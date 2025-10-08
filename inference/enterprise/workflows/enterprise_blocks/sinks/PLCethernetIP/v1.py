@@ -21,6 +21,15 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Pre-construct the output definition at class level to avoid repeated instantiation.
+# This is safe because OutputDefinition is immutable/does not change per call.
+_PRECOMPUTED_OUTPUTS: List[OutputDefinition] = [
+    OutputDefinition(
+        name="plc_results",
+        kind=[LIST_OF_VALUES_KIND],
+    ),
+]
+
 LONG_DESCRIPTION = """
 This **PLC Communication** block integrates a Roboflow Workflow with a PLC using Ethernet/IP communication.
 It can:
@@ -101,12 +110,7 @@ class PLCBlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="plc_results",
-                kind=[LIST_OF_VALUES_KIND],
-            ),
-        ]
+        return _PRECOMPUTED_OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
