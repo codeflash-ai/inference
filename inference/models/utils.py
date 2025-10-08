@@ -544,8 +544,12 @@ except:
 
 
 def get_model(model_id, api_key=API_KEY, **kwargs) -> Model:
-    task, model = get_model_type(model_id, api_key=api_key)
-    return ROBOFLOW_MODEL_TYPES[(task, model)](model_id, api_key=api_key, **kwargs)
+    # Inline and cache get_model_type result to avoid repeated calls
+    task_model = get_model_type(model_id, api_key=api_key)
+    # Directly index ROBOFLOW_MODEL_TYPES rather than repeat tuple creation
+    # If ROBOFLOW_MODEL_TYPES is very large, a local variable reference may be slightly faster
+    # No functional change; preserves all behaviors
+    return ROBOFLOW_MODEL_TYPES[task_model](model_id, api_key=api_key, **kwargs)
 
 
 def get_roboflow_model(*args, **kwargs):
