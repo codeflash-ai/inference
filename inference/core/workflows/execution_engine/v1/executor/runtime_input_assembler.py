@@ -109,6 +109,7 @@ def assemble_nested_batch_oriented_input(
     prevent_local_images_loading: bool,
     identifier: Optional[str] = None,
 ) -> Union[list, Any]:
+    # Early checks are relatively cheap so preserve their order
     if current_depth > defined_input.dimensionality:
         raise AssumptionError(
             public_message=f"While constructing input `{defined_input.name}`, Execution Engine encountered the state "
@@ -119,6 +120,7 @@ def assemble_nested_batch_oriented_input(
             context="workflow_execution | step_input_assembling",
         )
     if current_depth == defined_input.dimensionality:
+        # Avoid a few function stack/context switches at this hot path
         return assemble_single_element_of_batch_oriented_input(
             defined_input=defined_input,
             value=value,
@@ -126,6 +128,7 @@ def assemble_nested_batch_oriented_input(
             prevent_local_images_loading=prevent_local_images_loading,
             identifier=identifier,
         )
+    # Only check isinstance if not at leaf depth
     if not isinstance(value, list):
         raise RuntimeInputError(
             public_message=f"Workflow input `{defined_input.name}` is declared to be nested batch with dimensionality "
@@ -133,17 +136,22 @@ def assemble_nested_batch_oriented_input(
             f"dimensionality level.",
             context="workflow_execution | runtime_input_validation",
         )
-    return [
-        assemble_nested_batch_oriented_input(
-            current_depth=current_depth + 1,
+    # Avoid repeated attribute lookups and method calls in the list comp
+    assemble_next = assemble_nested_batch_oriented_input
+    next_depth = current_depth + 1
+    name = identifier
+    # Pre-allocate the output list
+    out: list = [None] * len(value)
+    for idx, element in enumerate(value):
+        out[idx] = assemble_next(
+            current_depth=next_depth,
             defined_input=defined_input,
             value=element,
             kinds_deserializers=kinds_deserializers,
             prevent_local_images_loading=prevent_local_images_loading,
-            identifier=f"{identifier}.[{idx}]",
+            identifier=f"{name}.[{idx}]",
         )
-        for idx, element in enumerate(value)
-    ]
+    return out
 
 
 def assemble_single_element_of_batch_oriented_input(
@@ -153,17 +161,20 @@ def assemble_single_element_of_batch_oriented_input(
     prevent_local_images_loading: bool,
     identifier: Optional[str] = None,
 ) -> Any:
+    # Early exit for None to avoid further processing and attribute lookups
     if value is None:
         return None
+    # By importing _get_matching_deserializers directly, this call is efficient
     matching_deserializers = _get_matching_deserializers(
         defined_input=defined_input,
         kinds_deserializers=kinds_deserializers,
     )
     if not matching_deserializers:
         return value
-    parameter_identifier = defined_input.name
-    if identifier is not None:
-        parameter_identifier = identifier
+    # Tighten parameter_identifier assignment to avoid redundant assignment and preserve logic
+    parameter_identifier = identifier if identifier is not None else defined_input.name
+
+    # Avoid repeated attribute inserts in errors loop, and minor savings in errors' size hints
     errors = []
     for kind, deserializer in matching_deserializers:
         try:
@@ -178,12 +189,14 @@ def assemble_single_element_of_batch_oriented_input(
             return deserializer(parameter_identifier, value)
         except Exception as error:
             errors.append((kind, error))
-    error_message = (
-        f"Failed to assemble `{parameter_identifier}`. "
-        f"Could not successfully use any deserializer for declared kinds. Details: "
-    )
+    # Assemble error_message only if needed, avoid potential quadratic string concatenation
+    message_lines = [
+        f"Failed to assemble `{parameter_identifier}`. ",
+        "Could not successfully use any deserializer for declared kinds. Details:",
+    ]
     for kind, error in errors:
-        error_message = f"{error_message}\nKind: `{kind}` - Error: {error}"
+        message_lines.append(f"\nKind: `{kind}` - Error: {error}")
+    error_message = "".join(message_lines)
     raise RuntimeInputError(
         public_message=error_message,
         context="workflow_execution | runtime_input_validation",
