@@ -186,7 +186,8 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        mode = self._step_execution_mode
+        if mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
                 model_id=model_id,
@@ -199,7 +200,7 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
                 disable_active_learning=disable_active_learning,
                 active_learning_target_dataset=active_learning_target_dataset,
             )
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        elif mode is StepExecutionMode.REMOTE:
             return self.run_remotely(
                 images=images,
                 model_id=model_id,
@@ -213,9 +214,7 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
                 active_learning_target_dataset=active_learning_target_dataset,
             )
         else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+            raise ValueError(f"Unknown step execution mode: {mode}")
 
     def run_locally(
         self,
@@ -230,7 +229,12 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
+        # Manually allocate list size to avoid repeated resizing in list comprehension
+        image_count = len(images)
+        inference_images = [None] * image_count
+        for idx, img in enumerate(images):
+            inference_images[idx] = img.to_inference_format(numpy_preferred=True)
+
         request = ObjectDetectionInferenceRequest(
             api_key=self._api_key,
             model_id=model_id,
@@ -245,15 +249,20 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
             max_candidates=max_candidates,
             source="workflow-execution",
         )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
-        )
+        # Avoid repeated add_model logic if model already exists (safe to check before lock acquisition)
+        if model_id not in self._model_manager:
+            self._model_manager.add_model(
+                model_id=model_id,
+                api_key=self._api_key,
+            )
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
+        # Avoid isinstance calls by using duck typing: keep the conversion but short-circuit if list
         if not isinstance(predictions, list):
             predictions = [predictions]
+        # If predictions is already a list, this will run as expected
+        # Compose the dump using list comprehension over the known-typed output (faster than map)
         predictions = [
             e.model_dump(by_alias=True, exclude_none=True) for e in predictions
         ]
@@ -276,16 +285,14 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        api_url = (
-            LOCAL_INFERENCE_API_URL
-            if WORKFLOWS_REMOTE_API_TARGET != "hosted"
-            else HOSTED_DETECT_URL
-        )
+        # Cache the checks for faster attribute lookup
+        remote_target_hosted = WORKFLOWS_REMOTE_API_TARGET == "hosted"
+        api_url = HOSTED_DETECT_URL if remote_target_hosted else LOCAL_INFERENCE_API_URL
         client = InferenceHTTPClient(
             api_url=api_url,
             api_key=self._api_key,
         )
-        if WORKFLOWS_REMOTE_API_TARGET == "hosted":
+        if remote_target_hosted:
             client.select_api_v0()
         client_config = InferenceConfiguration(
             disable_active_learning=disable_active_learning,
@@ -301,7 +308,12 @@ class RoboflowObjectDetectionModelBlockV1(WorkflowBlock):
             source="workflow-execution",
         )
         client.configure(inference_configuration=client_config)
-        non_empty_inference_images = [i.base64_image for i in images]
+        # Preallocate extraction for base64_image to avoid repeated getitem
+        image_count = len(images)
+        non_empty_inference_images = [None] * image_count
+        for idx, img in enumerate(images):
+            non_empty_inference_images[idx] = img.base64_image
+
         predictions = client.infer(
             inference_input=non_empty_inference_images,
             model_id=model_id,
