@@ -244,9 +244,12 @@ def ensure_zone_is_list_of_polygons(
 def calculate_nesting_depth(
     zone: Union[Polygon, List[Polygon]], max_depth: int, current_depth: int = 0
 ) -> int:
+    # Avoid repeated computation
     remaining_depth = max_depth - current_depth
+
+    # Fast path for ndarray: avoid extra work (uses .ndim instead of len(shape))
     if isinstance(zone, np.ndarray):
-        array_depth = len(zone.shape)
+        array_depth = zone.ndim
         if array_depth > remaining_depth:
             raise ValueError(
                 "While processing polygon zone detected an instance of the zone which is invalid, as "
@@ -256,6 +259,8 @@ def calculate_nesting_depth(
                 "https://github.com/roboflow/inference/issues"
             )
         return current_depth + array_depth
+
+    # Short-circuit for empty list/tuple (avoids building a set)
     if isinstance(zone, (list, tuple)):
         if remaining_depth < 1:
             raise ValueError(
@@ -265,20 +270,27 @@ def calculate_nesting_depth(
                 "the input is constructed by another Workflow block - raise an issue: "
                 "https://github.com/roboflow/inference/issues"
             )
-        depths = {
-            calculate_nesting_depth(
+        # Avoid set construction and double iteration by scanning as we go
+        it = iter(zone)
+        try:
+            first = next(it)
+        except StopIteration:
+            # Empty seq: nesting depth increases by 1
+            return current_depth + 1
+        first_depth = calculate_nesting_depth(
+            zone=first, max_depth=max_depth, current_depth=current_depth + 1
+        )
+        for e in it:
+            depth = calculate_nesting_depth(
                 zone=e, max_depth=max_depth, current_depth=current_depth + 1
             )
-            for e in zone
-        }
-        if not depths:
-            return current_depth + 1
-        if len(depths) != 1:
-            raise ValueError(
-                "While processing polygon zone detected an instance of the zone which is invalid, as "
-                "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
-                "If the input is constructed by another Workflow block - raise an issue: "
-                "https://github.com/roboflow/inference/issues"
-            )
-        return min(depths)
+            if depth != first_depth:
+                raise ValueError(
+                    "While processing polygon zone detected an instance of the zone which is invalid, as "
+                    "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
+                    "If the input is constructed by another Workflow block - raise an issue: "
+                    "https://github.com/roboflow/inference/issues"
+                )
+        return first_depth
+
     return current_depth
