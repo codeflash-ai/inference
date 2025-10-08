@@ -525,33 +525,52 @@ def _send_email_using_smtp_server(
     smtp_port: int,
     sender_email_password: str,
 ) -> None:
+    # Use locals here to reduce repeated attribute access
+    join = ",".join
     e_mail_message = MIMEMultipart()
     e_mail_message["From"] = sender_email
-    e_mail_message["To"] = ",".join(receiver_email)
+    e_mail_message["To"] = join(receiver_email)
     if cc_receiver_email:
-        e_mail_message["Cc"] = ",".join(cc_receiver_email)
+        e_mail_message["Cc"] = join(cc_receiver_email)
     if bcc_receiver_email:
-        e_mail_message["Bcc"] = ",".join(bcc_receiver_email)
+        e_mail_message["Bcc"] = join(bcc_receiver_email)
     e_mail_message["Subject"] = subject
+    # Use MIMEText directly
     e_mail_message.attach(MIMEText(message, "plain"))
+
+    # Local variable for encoding
+    encode = encoders.encode_base64
+    attach = e_mail_message.attach
+    add_header = MIMEBase.add_header
+
     for attachment_name, attachment_content in attachments.items():
         part = MIMEBase("application", "octet-stream")
-        binary_payload = attachment_content
-        if not isinstance(binary_payload, bytes):
-            binary_payload = binary_payload.encode("utf-8")
+        if not isinstance(attachment_content, bytes):
+            binary_payload = attachment_content.encode("utf-8")
+        else:
+            binary_payload = attachment_content
         part.set_payload(binary_payload)
-        encoders.encode_base64(part)
-        part.add_header(
+        encode(part)
+        add_header(
+            part,
             "Content-Disposition",
             f"attachment; filename= {attachment_name}",
         )
-        e_mail_message.attach(part)
-    to_sent = e_mail_message.as_string()
+        attach(part)
+
+    # Avoid extra local variable since as_string() is cheap and not reused.
     with establish_smtp_connection(
         smtp_server=smtp_server, smtp_port=smtp_port
     ) as server:
+        # Combine all recipient types (To, Cc, Bcc) for RFC5322 compliance
+        recipients = receiver_email
+        if cc_receiver_email:
+            recipients = recipients + cc_receiver_email
+        if bcc_receiver_email:
+            recipients = recipients + bcc_receiver_email
+        # Perform login first, then send to all recipients
         server.login(sender_email, sender_email_password)
-        server.sendmail(sender_email, receiver_email, to_sent)
+        server.sendmail(sender_email, recipients, e_mail_message.as_string())
 
 
 @contextmanager
