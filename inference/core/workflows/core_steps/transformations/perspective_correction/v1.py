@@ -168,29 +168,44 @@ def pick_largest_perspective_polygons(
         perspective_polygons_batch = [perspective_polygons_batch]
 
     largest_perspective_polygons: List[np.ndarray] = []
+    # Local bindings to speed up attribute lookups
+    contourArea = cv.contourArea
+    np_array = np.array
+    np_around = np.around
+    np_int32 = np.int32
+
+    # Use list comprehensions and direct conversion for better performance
     for polygons in perspective_polygons_batch:
         if polygons is None:
             continue
-        if not isinstance(polygons, list) and not isinstance(polygons, np.ndarray):
+        if not isinstance(polygons, (list, np.ndarray)):
             raise ValueError("Unexpected type of batch element")
         if len(polygons) == 0:
             raise ValueError("Unexpected empty batch element")
+        # optimized shape check branch
         if isinstance(polygons, np.ndarray):
-            if polygons.shape != (4, 2):
+            if polygons.shape == (4, 2):
+                largest_perspective_polygons.append(polygons)
+                continue
+            else:
                 raise ValueError("Unexpected shape of batch element")
-            largest_perspective_polygons.append(polygons)
-            continue
+        # Handle simple list-of-list case directly with fast conversion
         if len(polygons) == 4 and all(
             isinstance(p, list) and len(p) == 2 for p in polygons
         ):
-            largest_perspective_polygons.append(np.array(polygons))
+            largest_perspective_polygons.append(np_array(polygons))
             continue
-        polygons = [p if isinstance(p, np.ndarray) else np.array(p) for p in polygons]
-        polygons = [p for p in polygons if p.shape == (4, 2)]
-        if not polygons:
+        # Convert all elements to np.ndarray in one go
+        np_polygons = []
+        for p in polygons:
+            arr = p if isinstance(p, np.ndarray) else np_array(p)
+            if arr.shape == (4, 2):
+                np_polygons.append(arr)
+        if not np_polygons:
             raise ValueError("No batch element consists of 4 vertices")
-        polygons = [np.around(p).astype(np.int32) for p in polygons]
-        largest_polygon = max(polygons, key=lambda p: cv.contourArea(p))
+        # Use numpy's around and astype through list comprehension
+        np_polygons = [np_around(p).astype(np_int32) for p in np_polygons]
+        largest_polygon = max(np_polygons, key=contourArea)
         largest_perspective_polygons.append(largest_polygon)
     return largest_perspective_polygons
 
