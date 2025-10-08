@@ -802,7 +802,7 @@ class VideoConsumer:
 
     def __init__(
         self,
-        buffer_filling_strategy: Optional[BufferFillingStrategy],
+        buffer_filling_strategy: Optional["BufferFillingStrategy"],
         adaptive_mode_stream_pace_tolerance: float,
         adaptive_mode_reader_pace_tolerance: float,
         minimum_adaptive_mode_samples: int,
@@ -1016,54 +1016,63 @@ class VideoConsumer:
     def _frame_should_be_adaptively_dropped(
         self, declared_source_fps: Optional[float]
     ) -> bool:
-        if self._buffer_filling_strategy not in ADAPTIVE_STRATEGIES:
-            return False
+        # Fast path: combine early exit conditions into a single check
         if (
-            self._adaptive_frames_dropped_in_row
+            self._buffer_filling_strategy not in ADAPTIVE_STRATEGIES
+            or self._adaptive_frames_dropped_in_row
             >= self._maximum_adaptive_frames_dropped_in_row
-        ):
-            return False
-        if (
-            len(self._stream_consumption_pace_monitor.all_timestamps)
+            or len(self._stream_consumption_pace_monitor.all_timestamps)
             <= self._minimum_adaptive_mode_samples
         ):
-            # not enough observations
             return False
-        if hasattr(self._stream_consumption_pace_monitor, "fps"):
-            stream_consumption_pace = self._stream_consumption_pace_monitor.fps
-        else:
-            stream_consumption_pace = self._stream_consumption_pace_monitor()
-        announced_stream_fps = stream_consumption_pace
-        if declared_source_fps is not None and declared_source_fps > 0:
-            announced_stream_fps = declared_source_fps
+
+        # Use local variables to avoid repeated attribute lookups
+        stream_monitor = self._stream_consumption_pace_monitor
+
+        # Favor attribute access, fallback to callable only when needed
+        try:
+            stream_consumption_pace = stream_monitor.fps
+        except AttributeError:
+            stream_consumption_pace = stream_monitor()
+
+        announced_stream_fps = (
+            declared_source_fps
+            if declared_source_fps is not None and declared_source_fps > 0
+            else stream_consumption_pace
+        )
+
+        # We cannot keep up with stream emission
         if (
             announced_stream_fps - stream_consumption_pace
             > self._adaptive_mode_stream_pace_tolerance
         ):
-            # cannot keep up with stream emission
             return True
+
+        # Fast path: check minimum sample requirement for both monitors at once
         if (
             len(self._reader_pace_monitor.all_timestamps)
             <= self._minimum_adaptive_mode_samples
-        ) or (
-            len(self._decoding_pace_monitor.all_timestamps)
+            or len(self._decoding_pace_monitor.all_timestamps)
             <= self._minimum_adaptive_mode_samples
         ):
-            # not enough observations
             return False
-        actual_reader_pace = get_fps_if_tick_happens_now(
-            fps_monitor=self._reader_pace_monitor
-        )
-        if hasattr(self._decoding_pace_monitor, "fps"):
-            decoding_pace = self._decoding_pace_monitor.fps
-        else:
-            decoding_pace = self._decoding_pace_monitor()
+
+        actual_reader_pace = get_fps_if_tick_happens_now(self._reader_pace_monitor)
+
+        # Favor attribute access, fallback to callable only when needed
+        decoding_monitor = self._decoding_pace_monitor
+        try:
+            decoding_pace = decoding_monitor.fps
+        except AttributeError:
+            decoding_pace = decoding_monitor()
+
+        # Save compute on decoding
         if (
             decoding_pace - actual_reader_pace
             > self._adaptive_mode_reader_pace_tolerance
         ):
-            # we are too fast for the reader - time to save compute on decoding
             return True
+
         return False
 
     def _process_stream_frame_dropping_oldest(
@@ -1214,13 +1223,16 @@ def decode_video_frame_to_buffer(
 
 
 def get_fps_if_tick_happens_now(fps_monitor: sv.FPSMonitor) -> float:
-    if len(fps_monitor.all_timestamps) == 0:
+    timestamps = fps_monitor.all_timestamps
+    count = len(timestamps)
+    if count == 0:
         return 0.0
-    min_reader_timestamp = fps_monitor.all_timestamps[0]
+    # Use local variable for first timestamp to avoid repeated index access
+    min_reader_timestamp = timestamps[0]
     now = time.monotonic()
-    epsilon = 1e-8
-    reader_taken_time = (now - min_reader_timestamp) + epsilon
-    return (len(fps_monitor.all_timestamps) + 1) / reader_taken_time
+    # Avoid recalculating len
+    reader_taken_time = (now - min_reader_timestamp) + 1e-8
+    return (count + 1) / reader_taken_time
 
 
 def calculate_video_file_stride(
