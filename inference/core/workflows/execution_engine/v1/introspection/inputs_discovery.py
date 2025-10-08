@@ -132,12 +132,14 @@ def parse_blocks(
 def map_block_class2all_aliases(
     block_descriptions: List[BlockDescription],
 ) -> Dict[Type[WorkflowBlock], Set[str]]:
-    block_class2all_type_names = {}
+    # Pre-allocate set construction list to avoid creating temporary lists repeatedly
+    block_class2all_type_names: Dict[Type[WorkflowBlock], Set[str]] = {}
     for description in block_descriptions:
-        block_class2all_type_names[description.block_class] = set(
-            [description.manifest_type_identifier]
-            + description.manifest_type_identifier_aliases
-        )
+        # Directly pass unpacked values to set constructor for better efficiency
+        block_class2all_type_names[description.block_class] = {
+            description.manifest_type_identifier,
+            *description.manifest_type_identifier_aliases,
+        }
     return block_class2all_type_names
 
 
