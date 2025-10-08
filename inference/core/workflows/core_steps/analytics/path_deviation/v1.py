@@ -26,6 +26,16 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+OUTPUT_KEY = "path_deviation_detections"
+
+_PATH_DEVIATION_OUTPUT_DEFINITION = OutputDefinition(
+    name=OUTPUT_KEY,
+    kind=[
+        OBJECT_DETECTION_PREDICTION_KIND,
+        INSTANCE_SEGMENTATION_PREDICTION_KIND,
+    ],
+)
+
 OUTPUT_KEY: str = "path_deviation_detections"
 SHORT_DESCRIPTION = "Calculate Fréchet distance of object from the reference path."
 LONG_DESCRIPTION = """
@@ -73,15 +83,9 @@ class PathDeviationManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_KEY,
-                kind=[
-                    OBJECT_DETECTION_PREDICTION_KIND,
-                    INSTANCE_SEGMENTATION_PREDICTION_KIND,
-                ],
-            ),
-        ]
+        # Hoist the value and tuple construction out of the function for a slight speedup
+        # (constructing this at import time avoids recreating the list and objects each call)
+        return [_PATH_DEVIATION_OUTPUT_DEFINITION]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
