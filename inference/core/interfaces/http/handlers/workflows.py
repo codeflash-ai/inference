@@ -129,15 +129,25 @@ def get_unique_kinds(
     inputs: Dict[str, List[str]],
     outputs: Dict[str, Union[List[str], Dict[str, List[str]]]],
 ) -> Set[str]:
+    # Use set comprehension and itertools to minimize Python-level loops and speed up set addition
+    from itertools import chain
+
     all_kinds = set()
-    for input_element_kinds in inputs.values():
-        all_kinds.update(input_element_kinds)
-    for output_definition in outputs.values():
-        if isinstance(output_definition, list):
-            all_kinds.update(output_definition)
-        if isinstance(output_definition, dict):
-            for output_field_kinds in output_definition.values():
-                all_kinds.update(output_field_kinds)
+
+    # Batch update from all input kinds
+    all_kinds.update(chain.from_iterable(inputs.values()))
+
+    # Precompute all output kinds to one iterable & batch update
+    output_kinds_iter = chain.from_iterable(
+        (
+            output_definition
+            if isinstance(output_definition, list)
+            else chain.from_iterable(output_definition.values())
+        )
+        for output_definition in outputs.values()
+    )
+    all_kinds.update(output_kinds_iter)
+
     return all_kinds
 
 
