@@ -196,7 +196,7 @@ def _get_matching_deserializers(
 ) -> List[Tuple[str, Callable[[str, Any], Any]]]:
     matching_deserializers = []
     for kind in defined_input.kind:
-        kind_name = _get_kind_name(kind=kind)
+        kind_name = kind.name if isinstance(kind, Kind) else kind
         if kind_name not in kinds_deserializers:
             continue
         matching_deserializers.append((kind_name, kinds_deserializers[kind_name]))
