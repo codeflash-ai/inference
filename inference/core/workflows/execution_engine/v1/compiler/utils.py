@@ -44,9 +44,10 @@ def construct_output_selector(name: str) -> str:
 
 
 def is_input_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
-        return False
-    return selector_or_value.startswith("$inputs")
+    s = str(selector_or_value)
+    if s.startswith("$inputs"):
+        return True
+    return False
 
 
 def is_step_selector(selector_or_value: Any) -> bool:
