@@ -243,7 +243,8 @@ KEYS_REQUIRED_TO_EMBED_IN_ROOT_COORDINATES = {
 def sv_detections_to_root_coordinates(
     detections: sv.Detections, keypoints_key: str = KEYPOINTS_XY_KEY_IN_SV_DETECTIONS
 ) -> sv.Detections:
-    detections_copy = deepcopy(detections)
+    # Replace deepcopy with a custom, faster copy for Detections.
+    detections_copy = _fastcopy_detections(detections)
     if len(detections_copy) == 0:
         return detections_copy
 
@@ -256,45 +257,54 @@ def sv_detections_to_root_coordinates(
             f"the following metadata registered: {list(detections_copy.data.keys())}"
         )
         return detections_copy
+
     if SCALING_RELATIVE_TO_ROOT_PARENT_KEY in detections_copy.data:
         scale = detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY][0]
         detections_copy = scale_sv_detections(
             detections=detections,
             scale=1 / scale,
         )
-    detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.array(
-        [1.0] * len(detections_copy)
+
+    n = len(detections_copy)
+    # Most array fills/expansions replaced with vectorized/factory functions.
+    detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.full(n, 1.0)
+    detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.full(n, 1.0)
+
+    origin_dims = detections_copy[ROOT_PARENT_DIMENSIONS_KEY][0]
+    origin_height, origin_width = origin_dims[0], origin_dims[1]
+    detections_copy[IMAGE_DIMENSIONS_KEY] = np.repeat(
+        np.array([[origin_height, origin_width]]), n, axis=0
     )
-    detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array(
-        [1.0] * len(detections_copy)
-    )
-    origin_height = detections_copy[ROOT_PARENT_DIMENSIONS_KEY][0][0]
-    origin_width = detections_copy[ROOT_PARENT_DIMENSIONS_KEY][0][1]
-    detections_copy[IMAGE_DIMENSIONS_KEY] = np.array(
-        [[origin_height, origin_width]] * len(detections_copy)
-    )
+
     root_parent_id = detections_copy[ROOT_PARENT_ID_KEY][0]
     shift_x, shift_y = detections_copy[ROOT_PARENT_COORDINATES_KEY][0]
-    detections_copy.xyxy += [shift_x, shift_y, shift_x, shift_y]
+
+    detections_copy.xyxy = detections_copy.xyxy + np.array([shift_x, shift_y, shift_x, shift_y], dtype=detections_copy.xyxy.dtype)
+
     if keypoints_key in detections_copy.data:
-        for keypoints in detections_copy[keypoints_key]:
-            if len(keypoints):
-                keypoints += [shift_x, shift_y]
+        keypoints_arr = detections_copy[keypoints_key]
+        # If keypoints_arr is (n, m, 2) array
+        if isinstance(keypoints_arr, np.ndarray) and keypoints_arr.ndim == 3 and keypoints_arr.shape[2] == 2:
+            keypoints_arr += np.array([shift_x, shift_y], dtype=keypoints_arr.dtype)
+        else:
+            # Safe fallback for other structures (e.g., list of arrays)
+            for keypoints in keypoints_arr:
+                if len(keypoints):
+                    keypoints += [shift_x, shift_y]
+
     if detections_copy.mask is not None:
-        origin_mask_base = np.full((origin_height, origin_width), False)
-        new_anchored_masks = np.array(
-            [origin_mask_base.copy() for _ in detections_copy]
-        )
-        for anchored_mask, original_mask in zip(
-            new_anchored_masks, detections_copy.mask
-        ):
+        # Pre-allocate all masks as one "big" array instead of list of copies.
+        mask_shape = (origin_height, origin_width)
+        n_masks = len(detections_copy.mask)
+        # Preallocate output mask stack
+        new_anchored_masks = np.zeros((n_masks, origin_height, origin_width), dtype=bool)
+        for idx, original_mask in enumerate(detections_copy.mask):
             mask_h, mask_w = original_mask.shape
-            # TODO: instead of shifting mask we could store contours in data instead of storing mask (even if calculated)
-            #       it would be faster to shift contours but at expense of having to remember to generate mask from contour when it's needed
-            anchored_mask[shift_y : shift_y + mask_h, shift_x : shift_x + mask_w] = (
-                original_mask
-            )
+            y1, y2 = shift_y, shift_y + mask_h
+            x1, x2 = shift_x, shift_x + mask_w
+            new_anchored_masks[idx, y1:y2, x1:x2] = original_mask
         detections_copy.mask = new_anchored_masks
+
     new_root_metadata = ImageParentMetadata(
         parent_id=root_parent_id,
         origin_coordinates=OriginCoordinatesSystem(
@@ -455,3 +465,22 @@ def run_in_parallel(tasks: List[Callable[[], T]], max_workers: int = 1) -> List[
 
 def _run(fun: Callable[[], T]) -> T:
     return fun()
+
+
+def _fastcopy_detections(src: sv.Detections) -> sv.Detections:
+    # Attempt to avoid full deepcopy; sv.Detections usually holds NumPy arrays (copy-on-write safe).
+    # Safe if no user DataFrames, Tensors, or shared Python objects outside .data (typical usage).
+    new = sv.Detections.__new__(sv.Detections)
+    for k, v in src.__dict__.items():
+        # Known mutable/possibly mutated fields copied, otherwise reference.
+        if isinstance(v, np.ndarray):
+            setattr(new, k, v.copy())
+        elif isinstance(v, dict):
+            # Only shallow copy (keys→arrays), deep copy only arrays.
+            d_copy = {}
+            for dk, dv in v.items():
+                d_copy[dk] = dv.copy() if isinstance(dv, np.ndarray) else dv
+            setattr(new, k, d_copy)
+        else:
+            setattr(new, k, deepcopy(v) if k == "mask" else v)
+    return new
