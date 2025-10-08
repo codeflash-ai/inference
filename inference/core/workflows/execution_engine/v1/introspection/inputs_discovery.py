@@ -372,6 +372,8 @@ def generate_kinds_union(search_results: List[SelectorSearchResult]) -> Set[str]
 
 
 def kinds_are_matching(x: Set[str], y: Set[str]) -> bool:
-    if WILDCARD_KIND.name in x or WILDCARD_KIND.name in y:
+    wildcard = WILDCARD_KIND.name
+    if wildcard in x or wildcard in y:
         return True
-    return len(x.intersection(y)) > 0
+    # Use set.isdisjoint for a faster check of non-overlapping sets
+    return not x.isdisjoint(y)
