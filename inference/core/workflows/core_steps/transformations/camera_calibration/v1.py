@@ -19,6 +19,12 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+OUTPUT_CALIBRATED_IMAGE_KEY = "calibrated_image"
+
+_CACHED_OUTPUTS = [
+    OutputDefinition(name=OUTPUT_CALIBRATED_IMAGE_KEY, kind=[IMAGE_KIND]),
+]
+
 OUTPUT_CALIBRATED_IMAGE_KEY: str = "calibrated_image"
 LONG_DESCRIPTION = """
 This block uses the OpenCV `calibrateCamera` function to remove lens distortions from an image.
@@ -128,9 +134,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=OUTPUT_CALIBRATED_IMAGE_KEY, kind=[IMAGE_KIND]),
-        ]
+        return _CACHED_OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
