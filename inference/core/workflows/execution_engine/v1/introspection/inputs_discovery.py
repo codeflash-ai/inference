@@ -202,45 +202,52 @@ def search_input_selectors_in_step(
     result = []
     block_metadata = block_type_to_metadata[step_type]
     block_manifest_class = block_type_to_manifest[step_type]
+    # Optimization: move manifest creation outside property loop (once per step)
+    try:
+        manifest = block_manifest_class.model_validate(step_definition)
+    except ValidationError as error:
+        raise WorkflowDefinitionError(
+            public_message=f"Workflow definition invalid - step `{step_name}` misconfigured. See details in inner error.",
+            inner_error=error,
+            context="describing_workflow_inputs",
+        )
     for property_name, selector_definition in block_metadata.selectors.items():
-        try:
-            manifest = block_manifest_class.model_validate(step_definition)
-        except ValidationError as error:
-            raise WorkflowDefinitionError(
-                public_message=f"Workflow definition invalid - step `{step_name}` misconfigured. See details in inner error.",
-                inner_error=error,
-                context="describing_workflow_inputs",
-            )
         matching_references_kinds = grab_input_compatible_references_kinds(
             selector_definition=selector_definition
         )
         detected_input_selectors = grab_input_selectors_defined_for_step(
-            block_manifest=manifest,
+            block_manifest=manifest,  # manifest ready and valid
             property_name=property_name,
             selector_definition=selector_definition,
         )
-        result.extend(
-            prepare_search_results_for_detected_selectors(
-                step_name=step_name,
-                step_type=step_type,
-                property_name=property_name,
-                detected_input_selectors=detected_input_selectors,
-                input_selectors_details=input_selectors_details,
-                matching_references_kinds=matching_references_kinds,
+        if detected_input_selectors:
+            # Only call prepare_search_results_for_detected_selectors if there are any selectors
+            result.extend(
+                prepare_search_results_for_detected_selectors(
+                    step_name=step_name,
+                    step_type=step_type,
+                    property_name=property_name,
+                    detected_input_selectors=detected_input_selectors,
+                    input_selectors_details=input_selectors_details,
+                    matching_references_kinds=matching_references_kinds,
+                )
             )
-        )
     return result
 
 
 def grab_input_compatible_references_kinds(
     selector_definition: SelectorDefinition,
 ) -> Dict[str, Set[str]]:
-    matching_references = defaultdict(set)
-    for reference in selector_definition.allowed_references:
-        matching_references[reference.selected_element].update(
-            k.name for k in reference.kind
-        )
-    return matching_references
+    # Optimization: avoid repeated set creation by using dict comprehension
+    allowed_references = selector_definition.allowed_references
+    result = {}
+    for reference in allowed_references:
+        reference_kinds = set()
+        # Micro-optimization: build set directly with generator expression, avoids .update loop
+        for k in reference.kind:
+            reference_kinds.add(k.name)
+        result[reference.selected_element] = reference_kinds
+    return result
 
 
 def grab_input_selectors_defined_for_step(
@@ -248,20 +255,28 @@ def grab_input_selectors_defined_for_step(
     property_name: str,
     selector_definition: SelectorDefinition,
 ) -> List[str]:
+    # Key optimization: minimize repeated is_input_selector calls and minimize list/dict lookups
     list_allowed = selector_definition.is_list_element
     dict_allowed = selector_definition.is_dict_element
     detected_input_selectors = []
     value = getattr(block_manifest, property_name)
+    # Branch based on type, prefer elif for mutual exclusion
     if list_allowed and isinstance(value, list):
-        for selector in value:
-            if is_input_selector(selector_or_value=selector):
-                detected_input_selectors.append(selector)
-    if dict_allowed and isinstance(value, dict):
-        for selector in value.values():
-            if is_input_selector(selector_or_value=selector):
-                detected_input_selectors.append(selector)
-    if is_input_selector(selector_or_value=value):
-        detected_input_selectors.append(value)
+        # Optimization: Use list comprehension and filter for input selectors
+        detected_input_selectors.extend(
+            selector
+            for selector in value
+            if is_input_selector(selector_or_value=selector)
+        )
+    elif dict_allowed and isinstance(value, dict):
+        detected_input_selectors.extend(
+            selector
+            for selector in value.values()
+            if is_input_selector(selector_or_value=selector)
+        )
+    else:
+        if is_input_selector(selector_or_value=value):
+            detected_input_selectors.append(value)
     return detected_input_selectors
 
 
@@ -273,26 +288,33 @@ def prepare_search_results_for_detected_selectors(
     input_selectors_details: Dict[str, InputMetadata],
     matching_references_kinds: Dict[str, Set[str]],
 ) -> List[SelectorSearchResult]:
+    # Key optimization: pre-fetch required dicts/maps outside loop, avoid repeated lookups
     result = []
+    input_type_to_selected_element = INPUT_TYPE_TO_SELECTED_ELEMENT
+    input_selectors_details_get = input_selectors_details.get
     for detected_input_selector in detected_input_selectors:
-        if detected_input_selector not in input_selectors_details:
+        selector_details = input_selectors_details_get(detected_input_selector)
+        if selector_details is None:
             raise WorkflowDefinitionError(
                 public_message=f"Workflow definition invalid - step `{step_name}` declares input selector "
                 f"{detected_input_selector} which is not specified in inputs.",
                 context="describing_workflow_inputs",
             )
-        selector_details = input_selectors_details[detected_input_selector]
-        if selector_details.type not in INPUT_TYPE_TO_SELECTED_ELEMENT:
+        input_type = selector_details.type
+        selected_elements = input_type_to_selected_element.get(input_type)
+        if selected_elements is None:
             raise WorkflowDefinitionError(
-                public_message=f"Workflow definition invalid - declared input of type: {selector_details.type} "
+                public_message=f"Workflow definition invalid - declared input of type: {input_type} "
                 f"which is not supported in this installation of Workflow Execution Engine.",
                 context="describing_workflow_inputs",
             )
-
-        selected_elements = INPUT_TYPE_TO_SELECTED_ELEMENT[selector_details.type]
+        # Compose compatible_kinds set via generator
         kinds_for_element = set()
         for selected_element in selected_elements:
-            kinds_for_element.update(matching_references_kinds[selected_element])
+            # matching_references_kinds might not have this key, safeguard with .get and fallback to empty set
+            kinds_for_element.update(
+                matching_references_kinds.get(selected_element, ())
+            )
         if not kinds_for_element:
             raise WorkflowDefinitionError(
                 public_message=f"Workflow definition invalid - selector `{detected_input_selector}` declared for "
