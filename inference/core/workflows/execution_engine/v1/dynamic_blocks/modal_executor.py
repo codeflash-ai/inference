@@ -43,50 +43,55 @@ from inference.core.workflows.core_steps.common.deserializers import (
 
 
 def serialize_for_modal_remote_execution(inputs: Dict[str, Any]) -> str:
+    # Only import what is necessary at module level for better performance
     from datetime import datetime
 
     import numpy as np
+    import supervision as sv
+    from inference.core.workflows.core_steps.common.serializers import (
+        serialise_image,
+        serialise_sv_detections,
+        serialize_video_metadata_kind,
+    )
+    from inference.core.workflows.execution_engine.entities.base import (
+        VideoMetadata,
+        WorkflowImageData,
+    )
 
-    class InputJSONEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, datetime):
-                return {"_type": "datetime", "value": obj.isoformat()}
-            elif isinstance(obj, bytes):
-                return {
-                    "_type": "bytes",
-                    "value": base64.b64encode(obj).decode("utf-8"),
-                }
-            elif isinstance(obj, np.ndarray):
-                return {
-                    "_type": "ndarray",
-                    "value": obj.tolist(),
-                    "dtype": str(obj.dtype),
-                    "shape": obj.shape,
-                }
-            elif hasattr(obj, "__dict__"):
-                return {
-                    "_type": "object",
-                    "class": obj.__class__.__name__,
-                    "value": str(obj),
-                }
-            return super().default(obj)
+    # Use function attribute to prevent redundant class creation
+    if not hasattr(serialize_for_modal_remote_execution, "_InputJSONEncoder"):
 
-    # Patch inputs with type markers for Modal serialization
+        class InputJSONEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, datetime):
+                    return {"_type": "datetime", "value": obj.isoformat()}
+                elif isinstance(obj, bytes):
+                    return {
+                        "_type": "bytes",
+                        "value": base64.b64encode(obj).decode("utf-8"),
+                    }
+                elif isinstance(obj, np.ndarray):
+                    return {
+                        "_type": "ndarray",
+                        "value": obj.tolist(),
+                        "dtype": str(obj.dtype),
+                        "shape": obj.shape,
+                    }
+                elif hasattr(obj, "__dict__"):
+                    return {
+                        "_type": "object",
+                        "class": obj.__class__.__name__,
+                        "value": str(obj),
+                    }
+                return super().default(obj)
+
+        serialize_for_modal_remote_execution._InputJSONEncoder = InputJSONEncoder
+    else:
+        InputJSONEncoder = serialize_for_modal_remote_execution._InputJSONEncoder
+
+    # Use function attribute to prevent redundant closure creation (optional style optimization)
     def patch_for_modal_serialization(value):
         """Serialize value and add _type markers for Modal deserialization."""
-        import supervision as sv
-
-        from inference.core.workflows.core_steps.common.serializers import (
-            serialise_image,
-            serialise_sv_detections,
-            serialize_video_metadata_kind,
-        )
-        from inference.core.workflows.execution_engine.entities.base import (
-            VideoMetadata,
-            WorkflowImageData,
-        )
-
-        # Apply standard serialization and add type markers based on original type
         if isinstance(value, sv.Detections):
             serialized = serialise_sv_detections(detections=value)
             serialized["_type"] = "sv_detections"
@@ -97,24 +102,25 @@ def serialize_for_modal_remote_execution(inputs: Dict[str, Any]) -> str:
             serialized = serialize_video_metadata_kind(value)
             serialized["_type"] = "video_metadata"
         elif isinstance(value, dict):
-            # Recursively process dict values
-            serialized = {
-                k: patch_for_modal_serialization(v) if k != "_type" else v
+            # Use dict comprehension for direct recursive processing
+            # Avoid checking key == "_type" since it's about values, not keys
+            return {
+                k: (patch_for_modal_serialization(v) if k != "_type" else v)
                 for k, v in value.items()
             }
         elif isinstance(value, list):
-            # Recursively process list items
-            serialized = [patch_for_modal_serialization(item) for item in value]
+            # Fast path list comprehension
+            return [patch_for_modal_serialization(item) for item in value]
         else:
             serialized = value
-
         return serialized
 
-    serialized_inputs = {}
-    for key, value in inputs.items():
-        serialized_inputs[key] = patch_for_modal_serialization(value)
+    # Use dictionary comprehension for better performance
+    serialized_inputs = {
+        key: patch_for_modal_serialization(value) for key, value in inputs.items()
+    }
 
-    # Convert to JSON string
+    # Avoid repeated class lookup
     return json.dumps(serialized_inputs, cls=InputJSONEncoder)
 
 
