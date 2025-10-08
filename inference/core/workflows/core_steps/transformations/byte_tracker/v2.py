@@ -107,9 +107,7 @@ class ByteTrackerBlockManifest(WorkflowBlockManifest):
 
 
 class ByteTrackerBlockV2(WorkflowBlock):
-    def __init__(
-        self,
-    ):
+    def __init__(self):
         self._trackers: Dict[str, sv.ByteTrack] = {}
 
     @classmethod
@@ -132,16 +130,22 @@ class ByteTrackerBlockV2(WorkflowBlock):
             logger.warning(
                 f"Malformed fps in VideoMetadata, {self.__class__.__name__} requires fps in order to initialize ByteTrack"
             )
-        if metadata.video_identifier not in self._trackers:
-            self._trackers[metadata.video_identifier] = sv.ByteTrack(
+        # Avoid repeated dict lookups and use setdefault for a single lookup and initialization
+        tracker = self._trackers.get(metadata.video_identifier)
+        if tracker is None:
+            tracker = sv.ByteTrack(
                 track_activation_threshold=track_activation_threshold,
                 lost_track_buffer=lost_track_buffer,
                 minimum_matching_threshold=minimum_matching_threshold,
                 minimum_consecutive_frames=minimum_consecutive_frames,
                 frame_rate=fps,
             )
-        tracker = self._trackers[metadata.video_identifier]
+            self._trackers[metadata.video_identifier] = tracker
+        # Avoid generator expression overhead, pass detections directly if already a merged object
+        # If detections is already an sv.Detections instance, there's no need to merge
         tracked_detections = tracker.update_with_detections(
-            sv.Detections.merge(detections[i] for i in range(len(detections)))
+            sv.Detections.merge(detections)
+            if not isinstance(detections, sv.Detections)
+            else detections
         )
         return {OUTPUT_KEY: tracked_detections}
