@@ -334,18 +334,26 @@ def build_outputs_definitions(
     outputs: Dict[str, DynamicOutputDefinition],
     kinds_lookup: Dict[str, Kind],
 ) -> List[OutputDefinition]:
+    # Optimize for fewer attribute lookups and localize frequently used objects
+    WILDCARD_KIND_LIST = [WILDCARD_KIND]
+    OutputDefinition_ = OutputDefinition
+    collect_actual_kinds_for_output_ = collect_actual_kinds_for_output
+
     result = []
+    append_result = result.append
+
     for name, definition in outputs.items():
-        if not definition.kind:
-            result.append(OutputDefinition(name=name, kind=[WILDCARD_KIND]))
+        kind = definition.kind
+        if not kind:
+            append_result(OutputDefinition_(name=name, kind=WILDCARD_KIND_LIST))
         else:
-            actual_kinds = collect_actual_kinds_for_output(
+            actual_kinds = collect_actual_kinds_for_output_(
                 block_type=block_type,
                 output_name=name,
                 output=definition,
                 kinds_lookup=kinds_lookup,
             )
-            result.append(OutputDefinition(name=name, kind=actual_kinds))
+            append_result(OutputDefinition_(name=name, kind=actual_kinds))
     return result
 
 
