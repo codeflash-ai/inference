@@ -605,31 +605,37 @@ def correct_detections(
     transformed_rect_width: float,
     transformed_rect_height: float,
 ) -> sv.Detections:
+    # Prematurely compute int dimensions for reuse and avoid repeated calculation
+    int_rect_width: int = int(round(transformed_rect_width))
+    int_rect_height: int = int(round(transformed_rect_height))
+    resolution_wh = (int_rect_width, int_rect_height)
+
     corrected_detections: List[sv.Detections] = []
-    for i in range(len(detections)):
+    # Avoid repeated attribute lookup (localize commonly used value)
+    kp_key = KEYPOINTS_XY_KEY_IN_SV_DETECTIONS
+    det_len = len(detections)
+    # Pre-allocate numpy arrays and reuse wherever possible for memory efficiency
+    for i in range(det_len):
         # copy
         detection = detections[i]
-        mask = np.array(detection.mask)
+        mask = detection.mask
+
+        # Check for mask validity early to avoid expensive conversions
         if (
-            not np.array_equal(mask, np.array(None))
+            mask is not None
+            and isinstance(mask, (list, np.ndarray))
             and len(mask) > 0
             and isinstance(mask[0], np.ndarray)
         ):
-            polygon = np.array(sv.mask_to_polygons(mask[0]), dtype=np.float32)
-            # https://docs.opencv.org/4.9.0/d2/de8/group__core__array.html#gad327659ac03e5fd6894b90025e6900a7
+            # Avoid unnecessary np.array allocations and conversions
+            mask0 = mask[0]
+            polygon = np.asarray(sv.mask_to_polygons(mask0), dtype=np.float32)
             corrected_polygon: np.ndarray = cv.perspectiveTransform(
-                src=polygon, m=perspective_transformer
+                polygon, perspective_transformer
             ).reshape(-1, 2)
+            poly_int = np.around(corrected_polygon).astype(np.int32)
             detection.mask = np.array(
-                [
-                    sv.polygon_to_mask(
-                        polygon=np.around(corrected_polygon).astype(np.int32),
-                        resolution_wh=(
-                            int(round(transformed_rect_width)),
-                            int(round(transformed_rect_height)),
-                        ),
-                    ).astype(bool)
-                ]
+                [sv.polygon_to_mask(poly_int, resolution_wh).astype(bool)]
             )
             detection.xyxy = np.array(
                 [
@@ -639,14 +645,16 @@ def correct_detections(
                 ]
             )
         else:
-            xmin, ymin, xmax, ymax = np.around(detection.xyxy[0]).tolist()
+            # Only convert to numpy once and reuse arrays
+            xyxy0 = np.around(detection.xyxy[0])
+            xmin, ymin, xmax, ymax = xyxy0.tolist()
+            # Avoid inner np.array list construction, use direct float32 creation
             polygon = np.array(
                 [[[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]]],
                 dtype=np.float32,
             )
-            # https://docs.opencv.org/4.9.0/d2/de8/group__core__array.html#gad327659ac03e5fd6894b90025e6900a7
             corrected_polygon: np.ndarray = cv.perspectiveTransform(
-                src=polygon, m=perspective_transformer
+                polygon, perspective_transformer
             ).reshape(-1, 2)
             detection.xyxy = np.array(
                 [
@@ -655,17 +663,18 @@ def correct_detections(
                     )
                 ]
             )
-        if KEYPOINTS_XY_KEY_IN_SV_DETECTIONS in detection.data:
+
+        # Fast-path for keypoint correction
+        if kp_key in detection.data:
+            kp_data = detection.data[kp_key]
+            kp_point_array = np.asarray([kp_data[0]], dtype=np.float32)
             corrected_key_points = cv.perspectiveTransform(
-                src=np.array(
-                    [detection.data[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS][0]],
-                    dtype=np.float32,
-                ),
-                m=perspective_transformer,
+                kp_point_array, perspective_transformer
             ).reshape(-1, 2)
-            detection[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS] = np.array(
+            detection[kp_key] = np.array(
                 [np.around(corrected_key_points).astype(np.int32)], dtype="object"
             )
+
         corrected_detections.append(detection)
     return sv.Detections.merge(corrected_detections)
 
