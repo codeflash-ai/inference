@@ -548,7 +548,7 @@ class InMemoryBufferSink:
         return cls(queue_size=queue_size)
 
     def __init__(self, queue_size: int):
-        self._buffer = deque(maxlen=queue_size)
+        self._buffer = deque((), maxlen=queue_size)
 
     def on_prediction(
         self,
