@@ -228,7 +228,8 @@ class TimeInZoneBlockV3(WorkflowBlock):
 def ensure_zone_is_list_of_polygons(
     zone: Union[Polygon, List[Polygon]],
 ) -> List[Polygon]:
-    nesting_depth = calculate_nesting_depth(zone=zone, max_depth=3)
+    # Use a stack-based approach to avoid excessive recursion/stack-overhead in calculate_nesting_depth
+    nesting_depth = _calculate_nesting_depth_iterative(zone, max_depth=3)
     if nesting_depth > 3:
         raise ValueError(
             "roboflow_core/time_in_zone@v2 block requires `zone` input to be list of points, but "
@@ -282,3 +283,75 @@ def calculate_nesting_depth(
             )
         return min(depths)
     return current_depth
+
+
+def _calculate_nesting_depth_iterative(
+    zone: Union[Polygon, List[Polygon]], max_depth: int
+) -> int:
+    # Iterative stack-based nesting depth computation for uniform-nested structures (for performance)
+    # closely mimics the original recursive shape, error semantics, and ValueErrors
+    stack = [(zone, 0)]
+    uniform_depth = None
+    while stack:
+        curr_zone, current_depth = stack.pop()
+        remaining_depth = max_depth - current_depth
+        if isinstance(curr_zone, np.ndarray):
+            array_depth = len(curr_zone.shape)
+            if array_depth > remaining_depth:
+                raise ValueError(
+                    "While processing polygon zone detected an instance of the zone which is invalid, as "
+                    "the input is nested beyond limits - the block supports single and multiple "
+                    "lists of zone points. If you created the `zone` input manually, verify it's correctness. If "
+                    "the input is constructed by another Workflow block - raise an issue: "
+                    "https://github.com/roboflow/inference/issues"
+                )
+            depth_here = current_depth + array_depth
+            if uniform_depth is None:
+                uniform_depth = depth_here
+            elif uniform_depth != depth_here:
+                raise ValueError(
+                    "While processing polygon zone detected an instance of the zone which is invalid, as "
+                    "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
+                    "If the input is constructed by another Workflow block - raise an issue: "
+                    "https://github.com/roboflow/inference/issues"
+                )
+            continue
+
+        if isinstance(curr_zone, (list, tuple)):
+            if remaining_depth < 1:
+                raise ValueError(
+                    "While processing polygon zone detected an instance of the zone which is invalid, as "
+                    "the input is nested beyond limits - the block supports single and multiple "
+                    "lists of zone points. If you created the `zone` input manually, verify it's correctness. If "
+                    "the input is constructed by another Workflow block - raise an issue: "
+                    "https://github.com/roboflow/inference/issues"
+                )
+            if not curr_zone:  # empty list/tuple
+                depth_here = current_depth + 1
+                if uniform_depth is None:
+                    uniform_depth = depth_here
+                elif uniform_depth != depth_here:
+                    raise ValueError(
+                        "While processing polygon zone detected an instance of the zone which is invalid, as "
+                        "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
+                        "If the input is constructed by another Workflow block - raise an issue: "
+                        "https://github.com/roboflow/inference/issues"
+                    )
+                continue
+            for e in curr_zone:
+                stack.append((e, current_depth + 1))
+            continue
+
+        # leaf type (not ndarray, not list/tuple)
+        depth_here = current_depth
+        if uniform_depth is None:
+            uniform_depth = depth_here
+        elif uniform_depth != depth_here:
+            raise ValueError(
+                "While processing polygon zone detected an instance of the zone which is invalid, as "
+                "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
+                "If the input is constructed by another Workflow block - raise an issue: "
+                "https://github.com/roboflow/inference/issues"
+            )
+    # At this point, uniform_depth must be set (or the zone was completely empty, which follows the original logic)
+    return uniform_depth if uniform_depth is not None else 1
