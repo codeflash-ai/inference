@@ -145,7 +145,8 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        mode = self._step_execution_mode
+        if mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
                 model_id=model_id,
@@ -153,7 +154,7 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
                 disable_active_learning=disable_active_learning,
                 active_learning_target_dataset=active_learning_target_dataset,
             )
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        if mode is StepExecutionMode.REMOTE:
             return self.run_remotely(
                 images=images,
                 model_id=model_id,
@@ -161,10 +162,7 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
                 disable_active_learning=disable_active_learning,
                 active_learning_target_dataset=active_learning_target_dataset,
             )
-        else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+        raise ValueError(f"Unknown step execution mode: {self._step_execution_mode}")
 
     def run_locally(
         self,
