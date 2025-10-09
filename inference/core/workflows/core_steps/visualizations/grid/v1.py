@@ -94,6 +94,7 @@ class GridVisualizationBlockV1(WorkflowBlock):
         self.prev_input = None
         self.prev_output = None
 
+        # Note: LRUCache instantiation preserved as-is; performance depends on implementation
         self.thumbCache = LRUCache()
 
     @classmethod
@@ -130,9 +131,13 @@ class GridVisualizationBlockV1(WorkflowBlock):
             )
 
     def getEmptyImage(self, width: int, height: int) -> WorkflowImageData:
+        # The uuid and WorkflowImageData initialization are both needed and not slow
+        # Optimize the numpy.zeros call by preallocating a shape tuple
+        shape = (height, width, 3)
+        arr = np.zeros(shape, dtype=np.uint8)
         return WorkflowImageData(
             parent_metadata=ImageParentMetadata(parent_id=str(uuid.uuid4())),
-            numpy_image=np.zeros((height, width, 3), dtype=np.uint8),
+            numpy_image=arr,
         )
 
     def createGrid(
