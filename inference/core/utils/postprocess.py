@@ -71,8 +71,17 @@ def masks2multipoly(masks: np.ndarray) -> List[np.ndarray]:
         list: A list of segments, where each segment is obtained by converting the corresponding mask.
     """
     segments = []
+    # Vectorized skip for completely empty masks for common use case
+    masks_any = None
+    if masks.dtype == np.bool_ or masks.dtype == np.uint8:
+        masks_any = np.any(masks, axis=(1, 2))
     # Process per-mask to avoid allocating an entire N x H x W uint8 copy
-    for mask in masks:
+    for i, mask in enumerate(masks):
+        # Quickly skip empty masks
+        if masks_any is not None and not masks_any[i]:
+            segments.append([np.zeros((0, 2), dtype=np.float32)])
+            continue
+
         # Fast-path: bool -> zero-copy uint8 view
         if mask.dtype == np.bool_:
             m_uint8 = mask
@@ -89,7 +98,7 @@ def masks2multipoly(masks: np.ndarray) -> List[np.ndarray]:
             m_uint8 = m_bool.view(np.uint8)
 
         # Quickly skip empty masks
-        if not np.any(m_uint8):
+        if masks_any is None and not np.any(m_uint8):
             segments.append([np.zeros((0, 2), dtype=np.float32)])
             continue
 
