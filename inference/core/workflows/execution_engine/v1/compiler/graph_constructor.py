@@ -1382,12 +1382,17 @@ def get_all_batch_lineage_prefixes(lineages: List[List[str]]) -> List[List[str]]
     result = []
     already_spotted = set()
     for lineage in lineages:
-        lineage_prefixes = get_batch_lineage_prefixes(lineage=lineage)
-        for lineage_prefix in lineage_prefixes:
-            lineage_prefix_id = identify_lineage(lineage=lineage_prefix)
+        hash_list = [hash(e) for e in lineage]
+        prefix_sum_hashes = []
+        acc = 0
+        for h in hash_list:
+            acc += h
+            prefix_sum_hashes.append(acc)
+        for i in range(1, len(lineage) + 1):
+            lineage_prefix_id = prefix_sum_hashes[i - 1]
             if lineage_prefix_id not in already_spotted:
                 already_spotted.add(lineage_prefix_id)
-                result.append(lineage_prefix)
+                result.append(lineage[:i])
     return result
 
 
