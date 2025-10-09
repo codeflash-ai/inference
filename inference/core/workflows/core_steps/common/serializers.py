@@ -236,16 +236,33 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
-    if isinstance(value, WorkflowImageData):
-        value = serialise_image(image=value)
-    elif isinstance(value, dict):
-        value = serialize_dict(elements=value)
-    elif isinstance(value, list):
-        value = serialize_list(elements=value)
-    elif isinstance(value, sv.Detections):
-        value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
-        value = serialize_timestamp(timestamp=value)
+    # Inline isinstance checks to avoid repeated isinstance lookups
+    value_type = type(value)
+
+    if value_type is WorkflowImageData:
+        return serialise_image(value)  # No need to assign then re-return
+
+    # For dict/list, short-circuit when empty for performance
+    if value_type is dict:
+        if not value:  # Fast exit for empty dicts
+            return value
+        # In performance critical path: minimize function call overhead
+        items = value.items()
+        # Use dict comprehension for local vars and reduced Python-level overhead
+        return {k: serialize_wildcard_kind(v) for k, v in items}
+
+    if value_type is list:
+        if not value:  # Fast exit for empty lists
+            return value
+        # List comp to avoid append method call & localize serialize_wildcard_kind
+        return [serialize_wildcard_kind(v) for v in value]
+
+    if value_type is sv.Detections:
+        return serialise_sv_detections(value)
+
+    if value_type is datetime:
+        return serialize_timestamp(value)
+
     return value
 
 
@@ -258,11 +275,11 @@ def serialize_list(elements: List[Any]) -> List[Any]:
 
 
 def serialize_dict(elements: Dict[str, Any]) -> Dict[str, Any]:
-    serialized_result = {}
-    for key, value in elements.items():
-        value = serialize_wildcard_kind(value=value)
-        serialized_result[key] = value
-    return serialized_result
+    # Special case for empty dictionary (most optimized return path)
+    if not elements:
+        return elements
+    # Use dict comprehension for single-pass allocation and key hashing
+    return {k: serialize_wildcard_kind(v) for k, v in elements.items()}
 
 
 def serialize_secret(secret: str) -> str:
