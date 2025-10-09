@@ -1053,11 +1053,29 @@ def build_nested_dictionary_for_input_property(
 
 
 def get_manifest_fields_values(step_manifest: WorkflowBlockManifest) -> Dict[str, Any]:
+    # Pre-fetch attributes in a tight loop for speed
+    # Avoid repeated getattr lookups by directly accessing __dict__ if safe
+    model_fields = step_manifest.model_fields
+    # Try to use __dict__ for field lookup, fall back to getattr for missing fields
+    # (Assumption: model_fields are always present as attributes of step_manifest)
+    step_manifest_dict = getattr(step_manifest, "__dict__", None)
     result = {}
-    for field in step_manifest.model_fields:
-        if field in EXCLUDED_FIELDS:
-            continue
-        result[field] = getattr(step_manifest, field)
+
+    if step_manifest_dict is not None:
+        # This branch is faster if all fields are in __dict__, avoids repeated getattr
+        for field in model_fields:
+            if field not in EXCLUDED_FIELDS:
+                # Defensive: Use .get() to avoid KeyError if attribute is dynamically set elsewhere
+                if field in step_manifest_dict:
+                    result[field] = step_manifest_dict[field]
+                else:
+                    result[field] = getattr(step_manifest, field)
+    else:
+        # Fallback: Use getattr for every field
+        for field in model_fields:
+            if field not in EXCLUDED_FIELDS:
+                result[field] = getattr(step_manifest, field)
+
     return result
 
 
