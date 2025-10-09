@@ -109,7 +109,8 @@ class EnvironmentSecretsStoreBlockV1(WorkflowBlock):
                 "`roboflow_core/environment_secrets_store@v1` block cannot run in this environment - "
                 "access to environment variables is forbidden - use self-hosted `inference`"
             )
+        env = os.environ
         return {
-            variable_name.lower(): os.getenv(variable_name)
+            variable_name.lower(): env.get(variable_name)
             for variable_name in variables_storing_secrets
         }
