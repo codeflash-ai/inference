@@ -1839,8 +1839,10 @@ def get_property_with_invalid_selector(
     manifest: WorkflowBlockManifest, step_property: str
 ) -> Optional[str]:
     property_name = None
-    for key, value in manifest.__dict__.items():
-        if isinstance(value, str) and step_property in value:
+    manifest_dict = manifest.__dict__
+    step_property_interned = step_property
+    for key, value in manifest_dict.items():
+        if type(value) is str and step_property_interned in value:
             property_name = key
             break
     return property_name
