@@ -236,25 +236,26 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
-    if isinstance(value, WorkflowImageData):
+    vtype = type(value)
+    if vtype is WorkflowImageData:
         value = serialise_image(image=value)
-    elif isinstance(value, dict):
+    elif vtype is dict:
+        if not value:
+            return {}
         value = serialize_dict(elements=value)
-    elif isinstance(value, list):
+    elif vtype is list:
+        if not value:
+            return []
         value = serialize_list(elements=value)
     elif isinstance(value, sv.Detections):
         value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
+    elif vtype is datetime:
         value = serialize_timestamp(timestamp=value)
     return value
 
 
 def serialize_list(elements: List[Any]) -> List[Any]:
-    result = []
-    for element in elements:
-        element = serialize_wildcard_kind(value=element)
-        result.append(element)
-    return result
+    return [serialize_wildcard_kind(value=element) for element in elements]
 
 
 def serialize_dict(elements: Dict[str, Any]) -> Dict[str, Any]:
