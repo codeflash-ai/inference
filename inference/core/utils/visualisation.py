@@ -125,33 +125,53 @@ def draw_labels(
 ) -> np.ndarray:
     (x1, y1), _ = bbox_to_points(box=box)
     text = f"{box.class_name} {box.confidence:.2f}"
-    (text_width, text_height), _ = cv2.getTextSize(
-        text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-    )
-    button_size = (text_width + 20, text_height + 20)
-    button_img = np.full(
-        (button_size[1], button_size[0], 3), color[::-1], dtype=np.uint8
-    )
-    cv2.putText(
-        button_img,
-        text,
-        (10, 10 + text_height),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1,
-    )
-    end_x = min(x1 + button_size[0], image.shape[1])
-    end_y = min(y1 + button_size[1], image.shape[0])
-    image[y1:end_y, x1:end_x] = button_img[: end_y - y1, : end_x - x1]
+    # Cache frequently used params
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    thickness = 1
+
+    (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    # Compute button size and its maximum possible overlays using min() only once
+    button_w = text_width + 20
+    button_h = text_height + 20
+    img_h, img_w = image.shape[:2]
+    max_w = img_w - x1 if x1 < img_w else 0
+    max_h = img_h - y1 if y1 < img_h else 0
+    draw_w = min(button_w, max_w)
+    draw_h = min(button_h, max_h)
+    if draw_w <= 0 or draw_h <= 0:
+        return image
+
+    # Reversed color as before but create the array only as big as needed to overlay
+    button_img = np.empty((draw_h, draw_w, 3), dtype=np.uint8)
+    button_img[...] = color[::-1]
+    text_x = 10
+    text_y = 10 + text_height
+    if text_y < draw_h and text_x < draw_w:
+        cv2.putText(
+            button_img,
+            text,
+            (text_x, min(text_y, draw_h - 1)),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+        )
+    # Overwrite image region in-place only for the intersection
+    image[y1 : y1 + draw_h, x1 : x1 + draw_w] = button_img
     return image
 
 
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    # Avoid repeated box property access
+    bx = box.x
+    by = box.y
+    bw = box.width
+    bh = box.height
+    x1 = int(bx - bw * 0.5)
+    x2 = int(bx + bw * 0.5)
+    y1 = int(by - bh * 0.5)
+    y2 = int(by + bh * 0.5)
     return (x1, y1), (x2, y2)
