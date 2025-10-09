@@ -260,10 +260,11 @@ class RoboflowKeypointDetectionModelBlockV1(WorkflowBlock):
             keypoint_confidence=keypoint_confidence,
             source="workflow-execution",
         )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
-        )
+        if model_id not in self._model_manager:
+            self._model_manager.add_model(
+                model_id=model_id,
+                api_key=self._api_key,
+            )
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
