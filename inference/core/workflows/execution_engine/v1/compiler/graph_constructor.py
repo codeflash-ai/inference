@@ -1615,12 +1615,23 @@ def get_input_data_lineage_excluding_auto_batch_casting(
     lineage_deduplication_set = set()
     lineages = []
     for property_name, input_definition in input_data.items():
-        new_lineages_detected_within_property_data = get_lineage_for_input_property(
-            step_name=step_name,
-            property_name=property_name,
-            input_definition=input_definition,
-            lineage_deduplication_set=lineage_deduplication_set,
-        )
+        if input_definition.is_compound_input():
+            new_lineages_detected_within_property_data = (
+                get_lineage_from_compound_input(
+                    step_name=step_name,
+                    property_name=property_name,
+                    input_definition=input_definition,
+                    lineage_deduplication_set=lineage_deduplication_set,
+                )
+            )
+        else:
+            new_lineages_detected_within_property_data = []
+            if input_definition.is_batch_oriented():
+                lineage = input_definition.data_lineage
+                lineage_id = identify_lineage(lineage=lineage)
+                if lineage_id not in lineage_deduplication_set:
+                    lineage_deduplication_set.add(lineage_id)
+                    new_lineages_detected_within_property_data.append(lineage)
         if (
             property_name in scalar_parameters_to_be_batched
             and len(new_lineages_detected_within_property_data) == 0
