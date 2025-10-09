@@ -192,7 +192,7 @@ class GridVisualizationBlockV1(WorkflowBlock):
         return img
 
     def resizeImage(self, img: np.ndarray, width: int, height: int) -> np.ndarray:
-        img_height, img_width, _ = img.shape
+        img_height, img_width = img.shape[:2]
         scale_w = width / img_width
         scale_h = height / img_height
         scale = min(scale_w, scale_h)  # choose the scale that fits both dimensions
@@ -200,4 +200,22 @@ class GridVisualizationBlockV1(WorkflowBlock):
         new_width = int(img_width * scale)
         new_height = int(img_height * scale)
 
-        return cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        # Only perform resizing if dimensions actually change
+        if new_width == img_width and new_height == img_height:
+            return img
+
+        # For small and/or many repeated (w, h, interpolation) requests, cache results to avoid redundant computation
+        cache_key = (id(img), img.shape, img.dtype.str, new_width, new_height)
+        cache = getattr(self, "_resize_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(self, "_resize_cache", cache)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        # Keep cache size within a small limit
+        if len(cache) > 32:
+            cache.clear()
+        cache[cache_key] = resized
+        return resized
