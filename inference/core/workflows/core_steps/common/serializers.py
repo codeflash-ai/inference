@@ -232,7 +232,7 @@ def serialise_image(image: WorkflowImageData) -> Dict[str, Any]:
 
 
 def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
-    return video_metadata.dict()
+    return video_metadata.__dict__
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
