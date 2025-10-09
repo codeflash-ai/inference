@@ -138,31 +138,29 @@ class GridVisualizationBlockV1(WorkflowBlock):
     def createGrid(
         self, images: List[WorkflowImageData], width: int, height: int
     ) -> WorkflowImageData:
-        grid_size = math.ceil(math.sqrt(len(images)))
+        num_images = len(images)
+        grid_size = math.ceil(math.sqrt(num_images))
         img = np.zeros((height, width, 3), dtype=np.uint8)
-
         cell_width = width // grid_size
         cell_height = height // grid_size
 
         for r in range(grid_size):
             for c in range(grid_size):
                 index = r * grid_size + c
-
-                if index >= len(images):
+                if index >= num_images:
                     break
 
-                if images[index] is None:
+                image = images[index]
+                if image is None:
                     continue
 
-                cacheKey = f"{id(images[index])}_{cell_width}_{cell_height}"
-                if self.thumbCache.get(cacheKey) is None:
-                    self.thumbCache.set(
-                        cacheKey,
-                        self.resizeImage(
-                            images[index].numpy_image, cell_width, cell_height
-                        ),
-                    )
+                cacheKey = f"{id(image)}_{cell_width}_{cell_height}"
                 img_data = self.thumbCache.get(cacheKey)
+                if img_data is None:
+                    img_data = self.resizeImage(
+                        image.numpy_image, cell_width, cell_height
+                    )
+                    self.thumbCache.set(cacheKey, img_data)
 
                 img_data_height, img_data_width, _ = img_data.shape
 
@@ -188,6 +186,9 @@ class GridVisualizationBlockV1(WorkflowBlock):
                 img[start_y:end_y, start_x:end_x] = img_data[
                     :target_height, :target_width
                 ]
+
+            if (r + 1) * grid_size >= num_images:
+                break
 
         return img
 
