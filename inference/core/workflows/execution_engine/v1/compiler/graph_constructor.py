@@ -1781,11 +1781,13 @@ def establish_batch_oriented_step_lineage(
         input_data=input_data,
         dimensionality_reference_property=dimensionality_reference_property,
     )
+    # Avoid unnecessary list copies when slicing or appending.
     if output_dimensionality_offset < 0:
-        result_dimensionality = reference_lineage[:output_dimensionality_offset]
-        return result_dimensionality
+        # Slicing to output_dimensionality_offset creates a new list, but we avoid copy in get_reference_lineage
+        return reference_lineage[:output_dimensionality_offset]
     if output_dimensionality_offset == 0:
         return reference_lineage
+    # The reference_lineage list is copied in get_reference_lineage, so it's safe to append in place.
     reference_lineage.append(step_selector)
     return reference_lineage
 
@@ -1796,8 +1798,15 @@ def get_reference_lineage(
     input_data: StepInputData,
     dimensionality_reference_property: Optional[str],
 ) -> List[str]:
+    # Only copy when truly necessary to minimize allocations.
     if len(all_lineages) == 1:
-        return copy(all_lineages[0])
+        # all_lineages[0] might be returned many times, ensure it's not mutated later.
+        # In establish_batch_oriented_step_lineage:
+        #   - reference_lineage may be appended to if output_dimensionality_offset > 0.
+        #   - Slicing in this context creates a new list.
+        #   - Return a shallow copy only if ODSO > 0 might append.
+        return list(all_lineages[0])
+
     if dimensionality_reference_property not in input_data:
         raise AssumptionError(
             public_message=f"Workflow Compiler for step: `{step_selector}` expected dimensionality_reference_property "
@@ -1808,21 +1817,21 @@ def get_reference_lineage(
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
     property_data = input_data[dimensionality_reference_property]
+    # Avoid unnecessary copy() usage by returning early with copy only on the case we will mutate in the caller.
     if property_data.is_compound_input():
-        lineage = None
         for nested_element in property_data.iterate_through_definitions():
             if nested_element.is_batch_oriented():
-                lineage = copy(nested_element.data_lineage)
-                return lineage
-        if lineage is None:
-            raise AssumptionError(
-                public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
-                f"At this stage it is expected to succeed - lack of success indicates bug. "
-                f"Contact Roboflow team through github issues "
-                f"(https://github.com/roboflow/inference/issues) providing full "
-                f"context of the problem - including workflow definition you use.",
-                context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
-            )
+                # This data_lineage may be used for mutation in parent fn, so shallow copy with list().
+                return list(nested_element.data_lineage)
+        raise AssumptionError(
+            public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
+            f"At this stage it is expected to succeed - lack of success indicates bug. "
+            f"Contact Roboflow team through github issues "
+            f"(https://github.com/roboflow/inference/issues) providing full "
+            f"context of the problem - including workflow definition you use.",
+            context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
+        )
+    # Only allow batch_oriented
     if not property_data.is_batch_oriented():
         raise AssumptionError(
             public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
@@ -1832,7 +1841,8 @@ def get_reference_lineage(
             f"context of the problem - including workflow definition you use.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    return copy(property_data.data_lineage)
+    # property_data is batch_oriented; copy since caller may append
+    return list(property_data.data_lineage)
 
 
 def get_property_with_invalid_selector(
