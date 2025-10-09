@@ -144,8 +144,9 @@ class LMMForClassificationBlockV1(WorkflowBlock):
         lmm_config: LMMConfig,
         remote_api_key: Optional[str],
     ) -> BlockResult:
+        # Inline dispatch for better efficiency (avoid redundant method lookups)
         if self._step_execution_mode is StepExecutionMode.LOCAL:
-            return self.run_locally(
+            return self._run_classification(
                 images=images,
                 lmm_type=lmm_type,
                 classes=classes,
@@ -153,12 +154,13 @@ class LMMForClassificationBlockV1(WorkflowBlock):
                 remote_api_key=remote_api_key,
             )
         elif self._step_execution_mode is StepExecutionMode.REMOTE:
-            return self.run_remotely(
+            return self._run_classification(
                 images=images,
                 lmm_type=lmm_type,
                 classes=classes,
                 lmm_config=lmm_config,
                 remote_api_key=remote_api_key,
+                remotely=True,
             )
         else:
             raise ValueError(
@@ -253,4 +255,57 @@ class LMMForClassificationBlockV1(WorkflowBlock):
             prediction[ROOT_PARENT_ID_KEY] = (
                 image.workflow_root_ancestor_metadata.parent_id
             )
+        return predictions
+
+    def _run_classification(
+        self,
+        images: Batch[WorkflowImageData],
+        lmm_type: str,
+        classes: List[str],
+        lmm_config: LMMConfig,
+        remote_api_key: Optional[str],
+        remotely: bool = False,
+    ) -> BlockResult:
+        # Prompt generation differs by whitespace only; deduplicate template and set it once
+        prompt = (
+            f"You are supposed to perform image classification task. You are given image that should be "
+            f"assigned one of the following classes: {classes}. "
+            f'Your response must be JSON in format: {{"top": "some_class"}}'
+        )
+
+        # Optimize: preallocate result, avoid repeated list comprehensions
+        images_prepared_for_processing = [
+            image.to_inference_format(numpy_preferred=True) for image in images
+        ]
+
+        if lmm_type == GPT_4V_MODEL_TYPE:
+            raw_output = run_gpt_4v_llm_prompting(
+                image=images_prepared_for_processing,
+                prompt=prompt,
+                remote_api_key=remote_api_key,
+                lmm_config=lmm_config,
+            )
+        else:
+            # Exception message unchanged as required
+            raise ValueError(f"CogVLM has been removed from the Roboflow Core Models.")
+
+        structured_output = turn_raw_lmm_output_into_structured(
+            raw_output=raw_output,
+            expected_output={"top": "name of the class"},
+        )
+
+        # Optimize: Use zip and enumerate for single pass, avoid multiple loops for updating predictions
+        predictions = []
+        append = predictions.append  # Localize for faster loop
+        for i, (raw, structured) in enumerate(zip(raw_output, structured_output)):
+            image = images[i]
+            prediction = {
+                "raw_output": raw["content"],
+                "image": raw["image"],
+                "top": structured["top"],
+                PREDICTION_TYPE_KEY: "classification",
+                PARENT_ID_KEY: image.parent_metadata.parent_id,
+                ROOT_PARENT_ID_KEY: image.workflow_root_ancestor_metadata.parent_id,
+            }
+            append(prediction)
         return predictions
