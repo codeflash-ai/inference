@@ -595,5 +595,6 @@ def encode_image_to_jpeg_bytes(image: np.ndarray, jpeg_quality: int = 90) -> byt
         bytes: The JPEG encoded image.
     """
     encoding_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+    # cv2.imencode returns (flag, encoded_buf). Use the buffer's .tobytes() directly.
     _, img_encoded = cv2.imencode(".jpg", image, encoding_param)
-    return np.array(img_encoded).tobytes()
+    return img_encoded.tobytes()
