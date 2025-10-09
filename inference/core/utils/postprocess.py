@@ -676,9 +676,13 @@ def shift_keypoints(
     shift_x: Union[int, float],
     shift_y: Union[int, float],
 ) -> np.ndarray:
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] += shift_x
-        keypoints[:, keypoint_id * 3 + 1] += shift_y
+    # Vectorized implementation for faster processing
+    num_keypoints = keypoints.shape[1] // 3
+    if num_keypoints == 0:
+        return keypoints
+    # Slice and add directly using numpy broadcasting
+    keypoints[:, : num_keypoints * 3 : 3] += shift_x
+    keypoints[:, 1 : num_keypoints * 3 : 3] += shift_y
     return keypoints
 
 
