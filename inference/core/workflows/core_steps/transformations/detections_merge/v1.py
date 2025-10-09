@@ -97,9 +97,15 @@ def calculate_union_bbox(detections: sv.Detections) -> np.ndarray:
 
 def get_lowest_confidence_index(detections: sv.Detections) -> int:
     """Get the index of the detection with the lowest confidence."""
-    if detections.confidence is None:
+    # Directly use Python's built-in min for plain lists, otherwise np.argmin for arrays
+    conf = detections.confidence
+    if conf is None:
         return 0
-    return int(np.argmin(detections.confidence))
+    # Use Python's min/index for speed if confidence is a list or tuple
+    if isinstance(conf, (list, tuple)):
+        return conf.index(min(conf))
+    # For numpy arrays, np.argmin is already efficient
+    return int(np.argmin(conf))
 
 
 class DetectionsMergeBlockV1(WorkflowBlock):
