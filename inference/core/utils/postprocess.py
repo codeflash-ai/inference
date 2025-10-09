@@ -649,11 +649,13 @@ def undo_image_padding_for_predicted_keypoints(
 
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    for coord_id in range(keypoints.shape[1] // 3):
-        keypoints[:, coord_id * 3] -= pad_x
-        keypoints[:, coord_id * 3] /= scale
-        keypoints[:, coord_id * 3 + 1] -= pad_y
-        keypoints[:, coord_id * 3 + 1] /= scale
+
+    # Vectorized operations for better performance
+    idx_x = np.arange(0, keypoints.shape[1] // 3 * 3, 3)
+    idx_y = np.arange(1, keypoints.shape[1] // 3 * 3, 3)
+    keypoints[:, idx_x] = (keypoints[:, idx_x] - pad_x) / scale
+    keypoints[:, idx_y] = (keypoints[:, idx_y] - pad_y) / scale
+
     return keypoints
 
 
