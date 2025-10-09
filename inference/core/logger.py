@@ -81,21 +81,26 @@ def structlog_exception_formatter(
     else:
         exc_type, exc_value, exc_tb = sys.exc_info()
     if exc_tb:
-        tb_list = traceback.extract_tb(exc_tb)
+        stacktrace = []
+        for frame, lineno in traceback.walk_tb(exc_tb):
+            co = frame.f_code
+            code_line = (
+                traceback.linecache.getline(co.co_filename, lineno).strip() or None
+            )
+            stacktrace.append(
+                {
+                    "filename": co.co_filename,
+                    "lineno": lineno,
+                    "function": co.co_name,
+                    "code": code_line,
+                }
+            )
     else:
-        tb_list = []
+        stacktrace = []
     event_dict["exception"] = {
         "type": exc_type.__name__ if exc_type else "N/A",
         "message": str(exc_value) if exc_value else "N/A",
-        "stacktrace": [
-            {
-                "filename": tb.filename,
-                "lineno": tb.lineno,
-                "function": tb.name,
-                "code": tb.line,
-            }
-            for tb in tb_list
-        ],
+        "stacktrace": stacktrace,
     }
     return event_dict
 
