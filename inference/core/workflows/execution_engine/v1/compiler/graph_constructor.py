@@ -1315,12 +1315,34 @@ def grab_input_data_dimensionality_specifications(
     dimensionality_offstes: Dict[str, int],
 ) -> Dict[str, InputDimensionalitySpecification]:
     result = {}
+    # Pre-define local to avoid attribute lookup in loop
+    AssumptionError_local = AssumptionError
+    InputDimensionalitySpecification_local = InputDimensionalitySpecification
+    step_name_str = str(step_name)  # Avoid lookup in f-strings
+
     for parameter_name, dimensionality in inputs_dimensionalities.items():
         parameter_offset = dimensionality_offstes.get(parameter_name, 0)
-        non_zero_dimensionalities_for_parameter = {d for d in dimensionality if d > 0}
-        if len(non_zero_dimensionalities_for_parameter) > 1:
-            raise AssumptionError(
-                public_message=f"Workflow Compiler for step: `{step_name}` and parameter: {parameter_name}"
+
+        # Fast path: avoid set construction if possible.
+        # We only care about d>0, and checking count>1.
+        # Use a strict for-loop to minimize allocations
+        found_dimensionality = None
+        found_multiple = False
+        for d in dimensionality:
+            if d > 0:
+                if found_dimensionality is None:
+                    found_dimensionality = d
+                elif d != found_dimensionality:
+                    found_multiple = True
+                    break
+
+        if found_multiple:
+            # Need to compute the actual set for error reporting
+            non_zero_dimensionalities_for_parameter = {
+                d for d in dimensionality if d > 0
+            }
+            raise AssumptionError_local(
+                public_message=f"Workflow Compiler for step: `{step_name_str}` and parameter: {parameter_name}"
                 f"found multiple different values of actual input dimensionalities: "
                 f"`{non_zero_dimensionalities_for_parameter}` which should be detected and addresses "
                 f"at earlier stages of compilation."
@@ -1329,10 +1351,9 @@ def grab_input_data_dimensionality_specifications(
                 f"context of the problem - including workflow definition you use.",
                 context="workflow_compilation | execution_graph_construction | collecting_step_inputs",
             )
-        if non_zero_dimensionalities_for_parameter:
-            actual_dimensionality = next(iter(non_zero_dimensionalities_for_parameter))
-            result[parameter_name] = InputDimensionalitySpecification(
-                actual_dimensionality=actual_dimensionality,
+        if found_dimensionality is not None:
+            result[parameter_name] = InputDimensionalitySpecification_local(
+                actual_dimensionality=found_dimensionality,
                 expected_offset=parameter_offset,
             )
     return result
