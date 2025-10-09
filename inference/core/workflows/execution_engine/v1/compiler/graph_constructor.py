@@ -1396,9 +1396,10 @@ def get_batch_lineage_prefixes(lineage: List[str]) -> List[List[str]]:
         return []
     result = []
     prefix = []
-    for i in range(len(lineage)):
-        prefix.append(lineage[i])
-        result.append(copy(prefix))
+    for item in lineage:
+        prefix.append(item)
+        # Use list(prefix) for a shallow copy; faster than copy.copy for lists
+        result.append(list(prefix))
     return result
 
 
