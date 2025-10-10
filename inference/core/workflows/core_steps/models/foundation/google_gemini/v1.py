@@ -398,6 +398,16 @@ def prepare_unconstrained_prompt(
     max_tokens: int,
     **kwargs,
 ) -> dict:
+    # Inline the generation config dict construction for reduced function call overhead
+    generation_config = {
+        "max_output_tokens": max_tokens,
+        "response_mime_type": "text/plain",
+        "candidate_count": 1,
+    }
+    if temperature is not None:
+        generation_config["temperature"] = temperature
+
+    # Avoid unnecessary intermediate dictionaries/lists by building in-place
     return {
         "contents": {
             "parts": [
@@ -413,10 +423,7 @@ def prepare_unconstrained_prompt(
             ],
             "role": "user",
         },
-        "generationConfig": prepare_generation_config(
-            max_tokens=max_tokens,
-            temperature=temperature,
-        ),
+        "generationConfig": generation_config,
     }
 
 
@@ -717,6 +724,7 @@ def prepare_generation_config(
     temperature: Optional[float],
     response_mime_type: str = "text/plain",
 ) -> dict:
+    # Keep for compatibility, no behavior change
     result = {
         "max_output_tokens": max_tokens,
         "response_mime_type": response_mime_type,
