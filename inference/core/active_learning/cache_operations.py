@@ -95,17 +95,34 @@ def find_strategy_with_spare_usage_credit(
     project: str,
     matching_strategies_limits: OrderedDict[str, List[StrategyLimit]],
 ) -> Optional[str]:
+    # Inline the loop and avoid tuple unpacking from .items() if not needed,
+    # but OrderedDict.items() is already efficient for iteration.
+    # The main optimization comes from short-circuiting strategy rejection
+    # as soon as a limit is reached, which is already performed, so
+    # we can try to batch the evaluation of all limits for a strategy to reduce repeated lookups.
+    #
+    # Since the profiling shows most time is spent in repeated function calls and not in logic here,
+    # further practical optimization would be in batch-checking usages for a strategy, but since
+    # we must keep the same function signatures and cannot change input data structures or refactor
+    # 'datapoint_should_be_rejected_based_on_limit_usage', the improvement can mostly come
+    # from local variable use and using itertools for efficient iteration.
+    #
+    # But, the two functions are already minimal and optimal for their constraints.
+    # To get best memory/cache synergy, move Python's local lookups to variables,
+    # and avoid lookups inside loop bodies where possible.
+
+    # Bind functions/fields used in inner loops to local variables
+    strategy_rejected = datapoint_should_be_rejected_based_on_strategy_usage_limits
     for strategy_name, strategy_limits in matching_strategies_limits.items():
-        rejected_by_strategy = (
-            datapoint_should_be_rejected_based_on_strategy_usage_limits(
-                cache=cache,
-                workspace=workspace,
-                project=project,
-                strategy_name=strategy_name,
-                strategy_limits=strategy_limits,
-            )
+        # Save attribute lookups and function name lookup
+        rejected = strategy_rejected(
+            cache=cache,
+            workspace=workspace,
+            project=project,
+            strategy_name=strategy_name,
+            strategy_limits=strategy_limits,
         )
-        if not rejected_by_strategy:
+        if not rejected:
             return strategy_name
     return None
 
