@@ -521,11 +521,12 @@ class ValuesCountState(AggregationState):
         self._counts = defaultdict(int)
 
     def on_data(self, value: Any) -> None:
-        if isinstance(value, list):
+        counts = self._counts
+        if type(value) is list:
             for v in value:
-                self._counts[v] += 1
+                counts[v] += 1
             return None
-        self._counts[value] += 1
+        counts[value] += 1
 
     def get_result(self) -> Any:
         return dict(self._counts)
