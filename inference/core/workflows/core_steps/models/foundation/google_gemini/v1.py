@@ -471,7 +471,21 @@ def prepare_multi_label_classification_prompt(
     max_tokens: int,
     **kwargs,
 ) -> dict:
-    serialised_classes = ", ".join(classes)
+    # Avoid unnecessary join if classes is empty
+    if classes:
+        serialised_classes = ", ".join(classes)
+    else:
+        serialised_classes = ""
+    # Inline call to prepare_generation_config for a measurable performance boost (eliminate dict creation and function overhead)
+    generation_config = {
+        "max_output_tokens": max_tokens,
+        "response_mime_type": "application/json",
+        "candidate_count": 1,
+    }
+    if temperature is not None:
+        generation_config["temperature"] = temperature
+
+    # Assemble dict directly using local variables—dictionary construction is already fast, avoid intermediate temporaries
     return {
         "systemInstruction": {
             "role": "system",
@@ -501,11 +515,7 @@ def prepare_multi_label_classification_prompt(
             ],
             "role": "user",
         },
-        "generationConfig": prepare_generation_config(
-            max_tokens=max_tokens,
-            temperature=temperature,
-            response_mime_type="application/json",
-        ),
+        "generationConfig": generation_config,
     }
 
 
@@ -717,6 +727,7 @@ def prepare_generation_config(
     temperature: Optional[float],
     response_mime_type: str = "text/plain",
 ) -> dict:
+    # Single-step dict construction
     result = {
         "max_output_tokens": max_tokens,
         "response_mime_type": response_mime_type,
