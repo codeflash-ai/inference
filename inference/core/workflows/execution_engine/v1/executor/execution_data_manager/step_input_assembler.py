@@ -939,15 +939,23 @@ def unfold_parameters(
 
 def get_batch_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
     result = {}
+    BatchType = Batch  # local lookup for slightly faster isinstance checks
     for name, value in parameters.items():
-        if isinstance(value, Batch):
+        # Fast path for direct Batch instance
+        if isinstance(value, BatchType):
             result[name] = value
-        elif isinstance(value, list) and any(isinstance(v, Batch) for v in value):
-            result[name] = value
-        elif isinstance(value, dict) and any(
-            isinstance(v, Batch) for v in value.values()
-        ):
-            result[name] = value
+        # Lists: avoid generator + any(); loop with early exit
+        elif isinstance(value, list):
+            for v in value:
+                if isinstance(v, BatchType):
+                    result[name] = value
+                    break
+        # Dicts: optimize generator + any() by looping, break as soon as found
+        elif isinstance(value, dict):
+            for v in value.values():
+                if isinstance(v, BatchType):
+                    result[name] = value
+                    break
     return result
 
 
