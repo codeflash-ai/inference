@@ -34,6 +34,27 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_SYSTEM_INSTRUCTION_TEXT = (
+    "You act as OCR model. Your task is to read text from the image and return it in "
+    "paragraphs representing the structure of texts in the image. You should only return "
+    "recognised text, nothing else."
+)
+
+_SYSTEM_INSTRUCTION = {
+    "role": "system",
+    "parts": [
+        {
+            "text": _SYSTEM_INSTRUCTION_TEXT,
+        }
+    ],
+}
+
+_CONTENTS_PART_INLINE = {"inline_data": {"mime_type": "image/jpeg"}}
+
+_CONTENTS_PART_TEXT = {"text": "Read the text"}
+
+_CONTENTS_ROLE = "user"
+
 GOOGLE_API_KEY_PATTERN = re.compile(r"key=(.[^&]*)")
 GOOGLE_API_KEY_VALUE_GROUP = 1
 MIN_KEY_LENGTH_TO_REVEAL_PREFIX = 8
@@ -554,30 +575,16 @@ def prepare_ocr_prompt(
     max_tokens: int,
     **kwargs,
 ) -> dict:
+    # Use static dicts and minimal copying for performance
+    contents_parts = [
+        {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}},
+        _CONTENTS_PART_TEXT,
+    ]
     return {
-        "systemInstruction": {
-            "role": "system",
-            "parts": [
-                {
-                    "text": "You act as OCR model. Your task is to read text from the image and return it in "
-                    "paragraphs representing the structure of texts in the image. You should only return "
-                    "recognised text, nothing else.",
-                }
-            ],
-        },
+        "systemInstruction": _SYSTEM_INSTRUCTION,
         "contents": {
-            "parts": [
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": base64_image,
-                    }
-                },
-                {
-                    "text": f"Read the text",
-                },
-            ],
-            "role": "user",
+            "parts": contents_parts,
+            "role": _CONTENTS_ROLE,
         },
         "generationConfig": prepare_generation_config(
             max_tokens=max_tokens,
@@ -717,14 +724,20 @@ def prepare_generation_config(
     temperature: Optional[float],
     response_mime_type: str = "text/plain",
 ) -> dict:
-    result = {
-        "max_output_tokens": max_tokens,
-        "response_mime_type": response_mime_type,
-        "candidate_count": 1,
-    }
+    # Inline dict literal to avoid multiple assignments and dict resizing
     if temperature is not None:
-        result["temperature"] = temperature
-    return result
+        return {
+            "max_output_tokens": max_tokens,
+            "response_mime_type": response_mime_type,
+            "candidate_count": 1,
+            "temperature": temperature,
+        }
+    else:
+        return {
+            "max_output_tokens": max_tokens,
+            "response_mime_type": response_mime_type,
+            "candidate_count": 1,
+        }
 
 
 def google_api_key_safe_raise_for_status(response: Response) -> None:
