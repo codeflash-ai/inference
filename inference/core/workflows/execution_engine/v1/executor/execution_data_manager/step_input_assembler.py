@@ -893,17 +893,14 @@ def get_empty_batch_elements_indices(value: Any) -> Set[DynamicBatchIndex]:
     result = set()
     if isinstance(value, dict):
         for v in value.values():
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, list):
+            result.update(get_empty_batch_elements_indices(v))
+    elif isinstance(value, list):
         for v in value:
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, Batch):
+            result.update(get_empty_batch_elements_indices(v))
+    elif isinstance(value, Batch):
         for index, value_element in value.iter_with_indices():
             if isinstance(value_element, Batch):
-                value_result = get_empty_batch_elements_indices(value=value_element)
-                result = result.union(value_result)
+                result.update(get_empty_batch_elements_indices(value_element))
             elif value_element is None:
                 result.add(index)
     return result
