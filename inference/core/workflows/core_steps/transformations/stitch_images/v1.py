@@ -22,6 +22,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEF = OutputDefinition(name="stitched_image", kind=[IMAGE_KIND])
+
 OUTPUT_KEY: str = "stitched_image"
 LONG_DESCRIPTION = """
 This block combines two related scenes both containing fair amount of details.
@@ -75,9 +77,8 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=OUTPUT_KEY, kind=[IMAGE_KIND]),
-        ]
+        # Always return a new list, but reuse the cached OutputDefinition instance to avoid repeated construction
+        return [_OUTPUT_DEF]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
