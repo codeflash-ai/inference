@@ -69,6 +69,10 @@ from inference.core.utils.requests import (
 )
 from inference.core.utils.url_utils import wrap_url
 
+# Cache for parsed extra headers for efficiency
+_parsed_extra_headers: Optional[Optional[Dict[str, Union[str, List[str]]]]] = None
+_extra_headers_cache_value: Optional[str] = None
+
 MODEL_TYPE_DEFAULTS = {
     "object-detection": "yolov5v2s",
     "instance-segmentation": "yolact",
@@ -913,16 +917,30 @@ def send_inference_results_to_model_monitoring(
 def build_roboflow_api_headers(
     explicit_headers: Optional[Dict[str, Union[str, List[str]]]] = None,
 ) -> Optional[Dict[str, Union[List[str]]]]:
+    global _parsed_extra_headers, _extra_headers_cache_value
     if not ROBOFLOW_API_EXTRA_HEADERS:
         return explicit_headers
-    try:
-        extra_headers: dict = json.loads(ROBOFLOW_API_EXTRA_HEADERS)
+    if (
+        _parsed_extra_headers is None
+        or _extra_headers_cache_value != ROBOFLOW_API_EXTRA_HEADERS
+    ):
+        try:
+            extra_headers: dict = json.loads(ROBOFLOW_API_EXTRA_HEADERS)
+            _parsed_extra_headers = extra_headers
+            _extra_headers_cache_value = ROBOFLOW_API_EXTRA_HEADERS
+        except ValueError:
+            logger.warning("Could not decode ROBOFLOW_API_EXTRA_HEADERS")
+            _parsed_extra_headers = None
+            _extra_headers_cache_value = ROBOFLOW_API_EXTRA_HEADERS
+    if _parsed_extra_headers is not None:
         if explicit_headers:
-            extra_headers.update(explicit_headers)
-        return extra_headers
-    except ValueError:
-        logger.warning("Could not decode ROBOFLOW_API_EXTRA_HEADERS")
-        return explicit_headers
+            # Copy to not mutate underlying cache
+            combined_headers = _parsed_extra_headers.copy()
+            combined_headers.update(explicit_headers)
+            return combined_headers
+        else:
+            return _parsed_extra_headers.copy()
+    return explicit_headers
 
 
 @wrap_roboflow_api_errors()
