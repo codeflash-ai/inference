@@ -413,6 +413,7 @@ def try_parse_lmm_output_to_json(
 def try_parse_json(content: str, expected_output: Dict[str, str]) -> dict:
     try:
         data = json.loads(content)
-        return {key: data.get(key, NOT_DETECTED_VALUE) for key in expected_output}
+        get = data.get
+        return {key: get(key, NOT_DETECTED_VALUE) for key in expected_output}
     except Exception:
-        return {key: NOT_DETECTED_VALUE for key in expected_output}
+        return dict.fromkeys(expected_output, NOT_DETECTED_VALUE)
