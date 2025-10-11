@@ -238,38 +238,49 @@ class RoboflowDatasetUploadBlockV2(WorkflowBlock):
                 "retrieve one."
             )
         if disable_sink:
-            return [
-                {
-                    "error_status": False,
-                    "message": "Sink was disabled by parameter `disable_sink`",
-                }
-                for _ in range(len(images))
-            ]
-        result = []
-        predictions = [None] * len(images) if predictions is None else predictions
-        for image, prediction in zip(images, predictions):
-            error_status, message = maybe_register_datapoint_at_roboflow(
-                image=image,
-                prediction=prediction,
-                target_project=target_project,
-                usage_quota_name=usage_quota_name,
-                data_percentage=data_percentage,
-                persist_predictions=persist_predictions,
-                minutely_usage_limit=minutely_usage_limit,
-                hourly_usage_limit=hourly_usage_limit,
-                daily_usage_limit=daily_usage_limit,
-                max_image_size=max_image_size,
-                compression_level=compression_level,
-                registration_tags=registration_tags,
-                fire_and_forget=fire_and_forget,
-                labeling_batch_prefix=labeling_batch_prefix,
-                new_labeling_batch_frequency=labeling_batches_recreation_frequency,
-                cache=self._cache,
-                background_tasks=self._background_tasks,
-                thread_pool_executor=self._thread_pool_executor,
-                api_key=self._api_key,
-            )
-            result.append({"error_status": error_status, "message": message})
+            cnt = len(images)
+            if cnt == 0:
+                return []
+            # Use list multiplication, it's the fastest way without unnecessary loop
+            msg = {
+                "error_status": False,
+                "message": "Sink was disabled by parameter `disable_sink`",
+            }
+            return [msg.copy() for _ in range(cnt)]
+
+        n_images = len(images)
+        # Avoid repeatedly calling len
+        result = [None] * n_images
+        if predictions is None:
+            pred_seq = (None for _ in range(n_images))
+        else:
+            pred_seq = predictions
+
+        # Pre-bind static args to the function to reduce per-iteration lookup cost
+        maybe_reg = _get_maybe_registrator(
+            target_project=target_project,
+            usage_quota_name=usage_quota_name,
+            data_percentage=data_percentage,
+            persist_predictions=persist_predictions,
+            minutely_usage_limit=minutely_usage_limit,
+            hourly_usage_limit=hourly_usage_limit,
+            daily_usage_limit=daily_usage_limit,
+            max_image_size=max_image_size,
+            compression_level=compression_level,
+            registration_tags=registration_tags,
+            fire_and_forget=fire_and_forget,
+            labeling_batch_prefix=labeling_batch_prefix,
+            new_labeling_batch_frequency=labeling_batches_recreation_frequency,
+            cache=self._cache,
+            background_tasks=self._background_tasks,
+            thread_pool_executor=self._thread_pool_executor,
+            api_key=self._api_key,
+        )
+
+        # Avoid appending, use fixed-size preallocated result list
+        for idx, (image, prediction) in enumerate(zip(images, pred_seq)):
+            error_status, message = maybe_reg(image, prediction)
+            result[idx] = {"error_status": error_status, "message": message}
         return result
 
 
@@ -317,3 +328,52 @@ def maybe_register_datapoint_at_roboflow(
             api_key=api_key,
         )
     return False, "Registration skipped due to sampling settings"
+
+
+def _get_maybe_registrator(
+    target_project: str,
+    usage_quota_name: str,
+    data_percentage: float,
+    persist_predictions: bool,
+    minutely_usage_limit: int,
+    hourly_usage_limit: int,
+    daily_usage_limit: int,
+    max_image_size: Tuple[int, int],
+    compression_level: int,
+    registration_tags: List[str],
+    fire_and_forget: bool,
+    labeling_batch_prefix: str,
+    new_labeling_batch_frequency: "BatchCreationFrequency",  # type: ignore[name-defined]
+    cache: BaseCache,
+    background_tasks: Optional[BackgroundTasks],
+    thread_pool_executor: Optional[ThreadPoolExecutor],
+    api_key: str,
+):
+    # Precompute normalized probability to avoid per-call division
+    norm_prob = data_percentage / 100
+
+    def _maybe_register(image, prediction):
+        if random.random() < norm_prob:
+            return register_datapoint_at_roboflow(
+                image=image,
+                prediction=prediction,
+                target_project=target_project,
+                usage_quota_name=usage_quota_name,
+                persist_predictions=persist_predictions,
+                minutely_usage_limit=minutely_usage_limit,
+                hourly_usage_limit=hourly_usage_limit,
+                daily_usage_limit=daily_usage_limit,
+                max_image_size=max_image_size,
+                compression_level=compression_level,
+                registration_tags=registration_tags,
+                fire_and_forget=fire_and_forget,
+                labeling_batch_prefix=labeling_batch_prefix,
+                new_labeling_batch_frequency=new_labeling_batch_frequency,
+                cache=cache,
+                background_tasks=background_tasks,
+                thread_pool_executor=thread_pool_executor,
+                api_key=api_key,
+            )
+        return False, "Registration skipped due to sampling settings"
+
+    return _maybe_register
