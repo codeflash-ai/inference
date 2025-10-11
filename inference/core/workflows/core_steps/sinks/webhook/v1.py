@@ -383,11 +383,15 @@ class WebhookSinkBlockV1(WorkflowBlock):
                 "throttling_status": False,
                 "message": "Sink was disabled by parameter `disable_sink`",
             }
+
+        # Quick local to avoid multiple lookups
+        last_fired = self._last_notification_fired
+        now = None
+
         seconds_since_last_notification = cooldown_seconds
-        if self._last_notification_fired is not None:
-            seconds_since_last_notification = (
-                datetime.now() - self._last_notification_fired
-            ).total_seconds()
+        if last_fired is not None:
+            now = datetime.now()
+            seconds_since_last_notification = (now - last_fired).total_seconds()
         if seconds_since_last_notification < cooldown_seconds:
             logging.info(f"Activated `roboflow_core/webhook_notification@v1` cooldown.")
             return {
@@ -395,18 +399,24 @@ class WebhookSinkBlockV1(WorkflowBlock):
                 "throttling_status": True,
                 "message": "Sink cooldown applies",
             }
-        json_payload = execute_operations_on_parameters(
-            parameters=json_payload,
-            operations=json_payload_operations,
-        )
-        multi_part_encoded_files = execute_operations_on_parameters(
-            parameters=multi_part_encoded_files,
-            operations=multi_part_encoded_files_operations,
-        )
-        form_data = execute_operations_on_parameters(
-            parameters=form_data,
-            operations=form_data_operations,
-        )
+
+        # Optimize by skipping copy if no operations for key
+        if json_payload_operations:
+            json_payload = execute_operations_on_parameters(
+                parameters=json_payload,
+                operations=json_payload_operations,
+            )
+        if multi_part_encoded_files_operations:
+            multi_part_encoded_files = execute_operations_on_parameters(
+                parameters=multi_part_encoded_files,
+                operations=multi_part_encoded_files_operations,
+            )
+        if form_data_operations:
+            form_data = execute_operations_on_parameters(
+                parameters=form_data,
+                operations=form_data_operations,
+            )
+
         request_handler = partial(
             execute_request,
             url=url,
@@ -418,7 +428,12 @@ class WebhookSinkBlockV1(WorkflowBlock):
             form_data=form_data,
             timeout=request_timeout,
         )
-        self._last_notification_fired = datetime.now()
+
+        # Only call datetime.now() once per run if needed
+        if now is None:
+            now = datetime.now()
+        self._last_notification_fired = now
+
         if fire_and_forget and self._background_tasks:
             self._background_tasks.add_task(request_handler)
             return {
@@ -445,15 +460,24 @@ def execute_operations_on_parameters(
     parameters: Dict[str, Any],
     operations: Dict[str, List[AllOperationsType]],
 ) -> Dict[str, Any]:
-    parameters = copy(parameters)
-    for parameter_name, operations in operations.items():
-        if not operations or parameter_name not in parameters:
-            continue
-        operations_chain = build_operations_chain(operations=operations)
-        parameters[parameter_name] = operations_chain(
+    # Optimize: bulk check if any operations done, else return the original dictionary (preserve mutation semantics)
+    # Since 'parameters' should never be mutated as a side effect of this function, we must copy only when something may change.
+    # Use view to get key intersection and avoid unnecessary work.
+    if not operations:
+        return parameters if not parameters else copy(parameters)
+
+    # Pre-select keys with operations AND present in parameters
+    keys_to_process = [k for k in operations if operations[k] and k in parameters]
+    if not keys_to_process:
+        return parameters if not parameters else copy(parameters)
+
+    result = copy(parameters)
+    for parameter_name in keys_to_process:
+        operations_chain = build_operations_chain(operations=operations[parameter_name])
+        result[parameter_name] = operations_chain(
             parameters[parameter_name], global_parameters={}
         )
-    return parameters
+    return result
 
 
 def execute_request(
