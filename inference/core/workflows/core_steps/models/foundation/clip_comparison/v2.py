@@ -43,6 +43,33 @@ from inference.core.workflows.prototypes.block import (
 )
 from inference_sdk import InferenceHTTPClient
 
+_SIMILARITIES_OUTPUT = OutputDefinition(name="similarities", kind=[LIST_OF_VALUES_KIND])
+
+_MAX_SIMILARITY_OUTPUT = OutputDefinition(
+    name="max_similarity", kind=[FLOAT_ZERO_TO_ONE_KIND]
+)
+
+_MOST_SIMILAR_CLASS_OUTPUT = OutputDefinition(
+    name="most_similar_class", kind=[STRING_KIND]
+)
+
+_MIN_SIMILARITY_OUTPUT = OutputDefinition(
+    name="min_similarity", kind=[FLOAT_ZERO_TO_ONE_KIND]
+)
+
+_LEAST_SIMILAR_CLASS_OUTPUT = OutputDefinition(
+    name="least_similar_class", kind=[STRING_KIND]
+)
+
+_CLASSIFICATION_PREDICTIONS_OUTPUT = OutputDefinition(
+    name="classification_predictions",
+    kind=[CLASSIFICATION_PREDICTION_KIND],
+)
+
+_PARENT_ID_OUTPUT = OutputDefinition(name="parent_id", kind=[PARENT_ID_KIND])
+
+_ROOT_PARENT_ID_OUTPUT = OutputDefinition(name="root_parent_id", kind=[PARENT_ID_KIND])
+
 LONG_DESCRIPTION = """
 Use the OpenAI CLIP zero-shot classification model to classify images.
 
@@ -105,18 +132,16 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
+        # Return pre-instantiated OutputDefinition objects to avoid unnecessary allocations
         return [
-            OutputDefinition(name="similarities", kind=[LIST_OF_VALUES_KIND]),
-            OutputDefinition(name="max_similarity", kind=[FLOAT_ZERO_TO_ONE_KIND]),
-            OutputDefinition(name="most_similar_class", kind=[STRING_KIND]),
-            OutputDefinition(name="min_similarity", kind=[FLOAT_ZERO_TO_ONE_KIND]),
-            OutputDefinition(name="least_similar_class", kind=[STRING_KIND]),
-            OutputDefinition(
-                name="classification_predictions",
-                kind=[CLASSIFICATION_PREDICTION_KIND],
-            ),
-            OutputDefinition(name="parent_id", kind=[PARENT_ID_KIND]),
-            OutputDefinition(name="root_parent_id", kind=[PARENT_ID_KIND]),
+            _SIMILARITIES_OUTPUT,
+            _MAX_SIMILARITY_OUTPUT,
+            _MOST_SIMILAR_CLASS_OUTPUT,
+            _MIN_SIMILARITY_OUTPUT,
+            _LEAST_SIMILAR_CLASS_OUTPUT,
+            _CLASSIFICATION_PREDICTIONS_OUTPUT,
+            _PARENT_ID_OUTPUT,
+            _ROOT_PARENT_ID_OUTPUT,
         ]
 
     @classmethod
