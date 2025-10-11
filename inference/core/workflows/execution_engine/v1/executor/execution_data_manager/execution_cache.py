@@ -238,7 +238,8 @@ class ExecutionCache:
         return self._cache_content[step_name].get_all_outputs()
 
     def step_outputs_batches(self, step_name: str) -> bool:
-        if not self.contains_step(step_name=step_name):
+        # Inline the contains_step logic to avoid double dictionary lookup
+        if step_name not in self._cache_content:
             raise ExecutionEngineRuntimeError(
                 public_message=f"Error in execution engine. Attempted to check outputs status from step {step_name} "
                 f"which is not register in cache. That behavior should be prevented by "
