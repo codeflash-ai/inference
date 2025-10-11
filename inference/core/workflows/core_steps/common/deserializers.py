@@ -275,7 +275,16 @@ def deserialize_string_kind(parameter: str, value: Any) -> str:
 
 
 def deserialize_float_zero_to_one_kind(parameter: str, value: Any) -> float:
-    value = deserialize_float_kind(parameter=parameter, value=value)
+    if isinstance(value, float):
+        value = value
+    elif isinstance(value, int):
+        value = float(value)
+    else:
+        raise RuntimeInputError(
+            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+            f"float value, but invalid type of data found (`{type(value).__name__}`).",
+            context="workflow_execution | runtime_input_validation",
+        )
     if not (0.0 <= value <= 1.0):
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{parameter}` declared to hold "
