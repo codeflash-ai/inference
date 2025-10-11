@@ -384,8 +384,11 @@ class NonBatchStepCache:
         cache_content: Dict[str, Any],
     ):
         self._step_name = step_name
-        self._outputs = {o.name for o in outputs}
+        self._outputs: Set[str] = {o.name for o in outputs}
         self._cache_content = cache_content
+        # Precompute all defined properties for faster lookup
+        self._all_defined_properties: Set[str] = set(self._cache_content)
+        self._all_defined_properties.update(self._outputs)
 
     def register_outputs(self, outputs: Dict[str, Any]):
         if set(outputs.keys()) != self._outputs:
@@ -411,4 +414,4 @@ class NonBatchStepCache:
         return self._cache_content
 
     def is_property_defined(self, property_name: str) -> bool:
-        return property_name in self._cache_content or property_name in self._outputs
+        return property_name in self._all_defined_properties
