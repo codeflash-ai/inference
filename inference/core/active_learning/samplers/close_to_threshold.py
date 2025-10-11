@@ -132,15 +132,18 @@ def multi_class_classification_prediction_is_close_to_threshold(
                 epsilon=epsilon,
             )
         )
+    selected_class_names_check = selected_class_names is not None
+    if not selected_class_names_check:
+        for prediction_details in prediction["predictions"]:
+            if abs(prediction_details["confidence"] - threshold) < epsilon:
+                return True
+        return False
+    selected = selected_class_names
     for prediction_details in prediction["predictions"]:
-        if class_to_be_excluded(
-            class_name=prediction_details["class"],
-            selected_class_names=selected_class_names,
-        ):
+        # class_to_be_excluded logic inlined for better locality and avoiding function call
+        if prediction_details["class"] not in selected:
             continue
-        if is_close_to_threshold(
-            value=prediction_details["confidence"], threshold=threshold, epsilon=epsilon
-        ):
+        if abs(prediction_details["confidence"] - threshold) < epsilon:
             return True
     return False
 
@@ -151,6 +154,7 @@ def multi_class_classification_prediction_is_close_to_threshold_for_top_class(
     threshold: float,
     epsilon: float,
 ) -> bool:
+    # Fast path: skip set lookup if selected_class_names is None
     if (
         selected_class_names is not None
         and prediction["top"] not in selected_class_names
