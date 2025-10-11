@@ -13,6 +13,8 @@ from starlette.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST, HTTP_404_NO
 from inference.core.env import BUILDER_ORIGIN, MODEL_CACHE_DIR
 from inference.core.interfaces.http.error_handlers import with_route_exceptions_async
 
+_valid_workflow_id = re.compile(r"^[\w\-]+$").match
+
 logger = logging.getLogger(__name__)
 
 workflow_local_dir = Path(MODEL_CACHE_DIR) / "workflow" / "local"
@@ -256,7 +258,7 @@ async def builder_maybe_redirect(workflow_id: str):
     If the workflow_id.json file exists, redirect to /build/edit/{workflow_id}.
     Otherwise, redirect back to /build.
     """
-    if not re.match(r"^[\w\-]+$", workflow_id):
+    if not _valid_workflow_id(workflow_id):
         return RedirectResponse(url="/build", status_code=302)
 
     workflow_hash = sha256(workflow_id.encode()).hexdigest()
