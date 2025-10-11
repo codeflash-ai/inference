@@ -104,16 +104,22 @@ def prediction_is_close_to_threshold(
             epsilon=epsilon,
             minimum_objects_close_to_threshold=minimum_objects_close_to_threshold,
         )
-    checker = multi_label_classification_prediction_is_close_to_threshold
     if "top" in prediction:
-        checker = multi_class_classification_prediction_is_close_to_threshold
-    return checker(
-        prediction=prediction,
-        selected_class_names=selected_class_names,
-        threshold=threshold,
-        epsilon=epsilon,
-        only_top_classes=only_top_classes,
-    )
+        return multi_class_classification_prediction_is_close_to_threshold(
+            prediction=prediction,
+            selected_class_names=selected_class_names,
+            threshold=threshold,
+            epsilon=epsilon,
+            only_top_classes=only_top_classes,
+        )
+    else:
+        return multi_label_classification_prediction_is_close_to_threshold(
+            prediction=prediction,
+            selected_class_names=selected_class_names,
+            threshold=threshold,
+            epsilon=epsilon,
+            only_top_classes=only_top_classes,
+        )
 
 
 def multi_class_classification_prediction_is_close_to_threshold(
@@ -124,6 +130,7 @@ def multi_class_classification_prediction_is_close_to_threshold(
     only_top_classes: bool,
 ) -> bool:
     if only_top_classes:
+        # Delegate to faster, imported per-sample check
         return (
             multi_class_classification_prediction_is_close_to_threshold_for_top_class(
                 prediction=prediction,
@@ -132,15 +139,13 @@ def multi_class_classification_prediction_is_close_to_threshold(
                 epsilon=epsilon,
             )
         )
-    for prediction_details in prediction["predictions"]:
-        if class_to_be_excluded(
-            class_name=prediction_details["class"],
-            selected_class_names=selected_class_names,
-        ):
+    predictions = prediction["predictions"]
+    # Precise logic: Stop as soon as first match is found.
+    for pd in predictions:
+        # inlined check to reduce function call overhead for hot code path
+        if selected_class_names is not None and pd["class"] not in selected_class_names:
             continue
-        if is_close_to_threshold(
-            value=prediction_details["confidence"], threshold=threshold, epsilon=epsilon
-        ):
+        if abs(pd["confidence"] - threshold) < epsilon:
             return True
     return False
 
@@ -166,17 +171,17 @@ def multi_label_classification_prediction_is_close_to_threshold(
     epsilon: float,
     only_top_classes: bool,
 ) -> bool:
-    predicted_classes = set(prediction["predicted_classes"])
+    predicted_classes = (
+        set(prediction["predicted_classes"]) if only_top_classes else None
+    )
+    # Use .items() only once, avoid repeated attr access
     for class_name, prediction_details in prediction["predictions"].items():
         if only_top_classes and class_name not in predicted_classes:
             continue
-        if class_to_be_excluded(
-            class_name=class_name, selected_class_names=selected_class_names
-        ):
+        # inlined exclusion for hot code path
+        if selected_class_names is not None and class_name not in selected_class_names:
             continue
-        if is_close_to_threshold(
-            value=prediction_details["confidence"], threshold=threshold, epsilon=epsilon
-        ):
+        if abs(prediction_details["confidence"] - threshold) < epsilon:
             return True
     return False
 
