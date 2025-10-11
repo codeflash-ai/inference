@@ -127,8 +127,9 @@ def _merge_tiles_elements(
     tile_margin: int,
     tile_margin_color: Tuple[int, int, int],
 ) -> np.ndarray:
-    vertical_padding = (
-        np.ones((single_tile_size[1], tile_margin, 3)) * tile_margin_color
+    # Use np.full for efficient allocation and color fill
+    vertical_padding = np.full(
+        (single_tile_size[1], tile_margin, 3), tile_margin_color, dtype=np.uint8
     )
     merged_rows = [
         np.concatenate(
@@ -142,8 +143,8 @@ def _merge_tiles_elements(
         for row in tiles_elements
     ]
     row_width = merged_rows[0].shape[1]
-    horizontal_padding = (
-        np.ones((tile_margin, row_width, 3), dtype=np.uint8) * tile_margin_color
+    horizontal_padding = np.full(
+        (tile_margin, row_width, 3), tile_margin_color, dtype=np.uint8
     )
     rows_with_paddings = []
     for row in merged_rows:
@@ -158,4 +159,5 @@ def _merge_tiles_elements(
 def _generate_color_image(
     shape: Tuple[int, int], color: Tuple[int, int, int]
 ) -> np.ndarray:
-    return np.ones(shape[::-1] + (3,), dtype=np.uint8) * color
+    # Use np.full for direct color fill and dtype specification
+    return np.full(shape[::-1] + (3,), color, dtype=np.uint8)
