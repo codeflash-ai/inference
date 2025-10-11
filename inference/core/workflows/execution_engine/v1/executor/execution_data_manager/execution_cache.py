@@ -384,7 +384,8 @@ class NonBatchStepCache:
         cache_content: Dict[str, Any],
     ):
         self._step_name = step_name
-        self._outputs = {o.name for o in outputs}
+        # Use generator comprehension directly in set for lower memory usage
+        self._outputs = set(o.name for o in outputs)
         self._cache_content = cache_content
 
     def register_outputs(self, outputs: Dict[str, Any]):
@@ -403,7 +404,11 @@ class NonBatchStepCache:
         self,
         property_name: str,
     ) -> Any:
-        return self._cache_content.get(property_name)
+        # Direct dict access instead of .get() is faster if missing keys are rare
+        try:
+            return self._cache_content[property_name]
+        except KeyError:
+            return None
 
     def get_all_outputs(self) -> Dict[str, Any]:
         if not self._cache_content:
