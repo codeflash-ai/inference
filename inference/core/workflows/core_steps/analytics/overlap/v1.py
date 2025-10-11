@@ -97,20 +97,22 @@ class OverlapBlockV1(WorkflowBlock):
         other: list[int],
         overlap_type: Literal["Center Overlap", "Any Overlap"],
     ):
-
         # coords are [x1, y1, x2, y2]
         if overlap_type == "Center Overlap":
-            size = [other[2] - other[0], other[3] - other[1]]
-            (x, y) = [other[0] + size[0] / 2, other[1] + size[1] / 2]
+            # Fast center calculation, avoids intermediate list and unpack
+            x_center = (other[0] + other[2]) / 2
+            y_center = (other[1] + other[3]) / 2
             return (
-                x > overlap[0] and x < overlap[2] and y > overlap[1] and y < overlap[3]
+                overlap[0] < x_center < overlap[2]
+                and overlap[1] < y_center < overlap[3]
             )
         else:
-            return not (
-                other[2] < overlap[0]
-                or other[0] > overlap[2]
-                or other[3] < overlap[1]
-                or other[1] > overlap[3]
+            # Rearranged for less branch evaluation
+            return (
+                overlap[0] <= other[2]
+                and overlap[2] >= other[0]
+                and overlap[1] <= other[3]
+                and overlap[3] >= other[1]
             )
 
     def run(
