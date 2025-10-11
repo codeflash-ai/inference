@@ -265,7 +265,7 @@ def parse_multi_label_classification_results(
 
 
 def create_classes_index(classes: List[str]) -> Dict[str, int]:
-    return {class_name: idx for idx, class_name in enumerate(classes)}
+    return dict(zip(classes, range(len(classes))))
 
 
 def scale_confidence(value: float) -> float:
