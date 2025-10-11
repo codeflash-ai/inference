@@ -22,6 +22,14 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Pre-create OutputDefinition to avoid repeated instantiation on every method call
+_OUTPUT_DEFINITIONS: List[OutputDefinition] = [
+    OutputDefinition(
+        name="output",
+        kind=[WILDCARD_KIND],
+    )
+]
+
 LONG_DESCRIPTION = """
 Stores a value in a cache entry for later retrieval.
 
@@ -62,12 +70,8 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="output",
-                kind=[WILDCARD_KIND],
-            )
-        ]
+        # Return the cached output definitions. Return a copy to ensure output isn't mutated by caller.
+        return _OUTPUT_DEFINITIONS.copy()
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
