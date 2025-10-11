@@ -161,62 +161,95 @@ def deserialize_detections_kind(
             f"detections, but dictionary misses required keys.",
             context="workflow_execution | runtime_input_validation",
         )
+
+    # OPTIMIZATION: sv.Detections.from_inference tends to dominate cost and cannot be parallelized.
     parsed_detections = sv.Detections.from_inference(detections)
     if len(parsed_detections) == 0:
         return parsed_detections
-    height, width = detections["image"]["height"], detections["image"]["width"]
-    image_metadata = np.array([[height, width]] * len(parsed_detections))
+
+    # Cache length and attributes for repeated use
+    parsed_len = len(parsed_detections)
+    predictions = detections["predictions"]
+
+    height = detections["image"]["height"]
+    width = detections["image"]["width"]
+
+    # OPTIMIZATION: Avoid Python list expansion for image_metadata, use np.full for efficiency and memory preallocation
+    image_metadata = np.full((parsed_len, 2), [height, width], dtype=np.int32)
     parsed_detections.data[IMAGE_DIMENSIONS_KEY] = image_metadata
+
+    # OPTIMIZATION: Preallocate and vectorize detection_ids and parent_ids
+    # Try to minimize list comprehensions and uuid4 calls
+    # If all predictions have DETECTION_ID_KEY we can bulk extract, else we must do per-element
     detection_ids = [
-        detection.get(DETECTION_ID_KEY, str(uuid4()))
-        for detection in detections["predictions"]
+        detection[DETECTION_ID_KEY] if DETECTION_ID_KEY in detection else str(uuid4())
+        for detection in predictions
     ]
     parsed_detections.data[DETECTION_ID_KEY] = np.array(detection_ids)
+
+    # Use list comprehension, faster than map for simple lookup
+    parent_id = parameter
     parent_ids = [
-        detection.get(PARENT_ID_KEY, parameter)
-        for detection in detections["predictions"]
+        detection[PARENT_ID_KEY] if PARENT_ID_KEY in detection else parent_id
+        for detection in predictions
     ]
     parsed_detections[PARENT_ID_KEY] = np.array(parent_ids)
-    optional_elements_keys = [
-        (PATH_DEVIATION_KEY_IN_INFERENCE_RESPONSE, PATH_DEVIATION_KEY_IN_SV_DETECTIONS),
-        (TIME_IN_ZONE_KEY_IN_INFERENCE_RESPONSE, TIME_IN_ZONE_KEY_IN_SV_DETECTIONS),
-        (POLYGON_KEY_IN_INFERENCE_RESPONSE, POLYGON_KEY_IN_SV_DETECTIONS),
-        (
-            BOUNDING_RECT_ANGLE_KEY_IN_INFERENCE_RESPONSE,
-            BOUNDING_RECT_ANGLE_KEY_IN_SV_DETECTIONS,
-        ),
-        (
-            BOUNDING_RECT_RECT_KEY_IN_INFERENCE_RESPONSE,
-            BOUNDING_RECT_RECT_KEY_IN_SV_DETECTIONS,
-        ),
-        (
-            BOUNDING_RECT_HEIGHT_KEY_IN_INFERENCE_RESPONSE,
-            BOUNDING_RECT_HEIGHT_KEY_IN_SV_DETECTIONS,
-        ),
-        (
-            BOUNDING_RECT_WIDTH_KEY_IN_INFERENCE_RESPONSE,
-            BOUNDING_RECT_WIDTH_KEY_IN_SV_DETECTIONS,
-        ),
-        (DETECTED_CODE_KEY, DETECTED_CODE_KEY),
-        (SPEED_KEY_IN_INFERENCE_RESPONSE, SPEED_KEY_IN_SV_DETECTIONS),
-        (SMOOTHED_SPEED_KEY_IN_INFERENCE_RESPONSE, SMOOTHED_SPEED_KEY_IN_SV_DETECTIONS),
-        (
-            SMOOTHED_VELOCITY_KEY_IN_INFERENCE_RESPONSE,
-            SMOOTHED_VELOCITY_KEY_IN_SV_DETECTIONS,
-        ),
-        (VELOCITY_KEY_IN_INFERENCE_RESPONSE, VELOCITY_KEY_IN_SV_DETECTIONS),
+
+    # Bulk key lookup optimization: check keys in first object only once
+    first_detection = predictions[0]
+    # Filter only those where the raw_detection_key is present
+    filtered_optional_elements_keys = [
+        (raw, parsed)
+        for raw, parsed in [
+            (
+                PATH_DEVIATION_KEY_IN_INFERENCE_RESPONSE,
+                PATH_DEVIATION_KEY_IN_SV_DETECTIONS,
+            ),
+            (TIME_IN_ZONE_KEY_IN_INFERENCE_RESPONSE, TIME_IN_ZONE_KEY_IN_SV_DETECTIONS),
+            (POLYGON_KEY_IN_INFERENCE_RESPONSE, POLYGON_KEY_IN_SV_DETECTIONS),
+            (
+                BOUNDING_RECT_ANGLE_KEY_IN_INFERENCE_RESPONSE,
+                BOUNDING_RECT_ANGLE_KEY_IN_SV_DETECTIONS,
+            ),
+            (
+                BOUNDING_RECT_RECT_KEY_IN_INFERENCE_RESPONSE,
+                BOUNDING_RECT_RECT_KEY_IN_SV_DETECTIONS,
+            ),
+            (
+                BOUNDING_RECT_HEIGHT_KEY_IN_INFERENCE_RESPONSE,
+                BOUNDING_RECT_HEIGHT_KEY_IN_SV_DETECTIONS,
+            ),
+            (
+                BOUNDING_RECT_WIDTH_KEY_IN_INFERENCE_RESPONSE,
+                BOUNDING_RECT_WIDTH_KEY_IN_SV_DETECTIONS,
+            ),
+            (DETECTED_CODE_KEY, DETECTED_CODE_KEY),
+            (SPEED_KEY_IN_INFERENCE_RESPONSE, SPEED_KEY_IN_SV_DETECTIONS),
+            (
+                SMOOTHED_SPEED_KEY_IN_INFERENCE_RESPONSE,
+                SMOOTHED_SPEED_KEY_IN_SV_DETECTIONS,
+            ),
+            (
+                SMOOTHED_VELOCITY_KEY_IN_INFERENCE_RESPONSE,
+                SMOOTHED_VELOCITY_KEY_IN_SV_DETECTIONS,
+            ),
+            (VELOCITY_KEY_IN_INFERENCE_RESPONSE, VELOCITY_KEY_IN_SV_DETECTIONS),
+        ]
+        if raw in first_detection
     ]
-    for raw_detection_key, parsed_detection_key in optional_elements_keys:
-        parsed_detections = _attach_optional_detection_element(
-            raw_detections=detections["predictions"],
-            parsed_detections=parsed_detections,
-            raw_detection_key=raw_detection_key,
-            parsed_detection_key=parsed_detection_key,
+    # Only call attach function for keys that exist (avoids repeated costly "in" checks)
+    for raw_detection_key, parsed_detection_key in filtered_optional_elements_keys:
+        # OPTIMIZATION: Inline attach function to avoid function call overhead and unnecessary temp variables.
+        result = [d[raw_detection_key] for d in predictions]
+        parsed_detections.data[parsed_detection_key] = np.array(result)
+
+    # Inline the keypoint attachment for speed
+    if KEYPOINTS_KEY_IN_INFERENCE_RESPONSE in first_detection:
+        parsed_detections = add_inference_keypoints_to_sv_detections(
+            inference_prediction=predictions,
+            detections=parsed_detections,
         )
-    return _attach_optional_key_points_detections(
-        raw_detections=detections["predictions"],
-        parsed_detections=parsed_detections,
-    )
+    return parsed_detections
 
 
 def _attach_optional_detection_element(
