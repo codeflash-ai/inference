@@ -215,14 +215,18 @@ def extract_leading_class_from_prediction(
                 fallback_class_id = sys.maxsize
             return fallback_class_name, fallback_class_id, 0
         class_name = prediction["top"]
-        matching_class_ids = [
-            (p["class_id"], p["confidence"])
-            for p in prediction["predictions"]
-            if p["class"] == class_name
-        ]
-        if len(matching_class_ids) != 1:
+        match_idx = -1
+        for idx, p in enumerate(prediction["predictions"]):
+            if p["class"] == class_name:
+                if match_idx != -1:
+                    raise ValueError(
+                        f"Could not resolve class id for prediction: {prediction}"
+                    )
+                match_idx = idx
+        if match_idx == -1:
             raise ValueError(f"Could not resolve class id for prediction: {prediction}")
-        return class_name, matching_class_ids[0][0], matching_class_ids[0][1]
+        p = prediction["predictions"][match_idx]
+        return class_name, p["class_id"], p["confidence"]
     predicted_classes = prediction.get("predicted_classes", [])
     if not predicted_classes:
         return None
@@ -233,16 +237,10 @@ def extract_leading_class_from_prediction(
     )
     for class_name, prediction_details in prediction["predictions"].items():
         current_class_confidence = prediction_details["confidence"]
-        current_class_id = prediction_details["class_id"]
-        if max_confidence is None:
+        if (max_confidence is None) or (current_class_confidence > max_confidence):
             max_confidence = current_class_confidence
             max_confidence_class_name = class_name
-            max_confidence_class_id = current_class_id
-            continue
-        if max_confidence < current_class_confidence:
-            max_confidence = current_class_confidence
-            max_confidence_class_name = class_name
-            max_confidence_class_id = current_class_id
+            max_confidence_class_id = prediction_details["class_id"]
     if not max_confidence:
         return None
     return max_confidence_class_name, max_confidence_class_id, max_confidence
