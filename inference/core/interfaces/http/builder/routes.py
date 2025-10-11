@@ -13,6 +13,8 @@ from starlette.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST, HTTP_404_NO
 from inference.core.env import BUILDER_ORIGIN, MODEL_CACHE_DIR
 from inference.core.interfaces.http.error_handlers import with_route_exceptions_async
 
+_VALID_ID_PATTERN = re.compile(r"^[\w\-]+$")
+
 logger = logging.getLogger(__name__)
 
 workflow_local_dir = Path(MODEL_CACHE_DIR) / "workflow" / "local"
@@ -179,15 +181,17 @@ async def create_or_overwrite_workflow(
     Create or overwrite a workflow's JSON file on disk.
     Protected by CSRF token check.
     """
-    if not re.match(r"^[\w\-]+$", workflow_id):
+    if not _VALID_ID_PATTERN.match(workflow_id):
         return JSONResponse({"error": "invalid id"}, status_code=HTTP_400_BAD_REQUEST)
 
-    workflow_local_dir.mkdir(parents=True, exist_ok=True)
+    # Avoid repeated disk operations if directory exists (small win for certain OS filesystems)
+    if not workflow_local_dir.exists():
+        workflow_local_dir.mkdir(parents=True, exist_ok=True)
 
     # If the body claims a different ID, treat that as a "rename".
-    if request_body.get("id") and request_body.get("id") != workflow_id:
-        old_id: str = request_body["id"]
-        if not re.match(r"^[\w\-]+$", old_id):
+    old_id = request_body.get("id")
+    if old_id and old_id != workflow_id:
+        if not _VALID_ID_PATTERN.match(old_id):
             return JSONResponse(
                 {"error": "invalid id"}, status_code=HTTP_400_BAD_REQUEST
             )
@@ -205,9 +209,19 @@ async def create_or_overwrite_workflow(
 
     workflow_hash = sha256(workflow_id.encode()).hexdigest()
     file_path = workflow_local_dir / f"{workflow_hash}.json"
+
+    # Write the file as atomically as possible using a temporary file, then rename.
+    # This avoids data corruption from concurrent writes, increasing safe performance profile.
+    # This approach is only marginally costlier in the fast path, but safer under load.
     try:
-        with file_path.open("w", encoding="utf-8") as f:
+        tmp_path = file_path.with_suffix(".json.tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            # Use the default separators for the most compact file; indent is specified for readability, so unchanged.
             json.dump(request_body, f, indent=2)
+            f.flush()
+            # os.fsync is not called to avoid blocking excessively,
+            # as this route is au async and explicit durability is not specified.
+        tmp_path.replace(file_path)
     except Exception as e:
         logger.error(f"Error writing JSON for {workflow_id} to {file_path}: {e}")
         return JSONResponse({"error": "unable to write file"}, status_code=500)
