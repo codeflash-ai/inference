@@ -52,6 +52,8 @@ from inference.core.workflows.execution_engine.entities.base import (
     WorkflowImageData,
 )
 
+_float_int_types = (float, int)
+
 AnyNumber = Union[int, float]
 
 
@@ -286,7 +288,7 @@ def deserialize_float_zero_to_one_kind(parameter: str, value: Any) -> float:
 
 
 def deserialize_float_kind(parameter: str, value: Any) -> float:
-    if not isinstance(value, float) and not isinstance(value, int):
+    if not isinstance(value, _float_int_types):
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{parameter}` declared to hold "
             f"float value, but invalid type of data found (`{type(value).__name__}`).",
