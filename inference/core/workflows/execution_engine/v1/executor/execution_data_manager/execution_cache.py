@@ -152,8 +152,13 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        selector_split = selector.split(".")
+        # selector: e.g. "$steps.my_step.output"
+        # step_selector: "$steps.my_step"
+        # step_name: "my_step"
+        # property_name: "output"
+        step_selector = ".".join(selector_split[:2])
+        step_name = selector_split[1]
         if not self.step_outputs_batches(step_name=step_name):
             raise ExecutionEngineRuntimeError(
                 public_message=f"Error in execution engine. Attempted to get output in batch mode which is "
@@ -164,7 +169,7 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = selector_split[-1]
         return self._cache_content[step_name].get_outputs(
             property_name=property_name,
             indices=batch_elements_indices,
@@ -253,11 +258,15 @@ class ExecutionCache:
     def is_step_output_declared(self, selector: Any) -> bool:
         if not is_step_output_selector(selector_or_value=selector):
             return False
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        selector_split = selector.split(".")
+        # selector: e.g. "$steps.my_step.output"
+        # step_selector: "$steps.my_step"
+        # step_name: "my_step"
+        # property_name: "output"
+        step_name = selector_split[1]
         if not self.contains_step(step_name=step_name):
             return False
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = selector_split[-1]
         return self._cache_content[step_name].is_property_defined(
             property_name=property_name
         )
