@@ -23,6 +23,12 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_SINGLE_OUTPUT_DEF = OutputDefinition(
+    name="parsed_output",
+    kind=[DICTIONARY_KIND],
+    description="A parsed version of the output, provided as a dictionary containing the text.",
+)
+
 
 class BlockManifest(WorkflowBlockManifest):
     # SmolVLM needs an image and a text prompt.
@@ -70,13 +76,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="parsed_output",
-                kind=[DICTIONARY_KIND],
-                description="A parsed version of the output, provided as a dictionary containing the text.",
-            ),
-        ]
+        return [_SINGLE_OUTPUT_DEF]
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
