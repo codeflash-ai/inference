@@ -65,19 +65,33 @@ def sample_close_to_threshold(
     minimum_objects_close_to_threshold: int,
     probability: float,
 ) -> bool:
-    if is_prediction_a_stub(prediction=prediction):
+    # Inline check for stub to avoid function call overhead
+    if prediction.get("is_stub", False):
         return False
+    # Test ELIGIBLE_PREDICTION_TYPES directly to avoid repeated attribute lookup
     if prediction_type not in ELIGIBLE_PREDICTION_TYPES:
         return False
-    close_to_threshold = prediction_is_close_to_threshold(
-        prediction=prediction,
-        prediction_type=prediction_type,
-        selected_class_names=selected_class_names,
-        threshold=threshold,
-        epsilon=epsilon,
-        only_top_classes=only_top_classes,
-        minimum_objects_close_to_threshold=minimum_objects_close_to_threshold,
-    )
+    if CLASSIFICATION_TASK not in prediction_type:
+        close_to_threshold = detections_are_close_to_threshold(
+            prediction=prediction,
+            selected_class_names=selected_class_names,
+            threshold=threshold,
+            epsilon=epsilon,
+            minimum_objects_close_to_threshold=minimum_objects_close_to_threshold,
+        )
+    else:
+        # Avoid string membership checks by using prediction.get("top") which is potentially faster and semantically correct
+        if "top" in prediction:
+            checker = multi_class_classification_prediction_is_close_to_threshold
+        else:
+            checker = multi_label_classification_prediction_is_close_to_threshold
+        close_to_threshold = checker(
+            prediction=prediction,
+            selected_class_names=selected_class_names,
+            threshold=threshold,
+            epsilon=epsilon,
+            only_top_classes=only_top_classes,
+        )
     if not close_to_threshold:
         return False
     return random.random() < probability
