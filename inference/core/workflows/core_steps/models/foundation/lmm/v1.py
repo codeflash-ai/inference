@@ -331,6 +331,8 @@ def execute_gpt_4v_requests(
     prompt: str,
     lmm_config: LMMConfig,
 ) -> List[Dict[str, str]]:
+    if not image:
+        return []
     client = OpenAI(api_key=remote_api_key)
     tasks = [
         partial(
