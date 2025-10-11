@@ -166,17 +166,29 @@ def multi_label_classification_prediction_is_close_to_threshold(
     epsilon: float,
     only_top_classes: bool,
 ) -> bool:
-    predicted_classes = set(prediction["predicted_classes"])
-    for class_name, prediction_details in prediction["predictions"].items():
-        if only_top_classes and class_name not in predicted_classes:
+    # Avoid constructing set if not needed
+    predicted_classes_set = (
+        set(prediction["predicted_classes"]) if only_top_classes else None
+    )
+    predictions = prediction["predictions"]
+
+    # Branch selected_class_names lookup for early exit
+    if selected_class_names is not None:
+        selected_lookup = selected_class_names
+    else:
+        selected_lookup = None
+
+    # Extract faster local vars for hot path
+    abs_, lookup, top_classes = abs, selected_lookup, predicted_classes_set
+    th, eps = threshold, epsilon
+
+    # Loop over items directly, avoid function call overheads
+    for class_name, prediction_details in predictions.items():
+        if only_top_classes and class_name not in top_classes:
             continue
-        if class_to_be_excluded(
-            class_name=class_name, selected_class_names=selected_class_names
-        ):
+        if lookup is not None and class_name not in lookup:
             continue
-        if is_close_to_threshold(
-            value=prediction_details["confidence"], threshold=threshold, epsilon=epsilon
-        ):
+        if abs_(prediction_details["confidence"] - th) < eps:
             return True
     return False
 
