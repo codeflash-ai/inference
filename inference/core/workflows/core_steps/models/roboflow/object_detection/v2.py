@@ -46,6 +46,14 @@ from inference.core.workflows.prototypes.block import (
 )
 from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 
+# Create and cache the outputs list at class level,
+# as they are immutable, to avoid repeated allocations/constructions.
+_OUTPUTS: List[OutputDefinition] = [
+    OutputDefinition(name="inference_id", kind=[INFERENCE_ID_KIND]),
+    OutputDefinition(name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]),
+    OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
+]
+
 LONG_DESCRIPTION = """
 Run inference on a object-detection model hosted on or uploaded to Roboflow.
 
@@ -137,13 +145,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="inference_id", kind=[INFERENCE_ID_KIND]),
-            OutputDefinition(
-                name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]
-            ),
-            OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
