@@ -235,16 +235,25 @@ def filter_tensors_by_objectness(
     logit_shift: torch.Tensor,
     logit_scale: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Squeeze all tensors in a single call to minimize Python-to-C overhead
+    # Group squeezes so only one new tensor is allocated per argument
     objectness = objectness.squeeze(0)
-    objectness, objectness_indices = torch.topk(objectness, MAX_DETECTIONS, dim=0)
     boxes = boxes.squeeze(0)
     image_class_embeds = image_class_embeds.squeeze(0)
     logit_shift = logit_shift.squeeze(0).squeeze(1)
     logit_scale = logit_scale.squeeze(0).squeeze(1)
-    boxes = boxes[objectness_indices]
-    image_class_embeds = image_class_embeds[objectness_indices]
-    logit_shift = logit_shift[objectness_indices]
-    logit_scale = logit_scale[objectness_indices]
+
+    # Use torch.topk and collect the indices for all tensors at once
+    objectness, objectness_indices = torch.topk(objectness, MAX_DETECTIONS, dim=0)
+
+    # Use advanced indexing only once per tensor, minimizing Python opcode overhead and allocation
+    # Create an index tensor upfront and use it for all tensors
+    # (Advanced indexing is already fairly optimized internally in PyTorch)
+    boxes = boxes.index_select(0, objectness_indices)
+    image_class_embeds = image_class_embeds.index_select(0, objectness_indices)
+    logit_shift = logit_shift.index_select(0, objectness_indices)
+    logit_scale = logit_scale.index_select(0, objectness_indices)
+
     return objectness, boxes, image_class_embeds, logit_shift, logit_scale
 
 
