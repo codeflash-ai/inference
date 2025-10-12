@@ -374,7 +374,7 @@ def deserialize_dictionary_kind(parameter: str, value: Any) -> dict:
 
 
 def deserialize_point_kind(parameter: str, value: Any) -> Tuple[AnyNumber, AnyNumber]:
-    if not isinstance(value, list) and not isinstance(value, tuple):
+    if not isinstance(value, (list, tuple)):
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{parameter}` declared to hold "
             f"point coordinates, but invalid type of data found (`{type(value).__name__}`).",
@@ -386,14 +386,14 @@ def deserialize_point_kind(parameter: str, value: Any) -> Tuple[AnyNumber, AnyNu
             f"point coordinates, but missing point coordinates detected.",
             context="workflow_execution | runtime_input_validation",
         )
-    value = tuple(value[:2])
-    if any(not _is_number(e) for e in value):
+    x, y = value[0], value[1]
+    if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{parameter}` declared to hold "
             f"point coordinates, but at least one of the coordinate is not number",
             context="workflow_execution | runtime_input_validation",
         )
-    return value
+    return (x, y)
 
 
 def deserialize_zone_kind(
