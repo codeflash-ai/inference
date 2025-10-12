@@ -43,7 +43,6 @@ from inference.core.cache.model_artifacts import (
     are_all_files_cached,
     clear_cache,
     get_cache_dir,
-    get_cache_file_path,
     initialise_cache,
     load_json_from_cache,
     load_text_file_from_cache,
@@ -150,7 +149,8 @@ class RoboflowInferenceModel(Model):
         Returns:
             str: Full path to the cached file.
         """
-        return get_cache_file_path(file=f, model_id=self.endpoint)
+        # Use precomputed self.cache_dir for fast path join
+        return os.path.join(self.cache_dir, f)
 
     def clear_cache(self, delete_from_disk: bool = True) -> None:
         """Clear the cache directory.
