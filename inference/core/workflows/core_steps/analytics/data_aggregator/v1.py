@@ -538,14 +538,19 @@ class ValuesDifferenceState(AggregationState):
         self._max_value: Optional[Union[int, float]] = None
 
     def on_data(self, value: Any) -> None:
-        if self._min_value is None:
+        min_value = self._min_value
+        if min_value is None:
             self._min_value = value
             return None
-        if self._max_value is None:
+        max_value = self._max_value
+        if max_value is None:
             self._max_value = value
             return None
-        self._min_value = min(self._min_value, value)
-        self._max_value = max(self._max_value, value)
+        # Manually compare values instead of calling min/max for better performance
+        if value < min_value:
+            self._min_value = value
+        elif value > max_value:
+            self._max_value = value
 
     def get_result(self) -> Any:
         if self._min_value is None or self._max_value is None:
