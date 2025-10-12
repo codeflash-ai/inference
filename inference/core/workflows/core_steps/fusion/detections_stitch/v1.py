@@ -161,17 +161,19 @@ class DetectionsStitchBlockV1(WorkflowBlock):
 
 
 def retrieve_crop_wh(detections: sv.Detections) -> Optional[Tuple[int, int]]:
-    if len(detections) == 0:
+    if not detections:
         return None
-    if PARENT_DIMENSIONS_KEY not in detections.data:
+    data = detections.data
+    if PARENT_DIMENSIONS_KEY not in data:
         raise RuntimeError(
             f"Dimensions for crops is expected to be saved in data key {PARENT_DIMENSIONS_KEY} "
             f"of sv.Detections, but could not be found. Probably block producing sv.Detections "
             f"lack this part of implementation or has a bug."
         )
+    dims_0 = data[PARENT_DIMENSIONS_KEY][0]
     return (
-        detections.data[PARENT_DIMENSIONS_KEY][0][1].item(),
-        detections.data[PARENT_DIMENSIONS_KEY][0][0].item(),
+        dims_0[1].item(),
+        dims_0[0].item(),
     )
 
 
