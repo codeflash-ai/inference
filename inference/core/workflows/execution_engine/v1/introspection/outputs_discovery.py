@@ -8,11 +8,6 @@ from inference.core.workflows.execution_engine.introspection.blocks_loader impor
 from inference.core.workflows.execution_engine.introspection.entities import (
     BlocksDescription,
 )
-from inference.core.workflows.execution_engine.v1.compiler.utils import (
-    get_last_chunk_of_selector,
-    get_step_selector_from_its_output,
-    is_step_output_selector,
-)
 from inference.core.workflows.execution_engine.v1.core import (
     EXECUTION_ENGINE_V1_VERSION,
 )
@@ -65,14 +60,26 @@ def map_step_name_to_block_type(workflow_steps: List[dict]) -> Dict[str, str]:
 
 
 def extract_step_name_and_selected_property(selector: str) -> Tuple[str, str]:
-    if not is_step_output_selector(selector_or_value=selector):
+    # Optimize by avoiding repeated splits in utility functions when possible
+    # Inline what utils.py does to reduce calls and gratuitous string operations
+    # is_step_output_selector() uses split(".") and startswith("$steps.").
+    if not (
+        isinstance(selector, str)
+        and selector.startswith("$steps.")
+        and selector.count(".") == 2
+    ):
         raise WorkflowDefinitionError(
             public_message="Workflow definition invalid - output does not contain step selector.",
             context="describing_workflow_outputs",
         )
-    step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-    step_name = get_last_chunk_of_selector(selector=step_selector)
-    selected_property = get_last_chunk_of_selector(selector=selector)
+    # $steps.stepname.output_property
+    # Avoid unnecessary splits/copies for chunk extraction
+    # Only split once, carefully unpack the fields
+    # We know after validation above there will be exactly two dots
+    # This gives us three chunks: "$steps", step_name, selected_property
+    parts = selector.split(".", 2)
+    step_name = parts[1]
+    selected_property = parts[2]
     return step_name, selected_property
 
 
@@ -104,27 +111,30 @@ def determine_workflow_outputs_kinds(
     block_output_map: Dict[str, Dict[str, List[str]]],
 ) -> Dict[str, Union[List[str], Dict[str, List[str]]]]:
     workflow_response_definition = {}
+    # Localize lookups for attribute/field hits to minimize repeated dict gets
+    get_block_type = step_name_to_block_type.__getitem__
+    get_output_props = block_output_map.__getitem__
     for output in outputs_definitions:
         output_name = output["name"]
         selector = output["selector"]
-        step_name, selected_property = extract_step_name_and_selected_property(
-            selector=selector,
-        )
-        if step_name not in step_name_to_block_type:
+        step_name, selected_property = extract_step_name_and_selected_property(selector)
+        try:
+            step_type = get_block_type(step_name)
+        except KeyError:
             raise WorkflowDefinitionError(
                 public_message=f"Could not find step referred in outputs (`{step_name}`) within Workflow steps.",
                 context="describing_workflow_outputs",
             )
-        step_type = step_name_to_block_type[step_name]
-        output_properties = block_output_map[step_type]
+        output_properties = get_output_props(step_type)
         if selected_property == "*":
             property_kind = output_properties
         else:
-            if selected_property not in output_properties:
+            try:
+                property_kind = output_properties[selected_property]
+            except KeyError:
                 raise WorkflowDefinitionError(
                     public_message=f"Step `{step_name}` does not declare {selected_property} in its outputs.",
                     context="describing_workflow_outputs",
                 )
-            property_kind = output_properties[selected_property]
         workflow_response_definition[output_name] = property_kind
     return workflow_response_definition
