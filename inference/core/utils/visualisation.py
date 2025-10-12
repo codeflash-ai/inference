@@ -150,8 +150,12 @@ def draw_labels(
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    x = box.x
+    y = box.y
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(x - hw)
+    x2 = int(x + hw)
+    y1 = int(y - hh)
+    y2 = int(y + hh)
     return (x1, y1), (x2, y2)
