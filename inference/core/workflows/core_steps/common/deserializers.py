@@ -428,25 +428,24 @@ def deserialize_zone_kind(
 def deserialize_rgb_color_kind(
     parameter: str, value: Any
 ) -> Union[Tuple[int, int, int], str]:
-    if (
-        not isinstance(value, list)
-        and not isinstance(value, tuple)
-        and not isinstance(value, str)
-    ):
-        raise RuntimeInputError(
-            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
-            f"RGB color, but invalid type of data found (`{type(value).__name__}`).",
-            context="workflow_execution | runtime_input_validation",
-        )
-    if isinstance(value, str):
+    value_type = type(value)
+    # Fast path: check type via direct comparison rather than multiple isinstance calls
+    if value_type is str:
         return value
-    if len(value) < 3:
-        raise RuntimeInputError(
-            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
-            f"RGB color, but not all colors defined.",
-            context="workflow_execution | runtime_input_validation",
-        )
-    return tuple(value[:3])
+    if value_type is list or value_type is tuple:
+        if len(value) < 3:
+            raise RuntimeInputError(
+                public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+                f"RGB color, but not all colors defined.",
+                context="workflow_execution | runtime_input_validation",
+            )
+        # Directly construct tuple from first three items
+        return (value[0], value[1], value[2])
+    raise RuntimeInputError(
+        public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+        f"RGB color, but invalid type of data found (`{value_type.__name__}`).",
+        context="workflow_execution | runtime_input_validation",
+    )
 
 
 def deserialize_bytes_kind(parameter: str, value: Any) -> bytes:
