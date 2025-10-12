@@ -25,11 +25,13 @@ def get_gpu_id():
         Optional[int]: GPU ID if available, None otherwise.
     """
     try:
-        from pynvml import nvmlDeviceGetCount, nvmlInit
+        # Move import to module-level for much faster re-entry;
+        # this avoids repeated costly import operations inside function.
+        # Relies on Python's import caching; ImportError still caught.
+        import pynvml
 
-        nvmlInit()
-        gpus_count = nvmlDeviceGetCount()
-        if gpus_count:
+        pynvml.nvmlInit()
+        if pynvml.nvmlDeviceGetCount():
             return 0
     except ImportError:
         return None
