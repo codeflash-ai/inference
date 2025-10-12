@@ -128,34 +128,45 @@ class LineCounterBlockV2(WorkflowBlock):
                 f"tracker_id not initialized, {self.__class__.__name__} requires detections to be tracked"
             )
         metadata = image.video_metadata
-        if metadata.video_identifier not in self._batch_of_line_zones:
-            if not isinstance(line_segment, list) or len(line_segment) != 2:
+        line_zone = self._batch_of_line_zones.get(metadata.video_identifier)
+        if line_zone is None:
+            if not (isinstance(line_segment, list) and len(line_segment) == 2):
                 raise ValueError(
                     f"{self.__class__.__name__} requires line zone to be a list containing exactly 2 points"
                 )
-            if any(not isinstance(e, list) or len(e) != 2 for e in line_segment):
+            segment0, segment1 = line_segment
+            if not (
+                isinstance(segment0, list)
+                and len(segment0) == 2
+                and isinstance(segment1, list)
+                and len(segment1) == 2
+            ):
                 raise ValueError(
                     f"{self.__class__.__name__} requires each point of line zone to be a list containing exactly 2 coordinates"
                 )
-            if any(
-                not isinstance(e[0], (int, float)) or not isinstance(e[1], (int, float))
-                for e in line_segment
+            x0, y0 = segment0
+            x1, y1 = segment1
+            if not (
+                isinstance(x0, (int, float))
+                and isinstance(y0, (int, float))
+                and isinstance(x1, (int, float))
+                and isinstance(y1, (int, float))
             ):
                 raise ValueError(
                     f"{self.__class__.__name__} requires each coordinate of line zone to be a number"
                 )
             if triggering_anchor is not None:
-                self._batch_of_line_zones[metadata.video_identifier] = sv.LineZone(
-                    start=sv.Point(*line_segment[0]),
-                    end=sv.Point(*line_segment[1]),
+                line_zone = sv.LineZone(
+                    start=sv.Point(x0, y0),
+                    end=sv.Point(x1, y1),
                     triggering_anchors=[sv.Position(triggering_anchor)],
                 )
             else:
-                self._batch_of_line_zones[metadata.video_identifier] = sv.LineZone(
-                    start=sv.Point(*line_segment[0]),
-                    end=sv.Point(*line_segment[1]),
+                line_zone = sv.LineZone(
+                    start=sv.Point(x0, y0),
+                    end=sv.Point(x1, y1),
                 )
-        line_zone = self._batch_of_line_zones[metadata.video_identifier]
+            self._batch_of_line_zones[metadata.video_identifier] = line_zone
 
         mask_in, mask_out = line_zone.trigger(detections=detections)
         detections_in = detections[mask_in]
