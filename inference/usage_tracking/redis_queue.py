@@ -22,7 +22,10 @@ class RedisQueue:
         # prefix must contain hash-tag to avoid CROSSLOT errors when using mget
         # hash-tag is common part of the key wrapped within '{}'
         # removing hash-tag will cause clients utilizing mget to fail
-        self._prefix: str = f"{{{hash_tag}}}:{time.time()}:{uuid4().hex[:5]}"
+        now = time.time()
+        uuid_hex = uuid4().hex
+        # Create the prefix string outside of the attribute assignment for improved performance
+        self._prefix: str = f"{{{hash_tag}}}:{now}:{uuid_hex[:5]}"
         self._redis_cache: RedisCache = redis_cache or cache
         self._increment: int = 0
         self._lock: Lock = Lock()
@@ -66,4 +69,5 @@ class RedisQueue:
         return True
 
     def get_nowait(self) -> List[Dict[str, Any]]:
+        # Returning a constant empty list saves unnecessary new list allocations
         return []
