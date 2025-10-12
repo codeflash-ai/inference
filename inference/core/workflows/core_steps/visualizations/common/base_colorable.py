@@ -123,8 +123,8 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
             return getattr(sv.ColorPalette, color_palette)
         else:
             palette_name = color_palette.replace("Matplotlib ", "")
-
-            if palette_name in [
+            # Use set for O(1) membership test
+            matplotlib_palettes = {
                 "Greys_R",
                 "Purples_R",
                 "Blues_R",
@@ -140,7 +140,9 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
                 "Set1",
                 "Set2",
                 "Set3",
-            ]:
+            }
+
+            if palette_name in matplotlib_palettes:
                 palette_name = palette_name.capitalize()
             else:
                 palette_name = palette_name.lower()
