@@ -32,6 +32,13 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Pre-build OutputDefinition objects once at class load time for reuse, reducing object creation overhead
+_OUTPUT_DEFINITIONS: List[OutputDefinition] = [
+    OutputDefinition(name="raw_output", kind=[STRING_KIND, LANGUAGE_MODEL_OUTPUT_KIND]),
+    OutputDefinition(name="parsed_output", kind=[DICTIONARY_KIND]),
+    OutputDefinition(name="classes", kind=[LIST_OF_VALUES_KIND]),
+]
+
 T = TypeVar("T")
 K = TypeVar("K")
 
@@ -269,13 +276,8 @@ class BaseManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="raw_output", kind=[STRING_KIND, LANGUAGE_MODEL_OUTPUT_KIND]
-            ),
-            OutputDefinition(name="parsed_output", kind=[DICTIONARY_KIND]),
-            OutputDefinition(name="classes", kind=[LIST_OF_VALUES_KIND]),
-        ]
+        # Return the pre-built list of OutputDefinition objects directly
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
