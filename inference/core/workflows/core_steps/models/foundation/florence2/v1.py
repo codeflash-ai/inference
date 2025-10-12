@@ -479,7 +479,10 @@ def _prepare_grounding_bounding_box_from_detections(
 ) -> Optional[str]:
     if len(detections) == 0:
         return None
+    # Unpack and cast width/height as float once for faster repeated division
     height, width = image.shape[:2]
+    width_f = float(width)
+    height_f = float(height)
     if grounding_selection_mode not in COORDINATES_EXTRACTION:
         raise ValueError(
             f"Unknown grounding selection mode: {grounding_selection_mode}"
@@ -488,11 +491,18 @@ def _prepare_grounding_bounding_box_from_detections(
     left_top_x, left_top_y, right_bottom_x, right_bottom_y = extraction_function(
         detections
     )
-    left_top_x = _coordinate_to_loc(value=left_top_x / width)
-    left_top_y = _coordinate_to_loc(value=left_top_y / height)
-    right_bottom_x = _coordinate_to_loc(value=right_bottom_x / width)
-    right_bottom_y = _coordinate_to_loc(value=right_bottom_y / height)
-    return f"<loc_{left_top_x}><loc_{left_top_y}><loc_{right_bottom_x}><loc_{right_bottom_y}>"
+
+    # Compute and remap all box coordinates in a minimal number of operations
+    # Directly use optimized version of _coordinate_to_loc for each coordinate
+    left_top_x = _fast_coordinate_to_loc(left_top_x, width_f)
+    left_top_y = _fast_coordinate_to_loc(left_top_y, height_f)
+    right_bottom_x = _fast_coordinate_to_loc(right_bottom_x, width_f)
+    right_bottom_y = _fast_coordinate_to_loc(right_bottom_y, height_f)
+
+    return (
+        f"<loc_{left_top_x}><loc_{left_top_y}>"
+        f"<loc_{right_bottom_x}><loc_{right_bottom_y}>"
+    )
 
 
 COORDINATES_EXTRACTION = {
@@ -553,3 +563,29 @@ def _scale_value(
     max_value: Union[int, float],
 ) -> Union[int, float]:
     return max(min(value, max_value), min_value)
+
+
+def _fast_coordinate_to_loc(value: float, dim: float) -> int:
+    """Inline and fuse _coordinate_to_loc and _scale_value for performance.
+
+    Args:
+        value: pixel coordinate (float)
+        dim: width/height as float
+
+    Returns:
+        Bin index in 0..999 (int)
+    """
+    # Scale coordinate to [0, 1] and clamp in a single step - avoid extra function call
+    ratio = value / dim
+    if ratio < 0.0:
+        ratio = 0.0
+    elif ratio > 1.0:
+        ratio = 1.0
+    # Multiply and round in-place
+    loc_bin = round(ratio * LOC_BINS)
+    # Clamp to [0, LOC_BINS-1]
+    if loc_bin < 0:
+        loc_bin = 0
+    elif loc_bin >= LOC_BINS:
+        loc_bin = LOC_BINS - 1
+    return loc_bin
