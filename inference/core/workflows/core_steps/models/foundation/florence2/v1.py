@@ -520,31 +520,45 @@ def _extract_bbox_coordinates_as_location_prompt(
             "Could not extract 4 coordinates of bounding box to perform detection "
             "grounded Florence 2 prediction."
         )
-    left_top_x, left_top_y, right_bottom_x, right_bottom_y = coordinates
-    if all(isinstance(c, float) for c in coordinates):
-        left_top_x = _coordinate_to_loc(value=left_top_x)
-        left_top_y = _coordinate_to_loc(value=left_top_y)
-        right_bottom_x = _coordinate_to_loc(value=right_bottom_x)
-        right_bottom_y = _coordinate_to_loc(value=right_bottom_y)
-        return f"<loc_{left_top_x}><loc_{left_top_y}><loc_{right_bottom_x}><loc_{right_bottom_y}>"
-    if all(isinstance(c, int) for c in coordinates):
-        left_top_x = _coordinate_to_loc(value=left_top_x / width)
-        left_top_y = _coordinate_to_loc(value=left_top_y / height)
-        right_bottom_x = _coordinate_to_loc(value=right_bottom_x / width)
-        right_bottom_y = _coordinate_to_loc(value=right_bottom_y / height)
-        return f"<loc_{left_top_x}><loc_{left_top_y}><loc_{right_bottom_x}><loc_{right_bottom_y}>"
+    # Reduce generator overhead:
+    types = tuple(type(c) for c in coordinates)
+    # Fast path when all are float (more efficient than all/isinstance with generator)
+    if all(t is float for t in types):
+        # Avoid repetition, use list comprehension and join for fast string formatting
+        locs = [_coordinate_to_loc(value=c) for c in coordinates]
+        return f"<loc_{locs[0]}><loc_{locs[1]}><loc_{locs[2]}><loc_{locs[3]}>"
+
+    if all(t is int for t in types):
+        # Avoid redundant division, batch the calculation
+        locs = [
+            _coordinate_to_loc(coordinates[0] / width),
+            _coordinate_to_loc(coordinates[1] / height),
+            _coordinate_to_loc(coordinates[2] / width),
+            _coordinate_to_loc(coordinates[3] / height),
+        ]
+        return f"<loc_{locs[0]}><loc_{locs[1]}><loc_{locs[2]}><loc_{locs[3]}>"
+
     raise ValueError(
         "Provided coordinates in mixed format - coordinates must be all integers or all floats in range [0.0-1.0]"
     )
 
 
 def _coordinate_to_loc(value: float) -> int:
-    loc_bin = round(_scale_value(value=value, min_value=0.0, max_value=1.0) * LOC_BINS)
-    return _scale_value(  # to make sure 0-999 cutting out 1000 on 1.0
-        value=loc_bin,
-        min_value=0,
-        max_value=LOC_BINS - 1,
-    )
+    # Inline min/max logic here for speed, and avoid calling external _scale_value twice.
+    # Inlining _scale_value logic from foundation/florence2/v1.py (read-only for import).
+    # Keep LOC_BINS in scope for min/max cutoff.
+    value_cut = value
+    if value_cut > 1.0:
+        value_cut = 1.0
+    elif value_cut < 0.0:
+        value_cut = 0.0
+    loc_bin = round(value_cut * LOC_BINS)
+    # Now scale to 0,999 range (avoid external call)
+    if loc_bin < 0:
+        return 0
+    if loc_bin > LOC_BINS - 1:
+        return LOC_BINS - 1
+    return loc_bin
 
 
 def _scale_value(
