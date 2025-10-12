@@ -198,7 +198,9 @@ def manage_crops_metadata(
         raise ValueError(
             "To process non-empty detections offset is needed, but not given"
         )
-    if SCALING_RELATIVE_TO_PARENT_KEY in detections.data:
+    data = detections.data
+
+    if SCALING_RELATIVE_TO_PARENT_KEY in data:
         scale = detections[SCALING_RELATIVE_TO_PARENT_KEY][0]
         if abs(scale - 1.0) > 1e-4:
             raise ValueError(
@@ -208,11 +210,23 @@ def manage_crops_metadata(
                 f"scaling cannot be used in the meantime. This error probably indicate "
                 f"wrong step output plugged as input of this step."
             )
-    if PARENT_COORDINATES_KEY in detections.data:
-        detections.data[PARENT_COORDINATES_KEY] -= offset
-    if ROOT_PARENT_COORDINATES_KEY in detections.data:
-        detections.data[ROOT_PARENT_COORDINATES_KEY] -= offset
-    detections.data[PARENT_ID_KEY] = np.array([parent_id] * len(detections))
+
+    # Use local references to avoid repeated dictionary lookups
+    if PARENT_COORDINATES_KEY in data:
+        arr = data[PARENT_COORDINATES_KEY]
+        np.subtract(arr, offset, out=arr)
+
+    if ROOT_PARENT_COORDINATES_KEY in data:
+        arr = data[ROOT_PARENT_COORDINATES_KEY]
+        np.subtract(arr, offset, out=arr)
+
+    # Explicitly allocate only once, using np.full, which is more efficient for uniform arrays
+    # dtype is inferred from the first parent_id element
+    n = len(detections)
+    # Choose dtype dynamically to preserve original behavior; fallback to object for mixed/string types
+    arr_dtype = np.array([parent_id]).dtype
+    data[PARENT_ID_KEY] = np.full(n, parent_id, dtype=arr_dtype)
+
     return detections
 
 
