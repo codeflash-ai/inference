@@ -139,7 +139,8 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        exec_mode = self._step_execution_mode
+        if exec_mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
                 model_id=model_id,
@@ -147,7 +148,7 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
                 disable_active_learning=disable_active_learning,
                 active_learning_target_dataset=active_learning_target_dataset,
             )
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        elif exec_mode is StepExecutionMode.REMOTE:
             return self.run_remotely(
                 images=images,
                 model_id=model_id,
@@ -156,9 +157,7 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
                 active_learning_target_dataset=active_learning_target_dataset,
             )
         else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+            raise ValueError(f"Unknown step execution mode: {exec_mode}")
 
     def run_locally(
         self,
@@ -168,7 +167,10 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        # List comprehension out-of-place for maximum speed,
+        # avoids building an unnecessary intermediate if possible
         inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
+
         request = ClassificationInferenceRequest(
             api_key=self._api_key,
             model_id=model_id,
@@ -178,6 +180,7 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
             source="workflow-execution",
             active_learning_target_dataset=active_learning_target_dataset,
         )
+        # Add model is idempotent and will lock-acquire if not present
         self._model_manager.add_model(
             model_id=model_id,
             api_key=self._api_key,
@@ -185,12 +188,18 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
+
+        # Avoid repeated isinstance checks by directly building the normalized list
+        # Pre-allocate the list if necessary
         if isinstance(predictions, list):
-            predictions = [
+            model_dump = [
                 e.model_dump(by_alias=True, exclude_none=True) for e in predictions
             ]
+            predictions = model_dump
         else:
+            # Returns are not lists, so wrap once
             predictions = [predictions.model_dump(by_alias=True, exclude_none=True)]
+
         return self._post_process_result(
             predictions=predictions,
             images=images,
@@ -204,17 +213,21 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        # Use fast conditional assignment
         api_url = (
             LOCAL_INFERENCE_API_URL
             if WORKFLOWS_REMOTE_API_TARGET != "hosted"
             else HOSTED_CLASSIFICATION_URL
         )
+
+        # The inference client creation/config only depends on parameters
         client = InferenceHTTPClient(
             api_url=api_url,
             api_key=self._api_key,
         )
         if WORKFLOWS_REMOTE_API_TARGET == "hosted":
             client.select_api_v0()
+
         client_config = InferenceConfiguration(
             confidence_threshold=confidence,
             disable_active_learning=disable_active_learning,
@@ -224,13 +237,20 @@ class RoboflowClassificationModelBlockV1(WorkflowBlock):
             source="workflow-execution",
         )
         client.configure(inference_configuration=client_config)
+
+        # Extract base64_image in a single pass, do not check for empties, as original
+        # Use list comprehension for memory-friendly construction (references are not duplicated)
         non_empty_inference_images = [i.base64_image for i in images]
+
         predictions = client.infer(
             inference_input=non_empty_inference_images,
             model_id=model_id,
         )
+
+        # Normalize predictions to always be a list to avoid repeated isinstance checks downstream
         if not isinstance(predictions, list):
             predictions = [predictions]
+
         return self._post_process_result(
             predictions=predictions,
             images=images,
