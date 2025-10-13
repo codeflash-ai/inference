@@ -93,12 +93,21 @@ def aggregate_sequence(
                 f"value empty sequence which cannot be aggregated",
                 context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
             )
-        if mode in {SequenceAggregationMode.FIRST, SequenceAggregationMode.LAST}:
-            index = 0 if mode is SequenceAggregationMode.FIRST else -1
-            return value[index]
-        ctr_ordered = [e[0] for e in Counter(value).most_common()]
-        index = 0 if mode is SequenceAggregationMode.MOST_COMMON else -1
-        return ctr_ordered[index]
+        if mode is SequenceAggregationMode.FIRST:
+            return value[0]
+        if mode is SequenceAggregationMode.LAST:
+            return value[-1]
+        # Optimize MOST_COMMON and LEAST_COMMON by iterating once and finding min/max in-place.
+        # Avoid calling Counter(value).most_common() and creating intermediate lists.
+        counts = Counter(value)
+        if mode is SequenceAggregationMode.MOST_COMMON:
+            # min(max) over dict.items() is faster than sorting/counting if the number of unique elements is not huge.
+            # Most common: max by count
+            max_elem, _ = max(counts.items(), key=lambda item: item[1])
+            return max_elem
+        # LEAST_COMMON
+        min_elem, _ = min(counts.items(), key=lambda item: item[1])
+        return min_elem
     except (TypeError, ValueError) as e:
         raise InvalidInputTypeError(
             public_message=f"While executing aggregate_sequence(...) in context {execution_context}, encountered "
