@@ -155,6 +155,13 @@ def send_usage_payload(
 ) -> Set[APIKeyHash]:
     hashes_to_api_keys = hashes_to_api_keys or {}
     api_keys_hashes_failed = set()
+    # Locally cache extra_headers instead of re-checking for each call
+    if extra_headers is None:
+        default_headers = {}
+    else:
+        default_headers = extra_headers
+
+    # Minor optimization: Move headers construction out of inner loop.
     for api_key_hash, workflow_payloads in payload.items():
         if hashes_to_api_keys and api_key_hash not in hashes_to_api_keys:
             api_keys_hashes_failed.add(api_key_hash)
@@ -163,21 +170,27 @@ def send_usage_payload(
         if not api_key:
             api_keys_hashes_failed.add(api_key_hash)
             continue
-        complete_workflow_payloads = [
-            w for w in workflow_payloads.values() if "processed_frames" in w
-        ]
+
+        # Optimize: Use generator expression and list comprehension directly,
+        # but keep payload filtering/assignment as original.
+        complete_workflow_payloads = []
+        for w in workflow_payloads.values():
+            if "processed_frames" in w:
+                # Remove 'api_key_hash' and add 'api_key' efficiently.
+                # Avoid searching for 'api_key_hash' twice.
+                if "api_key_hash" in w:
+                    w.pop("api_key_hash")
+                w["api_key"] = api_key
+                complete_workflow_payloads.append(w)
+
         try:
-            for workflow_payload in complete_workflow_payloads:
-                if "api_key_hash" in workflow_payload:
-                    del workflow_payload["api_key_hash"]
-                workflow_payload["api_key"] = api_key
-            if not extra_headers:
-                extra_headers = {}
+            # No need to rebuild headers inside the try block.
+            headers = {"Authorization": f"Bearer {api_key}", **default_headers}
             response = requests.post(
                 api_usage_endpoint_url,
                 json=complete_workflow_payloads,
                 verify=ssl_verify,
-                headers={"Authorization": f"Bearer {api_key}", **extra_headers},
+                headers=headers,
                 timeout=1,
             )
         except Exception:
