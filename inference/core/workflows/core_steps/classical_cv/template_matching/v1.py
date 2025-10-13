@@ -112,16 +112,20 @@ class TemplateMatchingManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="predictions",
-                kind=[OBJECT_DETECTION_PREDICTION_KIND],
-            ),
-            OutputDefinition(
-                name="number_of_matches",
-                kind=[INTEGER_KIND],
-            ),
-        ]
+        # Move OutputDefinition instances to a constant for faster access and to avoid
+        # reconstructing identical OutputDefinition objects on every call.
+        if not hasattr(cls, "_DESCRIBE_OUTPUTS_CACHE"):
+            cls._DESCRIBE_OUTPUTS_CACHE = [
+                OutputDefinition(
+                    name="predictions",
+                    kind=[OBJECT_DETECTION_PREDICTION_KIND],
+                ),
+                OutputDefinition(
+                    name="number_of_matches",
+                    kind=[INTEGER_KIND],
+                ),
+            ]
+        return cls._DESCRIBE_OUTPUTS_CACHE
 
 
 class TemplateMatchingBlockV1(WorkflowBlock):
