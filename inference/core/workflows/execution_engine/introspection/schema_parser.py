@@ -123,13 +123,17 @@ def retrieve_primitive_type_from_property(
     property_description: str,
     property_definition: dict,
 ) -> Optional[PrimitiveTypeDefinition]:
+    # Fast-path exit for REFERENCE_KEY to avoid unnecessary lookups/checks
     if REFERENCE_KEY in property_definition:
         return None
+
+    # Handle arrays/lists/sets by recursively analyzing `items`
     if ITEMS_KEY in property_definition:
+        sub_definition = property_definition[ITEMS_KEY]
         result = retrieve_primitive_type_from_property(
             property_name=property_name,
             property_description=property_description,
-            property_definition=property_definition[ITEMS_KEY],
+            property_definition=sub_definition,
         )
         if result is None:
             return None
@@ -141,46 +145,61 @@ def retrieve_primitive_type_from_property(
         return replace(
             result, type_annotation=f"{high_level_type}[{result.type_annotation}]"
         )
+
+    # Handle tuples (used for fixed-length, heterogeneous arrays)
     if TUPLE_ITEMS_KEY in property_definition:
-        nested_annotations = [
-            retrieve_primitive_type_from_property(
+        tuple_defs = property_definition[TUPLE_ITEMS_KEY]
+        # avoid list comprehension plus join: go single-pass for better memory efficiency
+        annotations = []
+        append = annotations.append
+        for nested_definition in tuple_defs:
+            a = retrieve_primitive_type_from_property(
                 property_name=property_name,
                 property_description=property_description,
                 property_definition=nested_definition,
             )
-            for nested_definition in property_definition[TUPLE_ITEMS_KEY]
-        ]
-        inner_types = ", ".join(a.type_annotation for a in nested_annotations)
+            append(a)
+        inner_types = ", ".join(a.type_annotation for a in annotations)
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
             type_annotation=f"Tuple[{inner_types}]",
         )
-    if property_definition.get(TYPE_KEY) in TYPE_MAPPING:
-        type_name = TYPE_MAPPING[property_definition[TYPE_KEY]]
+
+    # Handle simple primitive types
+    type_value = property_definition.get(TYPE_KEY)
+    if type_value in TYPE_MAPPING:
+        type_name = TYPE_MAPPING[type_value]
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
             type_annotation=type_name,
         )
+
+    # Handle $ref
     if REF_KEY in property_definition:
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
             type_annotation=property_definition[REF_KEY].split("/")[-1],
         )
+
+    # Handle union/anyOf/oneOf/allOf
     if property_defines_union(property_definition=property_definition):
         return retrieve_primitive_type_from_union_property(
             property_name=property_name,
             property_description=property_description,
             union_definition=property_definition,
         )
-    if property_definition.get(TYPE_KEY) == "object":
+
+    # Handle dict/object
+    if type_value == "object":
         return retrieve_primitive_type_from_dict_property(
             property_name=property_name,
             property_description=property_description,
             property_definition=property_definition,
         )
+
     return PrimitiveTypeDefinition(
         property_name=property_name,
         property_description=property_description,
@@ -193,33 +212,49 @@ def retrieve_primitive_type_from_union_property(
     property_description: str,
     union_definition: dict,
 ) -> Optional[PrimitiveTypeDefinition]:
-    union_types = (
-        union_definition.get(ANY_OF_KEY, [])
-        + union_definition.get(ONE_OF_KEY, [])
-        + union_definition.get(ALL_OF_KEY, [])
-    )
-    primitive_union_types = [e for e in union_types if REFERENCE_KEY not in e]
+    # Inline to local: avoid repeated global lookups
+    ref_key = REFERENCE_KEY
+    none_type_name = NONE_TYPE_NAME
+    optional_type_name = OPTIONAL_TYPE_NAME
+    union_type_name = UNION_TYPE_NAME
+
+    # Inline, don't use comprehensions for filter+append
+    union_types = []
+    for k in (ANY_OF_KEY, ONE_OF_KEY, ALL_OF_KEY):
+        union_types.extend(union_definition.get(k, ()))
+    primitive_union_types = []
+    append_primitive = primitive_union_types.append
+    for e in union_types:
+        if ref_key not in e:
+            append_primitive(e)
+
     union_types_metadata = []
+    append_metadata = union_types_metadata.append
     for union_type in primitive_union_types:
         union_type_metadata = retrieve_primitive_type_from_property(
             property_name=property_name,
             property_description=property_description,
             property_definition=union_type,
         )
-        if union_type_metadata is None:
-            continue
-        union_types_metadata.append(union_type_metadata)
+        if union_type_metadata is not None:
+            append_metadata(union_type_metadata)
+
     if not union_types_metadata:
         return None
+
+    # Use set and then operate on it in-place as per original behavior
     type_names = {m.type_annotation for m in union_types_metadata}
-    if NONE_TYPE_NAME in type_names:
-        high_level_type = OPTIONAL_TYPE_NAME
-        type_names.remove(NONE_TYPE_NAME)
+    if none_type_name in type_names:
+        high_level_type = optional_type_name
+        type_names.remove(none_type_name)
     else:
-        high_level_type = UNION_TYPE_NAME
-    final_type_name = ", ".join(list(sorted(type_names)))
-    if len(type_names) == 0:
+        high_level_type = union_type_name
+
+    # For deterministic output, always sort
+    # Don't convert to list twice, use sorted directly in join
+    if not type_names:
         return None
+    final_type_name = ", ".join(sorted(type_names))
     if len(type_names) > 1:
         final_type_name = f"{high_level_type}[{final_type_name}]"
     return PrimitiveTypeDefinition(
