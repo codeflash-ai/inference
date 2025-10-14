@@ -85,15 +85,14 @@ def serialise_single_workflow_result_element(
     result_element: Dict[str, Any],
     excluded_fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    if excluded_fields is None:
-        excluded_fields = []
-    excluded_fields = set(excluded_fields)
-    serialised_result = {}
-    for key, value in result_element.items():
-        if key in excluded_fields:
-            continue
-        serialised_result[key] = serialize_wildcard_kind(value=value)
-    return serialised_result
+    # Only create the set if there are excluded fields specified
+    excluded = set(excluded_fields) if excluded_fields else set()
+    # Dict comprehension for performance and readability (no functional difference)
+    return {
+        key: serialize_wildcard_kind(value=value)
+        for key, value in result_element.items()
+        if key not in excluded
+    }
 
 
 @deprecated(

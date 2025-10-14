@@ -53,6 +53,13 @@ from inference.core.workflows.execution_engine.entities.base import (
     WorkflowImageData,
 )
 
+_SERIALIZER_DISPATCH = {
+    WorkflowImageData: lambda value: serialise_image(image=value),
+    dict: lambda value: serialize_dict(elements=value),
+    list: lambda value: serialize_list(elements=value),
+    datetime: lambda value: serialize_timestamp(timestamp=value),
+}
+
 MIN_SECRET_LENGTH_TO_REVEAL_PREFIX = 8
 MIN_POLYGON_POINT_COUNT = 3
 
@@ -236,16 +243,13 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
-    if isinstance(value, WorkflowImageData):
-        value = serialise_image(image=value)
-    elif isinstance(value, dict):
-        value = serialize_dict(elements=value)
-    elif isinstance(value, list):
-        value = serialize_list(elements=value)
-    elif isinstance(value, sv.Detections):
-        value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
-        value = serialize_timestamp(timestamp=value)
+    typ = type(value)
+    # Static mapping to avoid chained isinstance checks
+    if typ in _SERIALIZER_DISPATCH:
+        return _SERIALIZER_DISPATCH[typ](value)
+    # Fallback for superclass matches (necessary for sv.Detections)
+    if isinstance(value, sv.Detections):
+        return serialise_sv_detections(detections=value)
     return value
 
 
