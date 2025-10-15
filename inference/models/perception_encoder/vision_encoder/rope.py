@@ -51,13 +51,29 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
+    t_left = t[..., :start_index]
+    t_rot = t[..., start_index:end_index]
+    t_right = t[..., end_index:]
+
+    # Precompute these (no need to recompute sin/cos if scale==1)
+    cos = freqs.cos()
+    sin = freqs.sin()
+    if scale != 1.0:
+        cos = cos * scale
+        sin = sin * scale
+
+    rotated = rotate_half(t_rot)
+    t_rot = (t_rot * cos) + (rotated * sin)
+    if t_left.numel() == 0:
+        if t_right.numel() == 0:
+            out = t_rot
+        else:
+            out = torch.cat((t_rot, t_right), dim=-1)
+    else:
+        if t_right.numel() == 0:
+            out = torch.cat((t_left, t_rot), dim=-1)
+        else:
+            out = torch.cat((t_left, t_rot, t_right), dim=-1)
 
     return out.type(dtype)
 
