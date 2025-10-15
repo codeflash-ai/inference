@@ -571,14 +571,17 @@ def prepare_ocr_prompt(base64_image: str, **kwargs) -> List[dict]:
 def prepare_caption_prompt(
     base64_image: str, short_description: bool, **kwargs
 ) -> List[dict]:
-    caption_detail_level = "Caption should be short."
-    if not short_description:
-        caption_detail_level = "Caption should be extensive."
+    # Compose in-place with conditional to avoid extra assignment
     return [
         {
             "role": "system",
-            "content": f"You act as image caption model. Your task is to provide description of the image. "
-            f"{caption_detail_level}",
+            "content": (
+                "You act as image caption model. Your task is to provide description of the image. "
+                "Caption should be short."
+                if short_description
+                else "You act as image caption model. Your task is to provide description of the image. "
+                "Caption should be extensive."
+            ),
         },
         {
             "role": "user",
