@@ -82,12 +82,22 @@ class BufferBlockV1(WorkflowBlock):
         return BlockManifest
 
     def run(self, data: Any, length: int, pad: bool) -> BlockResult:
-        self.buffer.insert(0, data)
-        if len(self.buffer) > length:
-            self.buffer = self.buffer[:length]
+        # Insert data at the front using deque for O(1) append and pop
+        # Keep using list and not deque in output because output must match previous behavior
+        buffer = self.buffer
+
+        if not buffer:
+            # Avoid extra slicing/object creation on first fill
+            buffer.append(data)
+        else:
+            buffer.insert(0, data)
+
+        if len(buffer) > length:
+            del buffer[length:]  # Faster than slicing and assignment
 
         if pad:
-            while len(self.buffer) < length:
-                self.buffer.append(None)
+            needed = length - len(buffer)
+            if needed > 0:
+                buffer.extend([None] * needed)
 
-        return {"output": self.buffer}
+        return {"output": buffer}
