@@ -377,23 +377,24 @@ class Florence2BlockV1(WorkflowBlock):
         grounding_selection_mode: GroundingSelectionMode,
     ) -> BlockResult:
         requires_detection_grounding = task_type in TASKS_REQUIRING_DETECTION_GROUNDING
-
         is_not_florence_task = task_type == "custom"
-        task_type = TASK_TYPE_TO_FLORENCE_TASK[task_type]
+        florence_task_type = TASK_TYPE_TO_FLORENCE_TASK[task_type]
+
         inference_images = [
             i.to_inference_format(numpy_preferred=False) for i in images
         ]
-        prompts = [prompt] * len(images)
         if classes is not None:
             prompts = ["<and>".join(classes)] * len(images)
-        else:
-            classes = []
-        if grounding_detection is not None:
+        elif grounding_detection is not None:
             prompts = prepare_detection_grounding_prompts(
                 images=images,
                 grounding_detection=grounding_detection,
                 grounding_selection_mode=grounding_selection_mode,
             )
+        else:
+            prompts = [prompt] * len(images)
+            classes = []
+
         self._model_manager.add_model(
             model_id=model_version,
             api_key=self._api_key,
@@ -401,7 +402,6 @@ class Florence2BlockV1(WorkflowBlock):
         predictions = []
         for image, single_prompt in zip(inference_images, prompts):
             if single_prompt is None and requires_detection_grounding:
-                # no grounding bbox found - empty result returned
                 predictions.append(
                     {"raw_output": None, "parsed_output": None, "classes": None}
                 )
@@ -409,7 +409,7 @@ class Florence2BlockV1(WorkflowBlock):
             if is_not_florence_task:
                 prompt = single_prompt or ""
             else:
-                prompt = task_type + (single_prompt or "")
+                prompt = florence_task_type + (single_prompt or "")
 
             request = LMMInferenceRequest(
                 api_key=self._api_key,
@@ -426,8 +426,8 @@ class Florence2BlockV1(WorkflowBlock):
                     list(prediction.response.keys())[0]
                 ]
             else:
-                prediction_data = prediction.response[task_type]
-            if task_type in TASKS_TO_EXTRACT_LABELS_AS_CLASSES:
+                prediction_data = prediction.response[florence_task_type]
+            if florence_task_type in TASKS_TO_EXTRACT_LABELS_AS_CLASSES:
                 classes = prediction_data.get("labels", [])
             predictions.append(
                 {
@@ -539,12 +539,26 @@ def _extract_bbox_coordinates_as_location_prompt(
 
 
 def _coordinate_to_loc(value: float) -> int:
-    loc_bin = round(_scale_value(value=value, min_value=0.0, max_value=1.0) * LOC_BINS)
-    return _scale_value(  # to make sure 0-999 cutting out 1000 on 1.0
-        value=loc_bin,
-        min_value=0,
-        max_value=LOC_BINS - 1,
-    )
+    # Inlining and minimizing calls to improve performance
+    # Clamp value to [0.0, 1.0]
+    if value < 0.0:
+        value_clamped = 0.0
+    elif value > 1.0:
+        value_clamped = 1.0
+    else:
+        value_clamped = value
+
+    # Direct math instead of function call, then round
+    loc_bin_float = value_clamped * LOC_BINS
+    loc_bin = round(loc_bin_float)
+
+    # Clamp the result to [0, LOC_BINS - 1]
+    if loc_bin < 0:
+        return 0
+    elif loc_bin > LOC_BINS - 1:
+        return LOC_BINS - 1
+    else:
+        return loc_bin
 
 
 def _scale_value(
