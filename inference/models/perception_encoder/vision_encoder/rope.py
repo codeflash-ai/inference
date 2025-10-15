@@ -51,13 +51,25 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
+    # optimize split with memory efficient slicing (avoid triple temporary tensors if possible)
+    if start_index == 0 and end_index == t.shape[-1]:
+        t_rot = t
+        t_left = t_right = None
+    else:
+        t_left = t[..., :start_index] if start_index > 0 else None
+        t_rot = t[..., start_index:end_index]
+        t_right = t[..., end_index:] if end_index < t.shape[-1] else None
+
+    t_rot = (t_rot * freqs.cos() * scale) + (rotate_half(t_rot) * freqs.sin() * scale)
+
+    if t_left is None and t_right is None:
+        out = t_rot
+    elif t_left is None:
+        out = torch.cat((t_rot, t_right), dim=-1)
+    elif t_right is None:
+        out = torch.cat((t_left, t_rot), dim=-1)
+    else:
+        out = torch.cat((t_left, t_rot, t_right), dim=-1)
 
     return out.type(dtype)
 
@@ -97,9 +109,6 @@ class RotaryEmbedding(Module):
         cache_if_possible=True,
     ):
         super().__init__()
-        # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
-        # has some connection to NTK literature
-        # https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/
 
         theta *= theta_rescale_factor ** (dim / (dim - 2))
 
@@ -108,13 +117,13 @@ class RotaryEmbedding(Module):
         if exists(custom_freqs):
             freqs = custom_freqs
         elif freqs_for == "lang":
-            freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
-            )
+            arange = torch.arange(0, dim, 2)[: (dim // 2)]
+            freqs = 1.0 / (theta ** (arange.float() / dim))
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
         elif freqs_for == "constant":
-            freqs = torch.ones(num_freqs).float()
+            # torch.ones allocates contiguous, use float directly
+            freqs = torch.ones(num_freqs, dtype=torch.float32)
 
         self.cache_if_possible = cache_if_possible
 
@@ -122,25 +131,20 @@ class RotaryEmbedding(Module):
         self.tmp_store("cached_scales", None)
 
         self.freqs = nn.Parameter(freqs, requires_grad=learned_freq)
-
         self.learned_freq = learned_freq
 
         # dummy for device
-
         self.tmp_store("dummy", torch.tensor(0))
 
         # default sequence dimension
-
         self.seq_before_head_dim = seq_before_head_dim
         self.default_seq_dim = -3 if seq_before_head_dim else -2
 
         # interpolation factors
-
         assert interpolate_factor >= 1.0
         self.interpolate_factor = interpolate_factor
 
         # xpos
-
         self.use_xpos = use_xpos
         if not use_xpos:
             self.tmp_store("scale", None)
@@ -152,7 +156,6 @@ class RotaryEmbedding(Module):
         self.tmp_store("scale", scale)
 
         # add apply_rotary_emb as static method
-
         self.apply_rotary_emb = staticmethod(apply_rotary_emb)
 
     @property
@@ -163,6 +166,7 @@ class RotaryEmbedding(Module):
         self.register_buffer(key, value, persistent=False)
 
     def get_seq_pos(self, seq_len, device, dtype, offset=0):
+        # All compute in float32 from the start for precision, .arange with dtype
         return (
             torch.arange(seq_len, device=device, dtype=dtype) + offset
         ) / self.interpolate_factor
@@ -221,8 +225,10 @@ class RotaryEmbedding(Module):
         rotated_q = apply_rotary_emb(freqs, q, scale=scale, seq_dim=seq_dim)
         rotated_k = apply_rotary_emb(freqs, k, scale=scale**-1, seq_dim=seq_dim)
 
-        rotated_q = rotated_q.type(q.dtype)
-        rotated_k = rotated_k.type(k.dtype)
+        if rotated_q.dtype != q.dtype:
+            rotated_q = rotated_q.type(q.dtype)
+        if rotated_k.dtype != k.dtype:
+            rotated_k = rotated_k.type(k.dtype)
 
         return rotated_q, rotated_k
 
@@ -240,7 +246,7 @@ class RotaryEmbedding(Module):
 
         scale = 1.0
         if self.use_xpos:
-            power = (t - len(t) // 2) / self.scale_base
+            power = (t - t.shape[0] // 2) / self.scale_base
             scale = self.scale ** rearrange(power, "n -> n 1")
             scale = torch.cat((scale, scale), dim=-1)
 
@@ -284,17 +290,23 @@ class RotaryEmbedding(Module):
             and exists(self.cached_freqs)
             and (offset + seq_len) <= self.cached_freqs.shape[0]
         ):
-            return self.cached_freqs[offset : (offset + seq_len)].detach()
+            # .detach() is needed for safety, but not if already detached
+            cached = self.cached_freqs[offset : (offset + seq_len)]
+            if cached.requires_grad:
+                return cached.detach()
+            return cached
 
         freqs = self.freqs
 
-        freqs = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        # Avoid excess casting: directly use input dtype if matching freqs.dtype
+        t_cast = t if t.dtype == freqs.dtype else t.type(freqs.dtype)
+        freqs_e = einsum("..., f -> ... f", t_cast, freqs)
+        freqs_e = repeat(freqs_e, "... n -> ... (n r)", r=2)
 
         if should_cache:
-            self.tmp_store("cached_freqs", freqs.detach())
+            self.tmp_store("cached_freqs", freqs_e.detach())
 
-        return freqs
+        return freqs_e
 
 
 class Rope2D:
