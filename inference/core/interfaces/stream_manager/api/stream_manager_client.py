@@ -294,7 +294,8 @@ async def send_message(
 
 
 def _json_serializer(o: object) -> str:
-    if isinstance(o, Enum):
+    # Use type(o) for direct type comparison, which is faster than isinstance for single type check
+    if type(o) is Enum:
         return o.value
     raise ValueError(f"Could not serialise object: {o}")
 
