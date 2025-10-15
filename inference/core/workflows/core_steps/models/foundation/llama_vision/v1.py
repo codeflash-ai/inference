@@ -31,6 +31,11 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEFINITIONS = [
+    OutputDefinition(name="output", kind=[STRING_KIND, LANGUAGE_MODEL_OUTPUT_KIND]),
+    OutputDefinition(name="classes", kind=[LIST_OF_VALUES_KIND]),
+]
+
 MODEL_VERSION_MAPPING = {
     "11B (Free) - OpenRouter": "meta-llama/llama-3.2-11b-vision-instruct:free",
     "11B (Regular) - OpenRouter": "meta-llama/llama-3.2-11b-vision-instruct",
@@ -279,12 +284,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="output", kind=[STRING_KIND, LANGUAGE_MODEL_OUTPUT_KIND]
-            ),
-            OutputDefinition(name="classes", kind=[LIST_OF_VALUES_KIND]),
-        ]
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
