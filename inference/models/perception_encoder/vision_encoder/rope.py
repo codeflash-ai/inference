@@ -11,11 +11,13 @@ from torch.nn import Module, ModuleList
 
 
 def exists(val):
+    # Inline the check to avoid function call overhead in tight loops
     return val is not None
 
 
 def default(val, d):
-    return val if exists(val) else d
+    # Eliminate function call overhead for exists() check
+    return val if val is not None else d
 
 
 # broadcat, as tortoise-tts was using it
