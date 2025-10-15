@@ -130,14 +130,17 @@ def get_unique_kinds(
     outputs: Dict[str, Union[List[str], Dict[str, List[str]]]],
 ) -> Set[str]:
     all_kinds = set()
-    for input_element_kinds in inputs.values():
-        all_kinds.update(input_element_kinds)
+    # Use set.update(*values) for faster aggregation of input kinds
+    if inputs:
+        all_kinds.update(*inputs.values())
+    # Loop over outputs and aggregate efficiently
     for output_definition in outputs.values():
         if isinstance(output_definition, list):
             all_kinds.update(output_definition)
-        if isinstance(output_definition, dict):
-            for output_field_kinds in output_definition.values():
-                all_kinds.update(output_field_kinds)
+        elif isinstance(output_definition, dict):
+            values = output_definition.values()
+            if values:
+                all_kinds.update(*values)
     return all_kinds
 
 
