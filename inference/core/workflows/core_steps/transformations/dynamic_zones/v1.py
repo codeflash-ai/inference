@@ -116,35 +116,43 @@ def calculate_simplified_polygon(
     contours: List[np.ndarray], required_number_of_vertices: int, max_steps: int = 1000
 ) -> Tuple[np.ndarray, np.ndarray]:
     largest_contour = max(contours, key=len)
-
-    # https://docs.opencv.org/4.x/d3/dc0/group__imgproc__shape.html#ga014b28e56cb8854c0de4a211cb2be656
     convex_contour = cv.convexHull(
         points=largest_contour,
         returnPoints=True,
         clockwise=True,
     )
-    # https://docs.opencv.org/4.9.0/d3/dc0/group__imgproc__shape.html#ga8d26483c636be6b35c3ec6335798a47c
     perimeter = cv.arcLength(curve=convex_contour, closed=True)
     upper_epsilon = perimeter
-    lower_epsilon = 0.0000001
+    lower_epsilon = 1e-7
+    # Preallocate for first call outside loop
     epsilon = lower_epsilon + upper_epsilon / 2
-    # https://docs.opencv.org/4.9.0/d3/dc0/group__imgproc__shape.html#ga0012a5fdaea70b8a9970165d98722b4c
-    simplified_polygon = cv.approxPolyDP(
-        curve=convex_contour, epsilon=epsilon, closed=True
-    )
+
+    simplified_polygon = cv.approxPolyDP(convex_contour, epsilon, True)
+    prev_len = len(simplified_polygon)
+
+    # Instead of recomputing simplified_polygon unconditionally, early exit if attainable
     for _ in range(max_steps):
-        if len(simplified_polygon) == required_number_of_vertices:
+        curr_len = len(simplified_polygon)
+        if curr_len == required_number_of_vertices:
             break
-        if len(simplified_polygon) > required_number_of_vertices:
+        # Only assign lower/upper boundary if current result is different
+        if curr_len > required_number_of_vertices:
             lower_epsilon = epsilon
         else:
             upper_epsilon = epsilon
-        epsilon = lower_epsilon + (upper_epsilon - lower_epsilon) / 2
-        simplified_polygon = cv.approxPolyDP(
-            curve=convex_contour, epsilon=epsilon, closed=True
-        )
-    while len(simplified_polygon.shape) > 2:
+        next_epsilon = lower_epsilon + (upper_epsilon - lower_epsilon) / 2
+        # Exit if epsilon step size is negligible, avoiding futile extra iterations
+        if abs(next_epsilon - epsilon) < 1e-9:
+            break
+        epsilon = next_epsilon
+        simplified_polygon = cv.approxPolyDP(convex_contour, epsilon, True)
+
+    # The output from approxPolyDP is usually already (N,1,2); minimize shape checking
+    # Only flatten if necessary
+    sp_shape = simplified_polygon.shape
+    while len(sp_shape) > 2:
         simplified_polygon = np.concatenate(simplified_polygon)
+        sp_shape = simplified_polygon.shape
     return simplified_polygon, largest_contour
 
 
