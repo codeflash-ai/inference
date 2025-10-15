@@ -524,6 +524,7 @@ def prepare_multi_label_classification_prompt(
 
 
 def prepare_vqa_prompt(base64_image: str, prompt: str, **kwargs) -> List[dict]:
+    image_url = f"data:image/jpeg;base64,{base64_image}"
     return [
         {
             "role": "system",
@@ -538,7 +539,7 @@ def prepare_vqa_prompt(base64_image: str, prompt: str, **kwargs) -> List[dict]:
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
+                        "url": image_url,
                     },
                 },
             ],
