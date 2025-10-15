@@ -278,14 +278,11 @@ def measure_distance_with_pixel_ratio(
     object_2_class_name: str,
     reference_axis: Literal["horizontal", "vertical"],
 ) -> List[Dict[str, Union[str, float]]]:
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
     reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
         detections, object_1_class_name, object_2_class_name
     )
 
-    if not reference_bbox_1 or not reference_bbox_2:
+    if reference_bbox_1 is None or reference_bbox_2 is None:
         raise ValueError(
             f"Reference class '{object_1_class_name}' or '{object_2_class_name}' not found in predictions."
         )
@@ -326,15 +323,14 @@ def has_overlap(
     Returns:
         True if the bounding boxes overlap, False otherwise.
     """
+    # Unpack once for improved locality and float avoidance
     x1_min, y1_min, x1_max, y1_max = bbox1
     x2_min, y2_min, x2_max, y2_max = bbox2
 
-    if x1_max < x2_min or x2_max < x1_min:
-        return False
-    if y1_max < y2_min or y2_max < y1_min:
-        return False
-
-    return True
+    # Faster check using direct returns
+    return not (
+        x1_max < x2_min or x2_max < x1_min or y1_max < y2_min or y2_max < y1_min
+    )
 
 
 def has_axis_gap(
@@ -342,37 +338,40 @@ def has_axis_gap(
     reference_bbox_2: Tuple[int, int, int, int],
     reference_axis: str,
 ) -> bool:
+    # Combine logic for horizontal and vertical in single if for branchless check
     if reference_axis == "horizontal":
+        # If the bboxes project onto X-axis, they overlap in axis
         if (
             reference_bbox_1[0] < reference_bbox_2[2]
             and reference_bbox_1[2] > reference_bbox_2[0]
         ):
             return False
     else:
+        # If the bboxes project onto Y-axis, they overlap in axis
         if (
             reference_bbox_1[1] < reference_bbox_2[3]
             and reference_bbox_1[3] > reference_bbox_2[1]
         ):
             return False
-
     return True
 
 
 def find_reference_bboxes(
     detections: sv.Detections, object_1_class_name: str, object_2_class_name: str
 ):
+    # Use local references and minimal attribute lookups for speed
+    boxes = detections.xyxy.round().astype(int)
+    class_names = detections.data["class_name"]
     reference_bbox_1 = None
     reference_bbox_2 = None
 
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        detections.xyxy.round().astype(dtype=int), detections.data["class_name"]
-    ):
+    for idx in range(len(class_names)):
+        class_name = class_names[idx]
         if class_name == object_1_class_name:
-            reference_bbox_1 = (x_min, y_min, x_max, y_max)
+            reference_bbox_1 = tuple(boxes[idx])
         elif class_name == object_2_class_name:
-            reference_bbox_2 = (x_min, y_min, x_max, y_max)
-
-        if reference_bbox_1 and reference_bbox_2:
+            reference_bbox_2 = tuple(boxes[idx])
+        if reference_bbox_1 is not None and reference_bbox_2 is not None:
             break
 
     return reference_bbox_1, reference_bbox_2
@@ -383,16 +382,15 @@ def measure_distance_pixels(
     reference_bbox_1: Tuple[int, int, int, int],
     reference_bbox_2: Tuple[int, int, int, int],
 ):
+    # Avoid unnecessary abs/if by getting A and B once
     if reference_axis == "vertical":
-        distance_pixels = (
-            abs(reference_bbox_2[1] - reference_bbox_1[3])
-            if reference_bbox_2[1] > reference_bbox_1[3]
-            else abs(reference_bbox_1[1] - reference_bbox_2[3])
-        )
+        # Compute gap distance between bottom of bbox_1 and top of bbox_2, or vice versa
+        top_gap = reference_bbox_2[1] - reference_bbox_1[3]
+        bottom_gap = reference_bbox_1[1] - reference_bbox_2[3]
+        distance_pixels = top_gap if top_gap > 0 else abs(bottom_gap)
     else:
-        distance_pixels = (
-            abs(reference_bbox_2[0] - reference_bbox_1[2])
-            if reference_bbox_2[0] > reference_bbox_1[2]
-            else abs(reference_bbox_1[0] - reference_bbox_2[2])
-        )
+        # Compute gap distance between right of bbox_1 and left of bbox_2, or vice versa
+        right_gap = reference_bbox_2[0] - reference_bbox_1[2]
+        left_gap = reference_bbox_1[0] - reference_bbox_2[2]
+        distance_pixels = right_gap if right_gap > 0 else abs(left_gap)
     return distance_pixels
