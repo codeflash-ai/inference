@@ -54,8 +54,8 @@ def prepare_video_sources(
 
 
 def wrap_in_list(element: Union[T, List[T]]) -> List[T]:
-    if not issubclass(type(element), list):
-        element = [element]
+    if not isinstance(element, list):
+        return [element]
     return element
 
 
