@@ -521,13 +521,26 @@ def _extract_bbox_coordinates_as_location_prompt(
             "grounded Florence 2 prediction."
         )
     left_top_x, left_top_y, right_bottom_x, right_bottom_y = coordinates
-    if all(isinstance(c, float) for c in coordinates):
+
+    # Optimized type checking
+    all_float = True
+    all_int = True
+    for c in coordinates:
+        if type(c) is float:
+            all_int = False
+        elif type(c) is int:
+            all_float = False
+        else:
+            all_float = False
+            all_int = False
+
+    if all_float:
         left_top_x = _coordinate_to_loc(value=left_top_x)
         left_top_y = _coordinate_to_loc(value=left_top_y)
         right_bottom_x = _coordinate_to_loc(value=right_bottom_x)
         right_bottom_y = _coordinate_to_loc(value=right_bottom_y)
         return f"<loc_{left_top_x}><loc_{left_top_y}><loc_{right_bottom_x}><loc_{right_bottom_y}>"
-    if all(isinstance(c, int) for c in coordinates):
+    if all_int:
         left_top_x = _coordinate_to_loc(value=left_top_x / width)
         left_top_y = _coordinate_to_loc(value=left_top_y / height)
         right_bottom_x = _coordinate_to_loc(value=right_bottom_x / width)
@@ -539,12 +552,20 @@ def _extract_bbox_coordinates_as_location_prompt(
 
 
 def _coordinate_to_loc(value: float) -> int:
-    loc_bin = round(_scale_value(value=value, min_value=0.0, max_value=1.0) * LOC_BINS)
-    return _scale_value(  # to make sure 0-999 cutting out 1000 on 1.0
-        value=loc_bin,
-        min_value=0,
-        max_value=LOC_BINS - 1,
-    )
+    # Inlining and minimizing calls to improve performance
+    # Clamp value to [0.0, 1.0]
+    value_clamped = 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+
+    # Direct math instead of function call, then round
+    loc_bin = round(value_clamped * LOC_BINS)
+
+    # Clamp the result to [0, LOC_BINS - 1]
+    if loc_bin < 0:
+        return 0
+    elif loc_bin > LOC_BINS - 1:
+        return LOC_BINS - 1
+    else:
+        return loc_bin
 
 
 def _scale_value(
