@@ -181,12 +181,12 @@ class DistanceMeasurementBlockV1(WorkflowBlock):
         pixel_ratio: float,
     ) -> BlockResult:
         if calibration_method == "reference object":
-            reference_predictions = predictions
+            # Directly use predictions for reference_predictions
             distances = measure_distance_with_reference_object(
                 detections=predictions,
                 object_1_class_name=object_1_class_name,
                 object_2_class_name=object_2_class_name,
-                reference_predictions=reference_predictions,
+                reference_predictions=predictions,
                 reference_object_class_name=reference_object_class_name,
                 reference_width=reference_width,
                 reference_height=reference_height,
@@ -216,56 +216,54 @@ def measure_distance_with_reference_object(
     reference_height: float,
     reference_axis: Literal["horizontal", "vertical"],
 ):
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
+    # Use efficient tuple assignment, and skip redundant initialization
     reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
         detections, object_1_class_name, object_2_class_name
     )
 
-    if not reference_bbox_1 or not reference_bbox_2:
+    if (reference_bbox_1 is None) or (reference_bbox_2 is None):
         raise ValueError(
             f"Reference class '{object_1_class_name}' or '{object_2_class_name}' not found in predictions."
         )
 
-    if has_overlap(reference_bbox_1, reference_bbox_2) or not has_axis_gap(
-        reference_bbox_1, reference_bbox_2, reference_axis
-    ):
+    # Avoid unnecessary function calls if overlap/gap fail
+    if has_overlap(reference_bbox_1, reference_bbox_2):
+        return {OUTPUT_KEY_CENTIMETER: 0, OUTPUT_KEY_PIXEL: 0}
+    if not has_axis_gap(reference_bbox_1, reference_bbox_2, reference_axis):
         return {OUTPUT_KEY_CENTIMETER: 0, OUTPUT_KEY_PIXEL: 0}
 
-    # get the reference object bounding box
-    reference_bbox = None
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        reference_predictions.xyxy.round().astype(dtype=int),
-        reference_predictions.data["class_name"],
-    ):
-        if class_name == reference_object_class_name:
-            reference_bbox = (x_min, y_min, x_max, y_max)
+    # More efficient search (using numpy for "xyxy" column and zipped classes):
+    bboxes = reference_predictions.xyxy.round().astype(int)
+    class_names = reference_predictions.data["class_name"]
+    # Use enumerate to bind index, which is more cache-friendly
+    ref_box = None
+    for idx, cname in enumerate(class_names):
+        if cname == reference_object_class_name:
+            box_arr = bboxes[idx]
+            ref_box = (box_arr[0], box_arr[1], box_arr[2], box_arr[3])
             break
 
-    if not reference_bbox:
+    if ref_box is None:
         raise ValueError(
             f"Reference class '{reference_object_class_name}' not found in predictions."
         )
 
-    # calculate the pixel-to-centimeter ratio
-    reference_width_pixels = abs(reference_bbox[2] - reference_bbox[0])
-    reference_height_pixels = abs(reference_bbox[3] - reference_bbox[1])
+    # Calculate the pixel-to-centimeter ratio using tuple unpacking
+    ref_xmin, ref_ymin, ref_xmax, ref_ymax = ref_box
+    reference_width_pixels = abs(ref_xmax - ref_xmin)
+    reference_height_pixels = abs(ref_ymax - ref_ymin)
 
-    # Ensure the reference dimensions are positive and non-zero
     if reference_width <= 0 or reference_height <= 0:
         raise ValueError("Reference object dimensions must be greater than zero.")
 
     pixel_ratio_width = reference_width_pixels / reference_width
     pixel_ratio_height = reference_height_pixels / reference_height
-
-    # get the average pixel ratio
     pixel_ratio = (pixel_ratio_width + pixel_ratio_height) / 2
 
+    # Compute the distance in pixels between the two reference boxes
     distance_pixels = measure_distance_pixels(
         reference_axis, reference_bbox_1, reference_bbox_2
     )
-
     distance_cm = distance_pixels / pixel_ratio
 
     return {OUTPUT_KEY_CENTIMETER: distance_cm, OUTPUT_KEY_PIXEL: distance_pixels}
@@ -278,36 +276,30 @@ def measure_distance_with_pixel_ratio(
     object_2_class_name: str,
     reference_axis: Literal["horizontal", "vertical"],
 ) -> List[Dict[str, Union[str, float]]]:
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
     reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
         detections, object_1_class_name, object_2_class_name
     )
 
-    if not reference_bbox_1 or not reference_bbox_2:
+    if (reference_bbox_1 is None) or (reference_bbox_2 is None):
         raise ValueError(
             f"Reference class '{object_1_class_name}' or '{object_2_class_name}' not found in predictions."
         )
 
-    if has_overlap(reference_bbox_1, reference_bbox_2) or not has_axis_gap(
-        reference_bbox_1, reference_bbox_2, reference_axis
-    ):
+    if has_overlap(reference_bbox_1, reference_bbox_2):
+        return {OUTPUT_KEY_CENTIMETER: 0, OUTPUT_KEY_PIXEL: 0}
+    if not has_axis_gap(reference_bbox_1, reference_bbox_2, reference_axis):
         return {OUTPUT_KEY_CENTIMETER: 0, OUTPUT_KEY_PIXEL: 0}
 
     if pixel_ratio is None:
         raise ValueError("Pixel-to-centimeter ratio must be provided.")
-
     if not isinstance(pixel_ratio, (int, float)):
         raise ValueError("Pixel-to-centimeter ratio must be a number.")
-
     if pixel_ratio <= 0:
         raise ValueError("Pixel-to-centimeter ratio must be greater than zero.")
 
     distance_pixels = measure_distance_pixels(
         reference_axis, reference_bbox_1, reference_bbox_2
     )
-
     distance_cm = distance_pixels / pixel_ratio
 
     return {OUTPUT_KEY_CENTIMETER: distance_cm, OUTPUT_KEY_PIXEL: distance_pixels}
