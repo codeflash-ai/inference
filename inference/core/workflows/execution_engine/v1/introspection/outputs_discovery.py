@@ -107,16 +107,25 @@ def determine_workflow_outputs_kinds(
     for output in outputs_definitions:
         output_name = output["name"]
         selector = output["selector"]
-        step_name, selected_property = extract_step_name_and_selected_property(
-            selector=selector,
-        )
-        if step_name not in step_name_to_block_type:
+        # Avoid unnecessary helper calls, unpack directly
+        if not is_step_output_selector(selector_or_value=selector):
+            raise WorkflowDefinitionError(
+                public_message="Workflow definition invalid - output does not contain step selector.",
+                context="describing_workflow_outputs",
+            )
+
+        selector_split = selector.split(".")
+        # Only three-part selectors are valid since is_step_output_selector would return False otherwise
+        step_name = selector_split[1]
+        selected_property = selector_split[2]
+
+        block_type = step_name_to_block_type.get(step_name)
+        if block_type is None:
             raise WorkflowDefinitionError(
                 public_message=f"Could not find step referred in outputs (`{step_name}`) within Workflow steps.",
                 context="describing_workflow_outputs",
             )
-        step_type = step_name_to_block_type[step_name]
-        output_properties = block_output_map[step_type]
+        output_properties = block_output_map[block_type]
         if selected_property == "*":
             property_kind = output_properties
         else:
