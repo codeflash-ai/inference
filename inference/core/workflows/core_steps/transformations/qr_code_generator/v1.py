@@ -346,19 +346,24 @@ def _get_error_levels():
         import qrcode
 
         C = qrcode.constants
+        L = C.ERROR_CORRECT_L
+        M = C.ERROR_CORRECT_M
+        Q = C.ERROR_CORRECT_Q
+        H = C.ERROR_CORRECT_H
+
         return {
-            "LOW (~7% WORD RECOVERY / HIGHEST DATA CAPACITY)": C.ERROR_CORRECT_L,
-            "MEDIUM (~15% WORD RECOVERY)": C.ERROR_CORRECT_M,
-            "QUARTILE (~25% WORD RECOVERY)": C.ERROR_CORRECT_Q,
-            "HIGH (~30% WORD RECOVERY / LOWEST DATA CAPACITY)": C.ERROR_CORRECT_H,
-            "ERROR_CORRECT_L": C.ERROR_CORRECT_L,
-            "ERROR_CORRECT_M": C.ERROR_CORRECT_M,
-            "ERROR_CORRECT_Q": C.ERROR_CORRECT_Q,
-            "ERROR_CORRECT_H": C.ERROR_CORRECT_H,
-            "L": C.ERROR_CORRECT_L,
-            "M": C.ERROR_CORRECT_M,
-            "Q": C.ERROR_CORRECT_Q,
-            "H": C.ERROR_CORRECT_H,
+            "LOW (~7% WORD RECOVERY / HIGHEST DATA CAPACITY)": L,
+            "MEDIUM (~15% WORD RECOVERY)": M,
+            "QUARTILE (~25% WORD RECOVERY)": Q,
+            "HIGH (~30% WORD RECOVERY / LOWEST DATA CAPACITY)": H,
+            "ERROR_CORRECT_L": L,
+            "ERROR_CORRECT_M": M,
+            "ERROR_CORRECT_Q": Q,
+            "ERROR_CORRECT_H": H,
+            "L": L,
+            "M": M,
+            "Q": Q,
+            "H": H,
         }
     except ImportError:
         raise ImportError(
