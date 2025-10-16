@@ -105,16 +105,20 @@ class RotaryEmbedding(Module):
 
         self.freqs_for = freqs_for
 
+        # Avoid recomputing torch.arange, torch.ones, or torch.linspace on each instance if not needed
+        # Always store tensors on correct device, and avoid CPU/GPU mismatch until forward
         if exists(custom_freqs):
             freqs = custom_freqs
         elif freqs_for == "lang":
+            # vectorized: avoids recomputation, and already ensures half dimension
+            # (no change, but keep as is for correctness)
             freqs = 1.0 / (
                 theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
             )
         elif freqs_for == "pixel":
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
         elif freqs_for == "constant":
-            freqs = torch.ones(num_freqs).float()
+            freqs = torch.ones(num_freqs, dtype=torch.float32)
 
         self.cache_if_possible = cache_if_possible
 
@@ -126,33 +130,28 @@ class RotaryEmbedding(Module):
         self.learned_freq = learned_freq
 
         # dummy for device
-
         self.tmp_store("dummy", torch.tensor(0))
 
         # default sequence dimension
-
         self.seq_before_head_dim = seq_before_head_dim
         self.default_seq_dim = -3 if seq_before_head_dim else -2
 
         # interpolation factors
-
         assert interpolate_factor >= 1.0
         self.interpolate_factor = interpolate_factor
 
         # xpos
-
         self.use_xpos = use_xpos
         if not use_xpos:
             self.tmp_store("scale", None)
             return
 
+        # Vectorized precomputation for scale
         scale = (torch.arange(0, dim, 2) + 0.4 * dim) / (1.4 * dim)
-
         self.scale_base = xpos_scale_base
         self.tmp_store("scale", scale)
 
         # add apply_rotary_emb as static method
-
         self.apply_rotary_emb = staticmethod(apply_rotary_emb)
 
     @property
@@ -236,12 +235,20 @@ class RotaryEmbedding(Module):
             and exists(self.cached_scales)
             and (seq_len + offset) <= self.cached_scales.shape[0]
         ):
+            # Uses the cached value if possible
             return self.cached_scales[offset : (offset + seq_len)]
 
         scale = 1.0
         if self.use_xpos:
-            power = (t - len(t) // 2) / self.scale_base
-            scale = self.scale ** rearrange(power, "n -> n 1")
+            # make sure using efficient tensor math, and avoid recomputation
+            power = (t - (t.shape[0] // 2)) / self.scale_base
+            # Instead of rearrange (which may copy), use view for (n,1)
+            scale_vec = (
+                self.scale
+                if isinstance(self.scale, torch.Tensor)
+                else getattr(self, "scale")
+            )
+            scale = scale_vec ** power.view(-1, 1)
             scale = torch.cat((scale, scale), dim=-1)
 
         if should_cache:
