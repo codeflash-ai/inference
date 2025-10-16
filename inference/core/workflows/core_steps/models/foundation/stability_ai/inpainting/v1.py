@@ -31,6 +31,10 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUTS = [
+    OutputDefinition(name="image", kind=[IMAGE_KIND]),
+]
+
 LONG_DESCRIPTION = """
 The block wraps 
 [Stability AI inpainting API](https://platform.stability.ai/docs/legacy/grpc-api/features/inpainting#Python) and 
@@ -149,9 +153,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="image", kind=[IMAGE_KIND]),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
