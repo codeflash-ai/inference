@@ -5,10 +5,12 @@ def str_to_color(color: str) -> sv.Color:
     if color.startswith("#"):
         return sv.Color.from_hex(color)
     elif color.startswith("rgb"):
-        r, g, b = map(int, color[4:-1].split(","))
+        value_str = color[4:-1]
+        r, g, b = map(int, value_str.split(","))
         return sv.Color.from_rgb_tuple((r, g, b))
     elif color.startswith("bgr"):
-        b, g, r = map(int, color[4:-1].split(","))
+        value_str = color[4:-1]
+        b, g, r = map(int, value_str.split(","))
         return sv.Color.from_bgr_tuple((b, g, r))
     elif hasattr(sv.Color, color.upper()):
         return getattr(sv.Color, color.upper())
