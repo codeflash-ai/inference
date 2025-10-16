@@ -1239,6 +1239,7 @@ def verify_input_data_dimensionality(
     inputs_dimensionalities: Dict[str, Set[int]],
     dimensionality_offstes: Dict[str, int],
 ) -> None:
+    # Use local var for repeated lookup
     parameter_name2dimensionality_specification = (
         grab_input_data_dimensionality_specifications(
             step_name=step_name,
@@ -1249,12 +1250,16 @@ def verify_input_data_dimensionality(
     if not parameter_name2dimensionality_specification:
         # nothing to check if no batch-oriented inputs
         return None
-    different_dimensionalities_of_parameters = {
-        specification.actual_dimensionality
-        for specification in parameter_name2dimensionality_specification.values()
-    }
+
+    # Use generator expression and set constructor for efficiency
+    different_dimensionalities_of_parameters = set(
+        spec.actual_dimensionality
+        for spec in parameter_name2dimensionality_specification.values()
+    )
+
     if dimensionality_reference_property is None:
         if len(different_dimensionalities_of_parameters) > 1:
+            # dict comprehension directly
             parameter2dimensionality = {
                 k: e.actual_dimensionality
                 for k, e in parameter_name2dimensionality_specification.items()
@@ -1273,20 +1278,27 @@ def verify_input_data_dimensionality(
                 ],
             )
         return None
+
     reference_specification = parameter_name2dimensionality_specification[
         dimensionality_reference_property
     ]
-    expected_dimensionalities = {
-        property_name: (e.expected_offset - reference_specification.expected_offset)
-        + reference_specification.actual_dimensionality
-        for property_name, e in parameter_name2dimensionality_specification.items()
-    }
+
+    # Minimize repeated dict lookups, do all computations in one pass
+    expected_dimensionalities = {}
+    ref_expected_offset = reference_specification.expected_offset
+    ref_actual_dimensionality = reference_specification.actual_dimensionality
+    for property_name, e in parameter_name2dimensionality_specification.items():
+        expected_dimensionalities[property_name] = (
+            e.expected_offset - ref_expected_offset
+        ) + ref_actual_dimensionality
+
     if any(dim <= 0 for dim in expected_dimensionalities.values()):
         raise StepInputDimensionalityError(
             public_message=f"Given the definition of block defining step {step_name} and data provided, "
             f"the block would expect batch input dimensionality to be 0 or below, which is invalid.",
             context="workflow_compilation | execution_graph_construction | denoting_step_inputs_dimensionality",
         )
+
     for property_name, expected_dimensionality in expected_dimensionalities.items():
         actual_dimensionality = parameter_name2dimensionality_specification[
             property_name
@@ -1315,26 +1327,40 @@ def grab_input_data_dimensionality_specifications(
     dimensionality_offstes: Dict[str, int],
 ) -> Dict[str, InputDimensionalitySpecification]:
     result = {}
+    # Use local var for lookups
+    get_offset = dimensionality_offstes.get
+    # Use loop to minimize set construction and iteration
     for parameter_name, dimensionality in inputs_dimensionalities.items():
-        parameter_offset = dimensionality_offstes.get(parameter_name, 0)
-        non_zero_dimensionalities_for_parameter = {d for d in dimensionality if d > 0}
-        if len(non_zero_dimensionalities_for_parameter) > 1:
-            raise AssumptionError(
-                public_message=f"Workflow Compiler for step: `{step_name}` and parameter: {parameter_name}"
-                f"found multiple different values of actual input dimensionalities: "
-                f"`{non_zero_dimensionalities_for_parameter}` which should be detected and addresses "
-                f"at earlier stages of compilation."
-                f"This is most likely the bug. Contact Roboflow team through github issues "
-                f"(https://github.com/roboflow/inference/issues) providing full "
-                f"context of the problem - including workflow definition you use.",
-                context="workflow_compilation | execution_graph_construction | collecting_step_inputs",
-            )
-        if non_zero_dimensionalities_for_parameter:
-            actual_dimensionality = next(iter(non_zero_dimensionalities_for_parameter))
-            result[parameter_name] = InputDimensionalitySpecification(
-                actual_dimensionality=actual_dimensionality,
-                expected_offset=parameter_offset,
-            )
+        parameter_offset = get_offset(parameter_name, 0)
+        # Compute set only once if needed
+        non_zero_dimensionalities = None
+        if len(dimensionality) == 1:
+            only = next(iter(dimensionality))
+            if only > 0:
+                result[parameter_name] = InputDimensionalitySpecification(
+                    actual_dimensionality=only,
+                    expected_offset=parameter_offset,
+                )
+        elif dimensionality:
+            # build set inline, avoid full comprehension unless necessary
+            non_zero_dimensionalities = {d for d in dimensionality if d > 0}
+            if len(non_zero_dimensionalities) > 1:
+                raise AssumptionError(
+                    public_message=f"Workflow Compiler for step: `{step_name}` and parameter: {parameter_name}"
+                    f"found multiple different values of actual input dimensionalities: "
+                    f"`{non_zero_dimensionalities}` which should be detected and addresses "
+                    f"at earlier stages of compilation."
+                    f"This is most likely the bug. Contact Roboflow team through github issues "
+                    f"(https://github.com/roboflow/inference/issues) providing full "
+                    f"context of the problem - including workflow definition you use.",
+                    context="workflow_compilation | execution_graph_construction | collecting_step_inputs",
+                )
+            elif non_zero_dimensionalities:
+                actual_dimensionality = next(iter(non_zero_dimensionalities))
+                result[parameter_name] = InputDimensionalitySpecification(
+                    actual_dimensionality=actual_dimensionality,
+                    expected_offset=parameter_offset,
+                )
     return result
 
 
