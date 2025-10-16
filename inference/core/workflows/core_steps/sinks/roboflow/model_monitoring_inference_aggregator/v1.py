@@ -1,6 +1,5 @@
 import hashlib
 import logging
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
@@ -191,24 +190,25 @@ class PredictionsAggregator(object):
 
     def get_and_flush(self) -> List[ParsedPrediction]:
         predictions = self._consolidate()
-        self._raw_predictions = {}
+        self._raw_predictions = {}  # reset after consolidation
         return predictions
 
     def _consolidate(self) -> List[ParsedPrediction]:
-        formatted_predictions = []
+        # Fast path: accumulate all class_name->prediction mapping, only tracking max-confidence
+        class_groups: Dict[str, ParsedPrediction] = {}
         for model_id, predictions in self._raw_predictions.items():
-            formatted_predictions.extend(
-                format_predictions_for_model_monitoring(predictions, model_id)
+            formatted_predictions = format_predictions_for_model_monitoring(
+                predictions, model_id
             )
-        class_groups: Dict[str, List[ParsedPrediction]] = defaultdict(list)
-        for prediction in formatted_predictions:
-            class_name = prediction.class_name
-            class_groups[class_name].append(prediction)
-        representative_predictions = []
-        for class_name, predictions in class_groups.items():
-            predictions.sort(key=lambda x: x.confidence, reverse=True)
-            representative_predictions.append(predictions[0])
-        return representative_predictions
+            for prediction in formatted_predictions:
+                class_name = prediction.class_name
+                if (
+                    class_name not in class_groups
+                    or prediction.confidence > class_groups[class_name].confidence
+                ):
+                    class_groups[class_name] = prediction
+        # Just return the representative (max-confidence) predictions for each class
+        return list(class_groups.values())
 
 
 class ModelMonitoringInferenceAggregatorBlockV1(WorkflowBlock):
