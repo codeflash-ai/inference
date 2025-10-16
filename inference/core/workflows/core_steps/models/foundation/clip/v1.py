@@ -122,27 +122,27 @@ class ClipModelBlockV1(WorkflowBlock):
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        mode = self._step_execution_mode
+        if mode is StepExecutionMode.LOCAL:
             return self.run_locally(data=data, version=version)
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        elif mode is StepExecutionMode.REMOTE:
             return self.run_remotely(data=data, version=version)
         else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+            raise ValueError(f"Unknown step execution mode: {mode}")
 
     def run_locally(
         self,
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
+        # Optimize flow for str: cache & inference packed
         if isinstance(data, str):
             hash_key = hashlib.md5((version + data).encode("utf-8")).hexdigest()
-
             cached_value = text_cache.get(hash_key)
             if cached_value is not None:
                 return {"embedding": cached_value}
 
+            # Single inference request
             inference_request = ClipTextEmbeddingRequest(
                 clip_version_id=version,
                 text=[data],
@@ -156,14 +156,15 @@ class ClipModelBlockV1(WorkflowBlock):
             predictions = self._model_manager.infer_from_request_sync(
                 clip_model_id, inference_request
             )
-
-            text_cache.set(hash_key, predictions.embeddings[0])
-
-            return {"embedding": predictions.embeddings[0]}
+            embedding = predictions.embeddings[0]
+            text_cache.set(hash_key, embedding)
+            return {"embedding": embedding}
         else:
+            # For WorkflowImageData, use inference format only once
+            img_inf = data.to_inference_format(numpy_preferred=True)
             inference_request = ClipImageEmbeddingRequest(
                 clip_version_id=version,
-                image=[data.to_inference_format(numpy_preferred=True)],
+                image=[img_inf],
                 api_key=self._api_key,
             )
             clip_model_id = load_core_model(
@@ -181,24 +182,24 @@ class ClipModelBlockV1(WorkflowBlock):
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
-        api_url = (
-            LOCAL_INFERENCE_API_URL
-            if WORKFLOWS_REMOTE_API_TARGET != "hosted"
-            else HOSTED_CORE_MODEL_URL
-        )
+        # Compute api_url, client, and api-version only once
+        host_is_hosted = WORKFLOWS_REMOTE_API_TARGET == "hosted"
+        api_url = HOSTED_CORE_MODEL_URL if host_is_hosted else LOCAL_INFERENCE_API_URL
         client = InferenceHTTPClient(
             api_url=api_url,
             api_key=self._api_key,
         )
-        if WORKFLOWS_REMOTE_API_TARGET == "hosted":
+        if host_is_hosted:
             client.select_api_v0()
 
+        # Minimize conditional logic nesting, call embedding endpoints directly
         if isinstance(data, str):
             result = client.get_clip_text_embeddings(
                 text=data,
                 clip_version=version,
             )
         else:
+            # base64_image is directly passed to the SDK API, do not compute image dict here
             result = client.get_clip_image_embeddings(
                 inference_input=data.base64_image,
                 clip_version=version,
