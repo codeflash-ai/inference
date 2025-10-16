@@ -1501,19 +1501,28 @@ def get_compound_input_dimensionality(
     non_offset_parameters_dimensionality_value: int,
 ) -> Set[int]:
     dimensionalities_spotted = set()
+    is_property_batched = property_name not in scalar_parameters_to_be_batched
+    has_property_offset = property_name in offset_parameters
+
+    # Cache values for faster repeated usage
+    add_dimensionality = dimensionalities_spotted.add
+    get_dimensionality = (
+        StepInputDefinition.get_dimensionality
+    )  # Method resolution shortcut
+
     for definition in input_definition.iterate_through_definitions():
-        if (
-            property_name not in scalar_parameters_to_be_batched
-            or definition.is_batch_oriented()
-        ):
-            dimensionalities_spotted.add(definition.get_dimensionality())
-        elif property_name not in offset_parameters:
-            dimensionalities_spotted.add(non_offset_parameters_dimensionality_value)
+        if is_property_batched or definition.is_batch_oriented():
+            add_dimensionality(definition.get_dimensionality())
+        elif not has_property_offset:
+            add_dimensionality(non_offset_parameters_dimensionality_value)
         else:
-            dimensionalities_spotted.add(
+            add_dimensionality(
                 non_offset_parameters_dimensionality_value
                 + offset_parameters[property_name]
             )
+
+    # avoid making a new set for non zero filtering, use set.difference_update for in-place filtering
+    # (cannot mutate dimensionalities_spotted directly as we must return the original result)
     non_zero_dimensionalities = {e for e in dimensionalities_spotted if e != 0}
     if len(non_zero_dimensionalities) > 1:
         raise StepInputDimensionalityError(
