@@ -16,7 +16,6 @@ from inference.core.workflows.errors import (
     InvalidReferenceTargetError,
     StepInputDimensionalityError,
     StepInputLineageError,
-    StepOutputLineageError,
     WorkflowBlockError,
 )
 from inference.core.workflows.execution_engine.constants import (
@@ -1614,19 +1613,25 @@ def get_input_data_lineage_excluding_auto_batch_casting(
 ) -> List[List[str]]:
     lineage_deduplication_set = set()
     lineages = []
+    extend = lineages.extend
+    get_lineage_for_input_property_func = (
+        get_lineage_for_input_property  # Local var for faster access
+    )
     for property_name, input_definition in input_data.items():
-        new_lineages_detected_within_property_data = get_lineage_for_input_property(
-            step_name=step_name,
-            property_name=property_name,
-            input_definition=input_definition,
-            lineage_deduplication_set=lineage_deduplication_set,
+        new_lineages_detected_within_property_data = (
+            get_lineage_for_input_property_func(
+                step_name=step_name,
+                property_name=property_name,
+                input_definition=input_definition,
+                lineage_deduplication_set=lineage_deduplication_set,
+            )
         )
         if (
             property_name in scalar_parameters_to_be_batched
-            and len(new_lineages_detected_within_property_data) == 0
+            and not new_lineages_detected_within_property_data
         ):
             continue
-        lineages.extend(new_lineages_detected_within_property_data)
+        extend(new_lineages_detected_within_property_data)
     if not lineages:
         return lineages
     verify_lineages(step_name=step_name, detected_lineages=lineages)
@@ -1715,36 +1720,46 @@ def get_lineage_from_compound_input(
 
 
 def verify_lineages(step_name: str, detected_lineages: List[List[str]]) -> None:
+    # Fast-path: If <=1 lineage, skip checks
+    if len(detected_lineages) <= 1:
+        return
+
     lineages_by_length = defaultdict(list)
     for lineage in detected_lineages:
         lineages_by_length[len(lineage)].append(lineage)
-    if len(lineages_by_length) > 2:
+
+    num_lengths = len(lineages_by_length)
+    if num_lengths > 2:
         raise StepInputLineageError(
             public_message=f"Input data provided for step: `{step_name}` comes with lineages at more than two "
             f"dimensionality levels, which should not be possible.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
     lineage_lengths = sorted(lineages_by_length.keys())
-    for lineage_length in lineage_lengths:
-        if len(lineages_by_length[lineage_length]) > 1:
+    # Only work per-length, in order, and operate in place
+    for grouped_lineages in lineages_by_length.values():
+        if len(grouped_lineages) > 1:
             raise StepInputLineageError(
                 public_message=f"Among step `{step_name}` inputs found different lineages at the same  "
                 f"dimensionality levels dimensionality.",
                 context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
             )
-    if len(lineages_by_length[lineage_lengths[-1]]) > 1 and len(lineage_lengths) < 2:
-        raise StepInputLineageError(
-            public_message=f"If lineage differ at the last level, then Execution Engine requires at least one "
-            f"higher-dimension  input that will come with common lineage, but this is not the "
-            f"case for step {step_name}.",
-            context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
-        )
-    if len(lineage_lengths) == 2:
+    if len(lineage_lengths) == 1:
+        if len(lineages_by_length[lineage_lengths[0]]) > 1:
+            # This would have been caught above, but retain logic
+            raise StepInputLineageError(
+                public_message=f"If lineage differ at the last level, then Execution Engine requires at least one "
+                f"higher-dimension  input that will come with common lineage, but this is not the "
+                f"case for step {step_name}.",
+                context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
+            )
+    elif len(lineage_lengths) == 2:
         reference_lineage = lineages_by_length[lineage_lengths[0]][0]
-        if reference_lineage != lineages_by_length[lineage_lengths[1]][0][:-1]:
+        candidate = lineages_by_length[lineage_lengths[1]][0]
+        if reference_lineage != candidate[:-1]:
             raise StepInputLineageError(
                 public_message=f"Step `{step_name}` inputs does not share common lineage. Differing element: "
-                f"{lineages_by_length[lineage_lengths[1]][0]}, "
+                f"{candidate}, "
                 f"reference lineage prefix: {reference_lineage}",
                 context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
             )
