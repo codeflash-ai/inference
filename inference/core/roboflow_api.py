@@ -884,10 +884,9 @@ def _get_from_url(
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
     if len(params) == 0:
         return url
-    params_chunks = [
+    parameters_string = "&".join(
         f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
-    parameters_string = "&".join(params_chunks)
+    )
     return f"{url}?{parameters_string}"
 
 
@@ -917,12 +916,12 @@ def build_roboflow_api_headers(
         return explicit_headers
     try:
         extra_headers: dict = json.loads(ROBOFLOW_API_EXTRA_HEADERS)
-        if explicit_headers:
-            extra_headers.update(explicit_headers)
-        return extra_headers
     except ValueError:
         logger.warning("Could not decode ROBOFLOW_API_EXTRA_HEADERS")
         return explicit_headers
+    if explicit_headers:
+        extra_headers.update(explicit_headers)
+    return extra_headers
 
 
 @wrap_roboflow_api_errors()
