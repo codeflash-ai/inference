@@ -1152,14 +1152,11 @@ def verify_step_input_dimensionality_offsets(
     step_name: str,
     input_dimensionality_offsets: Dict[str, int],
 ) -> None:
-    min_offset, max_offset = None, None
-    for offset in input_dimensionality_offsets.values():
-        if min_offset is None or offset < min_offset:
-            min_offset = offset
-        if max_offset is None or offset > max_offset:
-            max_offset = offset
-    if min_offset is None or max_offset is None:
+    offsets = input_dimensionality_offsets.values()
+    if not offsets:
         return None
+    min_offset = min(offsets)
+    max_offset = max(offsets)
     if min_offset < 0 or max_offset < 0:
         raise BlockInterfaceError(
             public_message=f"Offsets could not be negative, but block defining step: {step_name} defines that values.",
