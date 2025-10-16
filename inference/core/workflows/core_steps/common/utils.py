@@ -175,35 +175,33 @@ def attach_parents_coordinates_to_batch_of_sv_detections(
     predictions: List[sv.Detections],
     images: Iterable[WorkflowImageData],
 ) -> List[sv.Detections]:
-    result = []
-    for prediction, image in zip(predictions, images):
-        result.append(
-            attach_parents_coordinates_to_sv_detections(
-                detections=prediction,
-                image=image,
-            )
-        )
-    return result
+    # Use list comprehension with helper to reduce Python-loop overhead
+    return [
+        attach_parents_coordinates_to_sv_detections(prediction, image)
+        for prediction, image in zip(predictions, images)
+    ]
 
 
 def attach_parents_coordinates_to_sv_detections(
     detections: sv.Detections,
     image: WorkflowImageData,
 ) -> sv.Detections:
-    detections = attach_parent_coordinates_to_detections(
+    # Optimize by avoiding extra array allocations; operate in-place
+    _attach_parent_coordinates_to_detections_inplace(
         detections=detections,
         parent_metadata=image.workflow_root_ancestor_metadata,
         parent_id_key=ROOT_PARENT_ID_KEY,
         coordinates_key=ROOT_PARENT_COORDINATES_KEY,
         dimensions_key=ROOT_PARENT_DIMENSIONS_KEY,
     )
-    return attach_parent_coordinates_to_detections(
+    _attach_parent_coordinates_to_detections_inplace(
         detections=detections,
         parent_metadata=image.parent_metadata,
         parent_id_key=PARENT_ID_KEY,
         coordinates_key=PARENT_COORDINATES_KEY,
         dimensions_key=PARENT_DIMENSIONS_KEY,
     )
+    return detections
 
 
 def attach_parent_coordinates_to_detections(
@@ -455,3 +453,28 @@ def run_in_parallel(tasks: List[Callable[[], T]], max_workers: int = 1) -> List[
 
 def _run(fun: Callable[[], T]) -> T:
     return fun()
+
+
+def _attach_parent_coordinates_to_detections_inplace(
+    detections: sv.Detections,
+    parent_metadata,
+    parent_id_key: str,
+    coordinates_key: str,
+    dimensions_key: str,
+) -> None:
+    # Inlined logic for direct array assignment, avoiding multiple len(detections) calls and temp arrays
+    n = len(detections)
+    parent_coordinates_system = parent_metadata.origin_coordinates
+    parent_id_value = parent_metadata.parent_id
+    detections[parent_id_key] = np.full(n, parent_id_value)
+    detections[coordinates_key] = np.full(
+        (n, 2),
+        [parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y],
+    )
+    detections[dimensions_key] = np.full(
+        (n, 2),
+        [
+            parent_coordinates_system.origin_height,
+            parent_coordinates_system.origin_width,
+        ],
+    )
