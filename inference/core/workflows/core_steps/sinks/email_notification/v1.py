@@ -38,6 +38,12 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUTS = [
+    OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="message", kind=[STRING_KIND]),
+]
+
 ROBOFLOW_EMAIL_ENDPOINT = "/notifications/email"
 
 LONG_DESCRIPTION = """
@@ -325,11 +331,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="message", kind=[STRING_KIND]),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
