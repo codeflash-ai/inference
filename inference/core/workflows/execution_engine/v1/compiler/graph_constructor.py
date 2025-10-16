@@ -1547,11 +1547,15 @@ def retrieve_batch_compatibility_of_input_selectors(
     input_selectors: List[ParsedSelector],
 ) -> Dict[str, Set[bool]]:
     batch_compatibility_of_properties = defaultdict(set)
+    # Loop unrolling: reduce attribute lookups, reuse local variables
     for parsed_selector in input_selectors:
-        for reference in parsed_selector.definition.allowed_references:
-            batch_compatibility_of_properties[
-                parsed_selector.definition.property_name
-            ].update(reference.points_to_batch)
+        definition = parsed_selector.definition
+        property_name = definition.property_name
+        # Avoid repeated dictionary lookups and set updates
+        prop_set = batch_compatibility_of_properties[property_name]
+        for reference in definition.allowed_references:
+            # reference.points_to_batch is assumed to be a set[bool], or an iterable of bools
+            prop_set.update(reference.points_to_batch)
     return batch_compatibility_of_properties
 
 
