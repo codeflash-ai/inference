@@ -194,8 +194,9 @@ def collect_substitutions_for_selected_input(
     input_selector = construct_input_selector(input_name=input_name)
     substitutions = []
     for step in steps:
+        step_dict = vars(step)
         for field in step.model_fields:
-            if getattr(step, field) != input_selector:
+            if step_dict.get(field, None) != input_selector:
                 continue
             substitution = InputSubstitution(
                 input_parameter_name=input_name,
