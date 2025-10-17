@@ -1,4 +1,3 @@
-import math
 from typing import List, Optional, Tuple, Union
 
 import cv2 as cv
@@ -196,10 +195,17 @@ def pick_largest_perspective_polygons(
 
 
 def sort_polygon_vertices_clockwise(polygon: np.ndarray) -> np.ndarray:
-    x_center = min(polygon[:, 0]) / 2 + max(polygon[:, 0]) / 2
-    y_center = min(polygon[:, 1]) / 2 + max(polygon[:, 1]) / 2
-    angle = lambda p: math.atan2(x_center - p[0], y_center - p[1])
-    return np.array(sorted(polygon.tolist(), key=angle, reverse=True))
+    # Vectorized center calculation
+    x = polygon[:, 0]
+    y = polygon[:, 1]
+    x_center = (x.min() + x.max()) / 2
+    y_center = (y.min() + y.max()) / 2
+
+    # Vectorized angle calculation using numpy for performance
+    angles = np.arctan2(x_center - x, y_center - y)
+    # Argsort for fast sorting by angle, reverse=True equivalent by multiplying by -1
+    sorted_indices = np.argsort(-angles)
+    return polygon[sorted_indices]
 
 
 def roll_polygon_vertices_to_start_from_leftmost_bottom(
