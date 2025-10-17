@@ -300,36 +300,26 @@ def calculate_vertices_to_contain_point(
         x2=vertex_3_from_1[0],
         y2=vertex_3_from_1[1],
     )
-    vertex_1 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_3_1,
-                b1=b_3_1,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
+    v1 = solve_line_intersection(
+        a1=a_3_1,
+        b1=b_3_1,
+        a2=a,
+        b2=b,
     )
+    vertex_1 = np.rint(v1).astype(int)
     a_4_2, b_4_2 = calculate_line_coeffs(
         x1=vertex_2[0],
         y1=vertex_2[1],
         x2=vertex_4_from_2[0],
         y2=vertex_4_from_2[1],
     )
-    vertex_2 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_4_2,
-                b1=b_4_2,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
+    v2 = solve_line_intersection(
+        a1=a_4_2,
+        b1=b_4_2,
+        a2=a,
+        b2=b,
     )
+    vertex_2 = np.rint(v2).astype(int)
     return vertex_1, vertex_2
 
 
@@ -343,40 +333,42 @@ def extend_perspective_polygon(
     bottom_left, top_left, top_right, bottom_right = polygon
     extended_width = 0
     extended_height = 0
-    original_width = max(
-        (
-            (bottom_left[0] - bottom_right[0]) ** 2
-            + (bottom_left[1] - bottom_right[1]) ** 2
-        )
-        ** 0.5,
-        ((top_left[0] - top_right[0]) ** 2 + (top_left[1] - top_right[1]) ** 2) ** 0.5,
-    )
-    original_height = max(
-        ((bottom_left[0] - top_left[0]) ** 2 + (bottom_left[1] - top_left[1]) ** 2)
-        ** 0.5,
-        ((bottom_right[0] - top_right[0]) ** 2 + (bottom_right[1] - top_right[1]) ** 2)
-        ** 0.5,
-    )
+
+    # Precompute all distances to avoid double-computation
+    d_bottom = ((bottom_left[0] - bottom_right[0]) ** 2 + (bottom_left[1] - bottom_right[1]) ** 2) ** 0.5
+    d_top = ((top_left[0] - top_right[0]) ** 2 + (top_left[1] - top_right[1]) ** 2) ** 0.5
+    original_width = max(d_bottom, d_top)
+    d_left = ((bottom_left[0] - top_left[0]) ** 2 + (bottom_left[1] - top_left[1]) ** 2) ** 0.5
+    d_right = ((bottom_right[0] - top_right[0]) ** 2 + (bottom_right[1] - top_right[1]) ** 2) ** 0.5
+    original_height = max(d_left, d_right)
+
+    # Preallocate polygon array for pointPolygonTest (avoiding new array allocation for each call)
+    poly_pts = np.empty((4, 2), dtype=np.int32)
+
     for i in range(len(detections)):
         det = detections[i]
-        # extend to the left
-        points = []
+        # Use a flat structure and store results of get_anchors_coordinates
+        anchors = {}
         if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]
-            )
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0])
+            anchors['BOTTOM_LEFT'] = det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]
+            anchors['TOP_LEFT'] = det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0]
+            anchors['BOTTOM_RIGHT'] = det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0]
+            anchors['TOP_RIGHT'] = det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0]
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
-        for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            anchors[str(bbox_position)] = det.get_anchors_coordinates(anchor=bbox_position)[0]
+
+        # extend to the left
+        points_left = []
+        if bbox_position == ALL_POSITIONS:
+            points_left.append(anchors['BOTTOM_LEFT'])
+            points_left.append(anchors['TOP_LEFT'])
+        else:
+            points_left.append(anchors[str(bbox_position)])
+
+        for x, y in points_left:
+            # Fast polygon buffer reuse
+            _polygon_array(bottom_left, top_left, top_right, bottom_right, out=poly_pts)
+            if cv.pointPolygonTest(poly_pts, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=bottom_left[0],
@@ -396,28 +388,17 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_width += (
-                    (bottom_left[0] - original_bottom_left[0]) ** 2
-                    + (bottom_left[1] - original_bottom_left[1]) ** 2
-                ) ** 0.5
+                extended_width += ((bottom_left[0] - original_bottom_left[0]) ** 2 + (bottom_left[1] - original_bottom_left[1]) ** 2) ** 0.5
         # extend to the right
-        points = []
+        points_right = []
         if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0]
-            )
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0])
+            points_right.append(anchors['BOTTOM_RIGHT'])
+            points_right.append(anchors['TOP_RIGHT'])
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
-        for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            points_right.append(anchors[str(bbox_position)])
+        for x, y in points_right:
+            _polygon_array(bottom_left, top_left, top_right, bottom_right, out=poly_pts)
+            if cv.pointPolygonTest(poly_pts, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=top_right[0],
@@ -437,30 +418,17 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_width += (
-                    (bottom_right[0] - original_bottom_right[0]) ** 2
-                    + (bottom_right[1] - original_bottom_right[1]) ** 2
-                ) ** 0.5
+                extended_width += ((bottom_right[0] - original_bottom_right[0]) ** 2 + (bottom_right[1] - original_bottom_right[1]) ** 2) ** 0.5
         # extend to the bottom
-        points = []
+        points_bottom = []
         if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0]
-            )
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]
-            )
+            points_bottom.append(anchors['BOTTOM_RIGHT'])
+            points_bottom.append(anchors['BOTTOM_LEFT'])
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
-        for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            points_bottom.append(anchors[str(bbox_position)])
+        for x, y in points_bottom:
+            _polygon_array(bottom_left, top_left, top_right, bottom_right, out=poly_pts)
+            if cv.pointPolygonTest(poly_pts, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=bottom_right[0],
@@ -480,26 +448,17 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_height += (
-                    (bottom_left[0] - original_bottom_left[0]) ** 2
-                    + (bottom_left[1] - original_bottom_left[1]) ** 2
-                ) ** 0.5
+                extended_height += ((bottom_left[0] - original_bottom_left[0]) ** 2 + (bottom_left[1] - original_bottom_left[1]) ** 2) ** 0.5
         # extend to the top
-        points = []
+        points_top = []
         if bbox_position == ALL_POSITIONS:
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0])
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0])
+            points_top.append(anchors['TOP_RIGHT'])
+            points_top.append(anchors['TOP_LEFT'])
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
-        for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            points_top.append(anchors[str(bbox_position)])
+        for x, y in points_top:
+            _polygon_array(bottom_left, top_left, top_right, bottom_right, out=poly_pts)
+            if cv.pointPolygonTest(poly_pts, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=top_left[0],
@@ -519,10 +478,7 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_height += (
-                    (top_left[0] - original_top_left[0]) ** 2
-                    + (top_left[1] - original_top_left[1]) ** 2
-                ) ** 0.5
+                extended_height += ((top_left[0] - original_top_left[0]) ** 2 + (top_left[1] - original_top_left[1]) ** 2) ** 0.5
     return (
         np.array(
             [
@@ -668,6 +624,17 @@ def correct_detections(
             )
         corrected_detections.append(detection)
     return sv.Detections.merge(corrected_detections)
+
+def _polygon_array(bl, tl, tr, br, out: np.ndarray = None):
+    # Use a shared preallocated buffer for pointPolygonTest to avoid allocations in tight loops
+    if out is not None:
+        out[0] = bl
+        out[1] = tl
+        out[2] = tr
+        out[3] = br
+        return out
+    else:
+        return np.array([bl, tl, tr, br], dtype=np.int32)
 
 
 class PerspectiveCorrectionBlockV1(WorkflowBlock):
