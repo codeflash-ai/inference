@@ -28,7 +28,8 @@ def construct_input_selector(input_name: str) -> str:
 
 
 def get_steps_selectors(steps: List[WorkflowBlockManifest]) -> Set[str]:
-    return {construct_step_selector(step_name=step.name) for step in steps}
+    # Use set comprehension and inline string formatting for efficiency
+    return {f"$steps.{step.name}" for step in steps}
 
 
 def construct_step_selector(step_name: str) -> str:
