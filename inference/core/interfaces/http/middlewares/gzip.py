@@ -13,10 +13,13 @@ def gzip_response_if_requested(
 ) -> Union[Response, T]:
     if "gzip" not in request.headers.get("Accept-Encoding", ""):
         return response
+    json_content = response.json().encode("utf-8")
+    compressed_body = gzip.compress(json_content)
     response = Response(
-        content=response.json(),
+        content=compressed_body,
+        headers={
+            "Content-Encoding": "gzip",
+            "Content-Length": str(len(compressed_body)),
+        },
     )
-    response.body = gzip.compress(response.body)
-    response.headers["Content-Encoding"] = "gzip"
-    response.headers["Content-Length"] = str(len(response.body))
     return response
