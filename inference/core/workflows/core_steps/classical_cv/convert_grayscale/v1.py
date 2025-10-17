@@ -20,6 +20,15 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUTS = [
+    OutputDefinition(
+        name=OUTPUT_IMAGE_KEY,
+        kind=[
+            IMAGE_KIND,
+        ],
+    ),
+]
+
 SHORT_DESCRIPTION: str = "Convert an RGB image to grayscale."
 LONG_DESCRIPTION: str = """
 Block to convert an RGB image to grayscale. The output image will have only one channel.
@@ -54,14 +63,7 @@ class ConvertGrayscaleManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_IMAGE_KEY,
-                kind=[
-                    IMAGE_KIND,
-                ],
-            ),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
