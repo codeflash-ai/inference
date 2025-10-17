@@ -938,39 +938,59 @@ def unfold_parameters(
 
 
 def get_batch_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    # Optimize by avoiding unnecessary any() calls when possible.
     result = {}
     for name, value in parameters.items():
         if isinstance(value, Batch):
             result[name] = value
-        elif isinstance(value, list) and any(isinstance(v, Batch) for v in value):
-            result[name] = value
-        elif isinstance(value, dict) and any(
-            isinstance(v, Batch) for v in value.values()
-        ):
-            result[name] = value
+        elif isinstance(value, list):
+            for v in value:
+                if isinstance(v, Batch):
+                    result[name] = value
+                    break
+        elif isinstance(value, dict):
+            for v in value.values():
+                if isinstance(v, Batch):
+                    result[name] = value
+                    break
     return result
 
 
 def iterate_over_batches(
     batch_parameters: Dict[str, Any],
 ) -> Generator[Dict[str, Any], None, None]:
-    index = 0
-    end = False
-    while not end:
+    # Precompute batch length if possible
+    min_batch_len = None
+    for value in batch_parameters.values():
+        if isinstance(value, Batch):
+            batch_len = len(value)
+            if min_batch_len is None or batch_len < min_batch_len:
+                min_batch_len = batch_len
+        elif isinstance(value, list):
+            for element in value:
+                if isinstance(element, Batch):
+                    batch_len = len(element)
+                    if min_batch_len is None or batch_len < min_batch_len:
+                        min_batch_len = batch_len
+        elif isinstance(value, dict):
+            for key_value in value.values():
+                if isinstance(key_value, Batch):
+                    batch_len = len(key_value)
+                    if min_batch_len is None or batch_len < min_batch_len:
+                        min_batch_len = batch_len
+
+    if min_batch_len is None or min_batch_len == 0:
+        return
+
+    for index in range(min_batch_len):
         result = {}
         for name, value in batch_parameters.items():
             if isinstance(value, Batch):
-                if len(value) <= index:
-                    end = True
-                    break
                 result[name] = value[index]
             elif isinstance(value, list):
                 to_yield = []
                 for element in value:
                     if isinstance(element, Batch):
-                        if len(element) <= index:
-                            end = True
-                            break
                         to_yield.append(element[index])
                     else:
                         to_yield.append(element)
@@ -978,15 +998,9 @@ def iterate_over_batches(
             elif isinstance(value, dict):
                 to_yield = {}
                 for key, key_value in value.items():
-                    if not isinstance(key_value, Batch):
-                        to_yield[key] = key_value
+                    if isinstance(key_value, Batch):
+                        to_yield[key] = key_value[index]
                     else:
-                        if len(key_value) <= index:
-                            end = True
-                            break
-                        else:
-                            to_yield[key] = key_value[index]
+                        to_yield[key] = key_value
                 result[name] = to_yield
-        index += 1
-        if not end:
-            yield result
+        yield result
