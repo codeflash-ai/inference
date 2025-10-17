@@ -1226,13 +1226,16 @@ def get_fps_if_tick_happens_now(fps_monitor: sv.FPSMonitor) -> float:
 def calculate_video_file_stride(
     actual_fps: Optional[Union[float, int]], desired_fps: Optional[Union[float, int]]
 ) -> int:
-    if actual_fps is None or desired_fps is None:
-        return 1
-    if actual_fps < 0 or desired_fps < 0:
+    if actual_fps is None or desired_fps is None or actual_fps < 0 or desired_fps < 0:
         return 1
     true_stride = actual_fps / desired_fps
-    integer_stride = max(int(true_stride), 1)
-    probability_of_missing_frame = max(true_stride - integer_stride, 0)
-    if random.random() < probability_of_missing_frame:
+    integer_stride = int(true_stride)
+    if integer_stride < 1:
+        integer_stride = 1
+    probability_of_missing_frame = true_stride - integer_stride
+    if (
+        probability_of_missing_frame > 0
+        and random.random() < probability_of_missing_frame
+    ):
         integer_stride += 1
     return integer_stride
