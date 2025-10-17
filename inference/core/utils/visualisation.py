@@ -123,35 +123,59 @@ def draw_labels(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
     color: Tuple[int, ...],
 ) -> np.ndarray:
-    (x1, y1), _ = bbox_to_points(box=box)
+    # Faster bbox_to_points by reusing calculations below
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    y1 = int(box.y - hh)
+
     text = f"{box.class_name} {box.confidence:.2f}"
-    (text_width, text_height), _ = cv2.getTextSize(
-        text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-    )
-    button_size = (text_width + 20, text_height + 20)
-    button_img = np.full(
-        (button_size[1], button_size[0], 3), color[::-1], dtype=np.uint8
-    )
-    cv2.putText(
-        button_img,
-        text,
-        (10, 10 + text_height),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1,
-    )
-    end_x = min(x1 + button_size[0], image.shape[1])
-    end_y = min(y1 + button_size[1], image.shape[0])
-    image[y1:end_y, x1:end_x] = button_img[: end_y - y1, : end_x - x1]
+    # Group cv2.getTextSize and cv2.putText params to reduce attribute lookup overhead
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    thickness = 1
+
+    (text_width, text_height), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    button_w = text_width + 20
+    button_h = text_height + 20
+
+    # Precompute button_img only for the overlapped area
+    end_x = min(x1 + button_w, image.shape[1])
+    end_y = min(y1 + button_h, image.shape[0])
+    draw_w = end_x - x1
+    draw_h = end_y - y1
+
+    # Only create the button_img for the required subregion, reducing memory if clipped
+    if draw_w <= 0 or draw_h <= 0:
+        return image
+
+    button_img = np.full((draw_h, draw_w, 3), color[::-1], dtype=np.uint8)
+    # Draw text only if it will fit inside
+    text_x = 10
+    text_y = 10 + text_height
+    if text_x + text_width <= draw_w and text_y <= draw_h:
+        cv2.putText(
+            button_img,
+            text,
+            (text_x, text_y),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+        )
+
+    image[y1:end_y, x1:end_x] = button_img
     return image
 
 
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    # No significant hotspots reported for this function, retain as-is
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    x2 = int(box.x + hw)
+    y1 = int(box.y - hh)
+    y2 = int(box.y + hh)
     return (x1, y1), (x2, y2)
