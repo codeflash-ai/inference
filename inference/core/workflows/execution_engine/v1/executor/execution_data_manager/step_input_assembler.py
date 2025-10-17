@@ -910,9 +910,9 @@ def get_empty_batch_elements_indices(value: Any) -> Set[DynamicBatchIndex]:
 
 
 def remove_indices(value: Any, indices: Set[DynamicBatchIndex]) -> Any:
-    if isinstance(value, dict):
+    if type(value) is dict:
         return {k: remove_indices(value=v, indices=indices) for k, v in value.items()}
-    if isinstance(value, list):
+    if type(value) is list:
         return [remove_indices(value=v, indices=indices) for v in value]
     if isinstance(value, Batch):
         return value.remove_by_indices(indices_to_remove=indices)
