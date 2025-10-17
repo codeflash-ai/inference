@@ -44,17 +44,18 @@ def orjson_response(
 def orjson_response_keeping_parent_id(
     response: Union[List[InferenceResponse], InferenceResponse, BaseModel],
 ) -> ORJSONResponseBytes:
+    # Fast path for list using list comprehension and dict.setdefault
     if isinstance(response, list):
-        content = []
-        for r in response:
-            serialised = r.model_dump(by_alias=True, exclude_none=True)
-            if "parent_id" not in serialised:
-                serialised["parent_id"] = None
-            content.append(serialised)
+        content = [
+            (d := r.model_dump(by_alias=True, exclude_none=True)).setdefault(
+                "parent_id", None
+            )
+            or d
+            for r in response
+        ]
     else:
         content = response.model_dump(by_alias=True, exclude_none=True)
-        if "parent_id" not in content:
-            content["parent_id"] = None
+        content.setdefault("parent_id", None)
     return ORJSONResponseBytes(content=content)
 
 
