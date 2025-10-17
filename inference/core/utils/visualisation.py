@@ -89,9 +89,14 @@ def draw_instance_segmentation_points(
     color: Tuple[int, ...],
     thickness: int,
 ) -> np.ndarray:
-    points_array = np.array([(int(p.x), int(p.y)) for p in points], np.int32)
     if len(points) > 2:
-        image = cv2.polylines(
+        # Preallocate array more efficiently
+        points_array = np.empty((len(points), 2), dtype=np.int32)
+        for i, p in enumerate(points):
+            points_array[i, 0] = int(p.x)
+            points_array[i, 1] = int(p.y)
+        # Use polylines in-place if possible to avoid copying the image
+        cv2.polylines(
             image,
             [points_array],
             isClosed=True,
@@ -150,8 +155,10 @@ def draw_labels(
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    x2 = int(box.x + hw)
+    y1 = int(box.y - hh)
+    y2 = int(box.y + hh)
     return (x1, y1), (x2, y2)
