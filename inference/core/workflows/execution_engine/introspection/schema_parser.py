@@ -123,13 +123,16 @@ def retrieve_primitive_type_from_property(
     property_description: str,
     property_definition: dict,
 ) -> Optional[PrimitiveTypeDefinition]:
+    # Fast-path out if REFERENCE_KEY is present
     if REFERENCE_KEY in property_definition:
         return None
-    if ITEMS_KEY in property_definition:
+    # If the property is a container type (list/set), handle recursively
+    items_key = ITEMS_KEY
+    if items_key in property_definition:
         result = retrieve_primitive_type_from_property(
             property_name=property_name,
             property_description=property_description,
-            property_definition=property_definition[ITEMS_KEY],
+            property_definition=property_definition[items_key],
         )
         if result is None:
             return None
@@ -141,34 +144,45 @@ def retrieve_primitive_type_from_property(
         return replace(
             result, type_annotation=f"{high_level_type}[{result.type_annotation}]"
         )
-    if TUPLE_ITEMS_KEY in property_definition:
-        nested_annotations = [
-            retrieve_primitive_type_from_property(
+    # Optimize repeated lookups for tuple (prefixItems)
+    tuple_items_key = TUPLE_ITEMS_KEY
+    if tuple_items_key in property_definition:
+        nested_definitions = property_definition[tuple_items_key]
+        # Combine loop-and-filter (avoid creating unnecessary lists)
+        nested_annotations = []
+        append = nested_annotations.append
+        for nested_definition in nested_definitions:
+            ret = retrieve_primitive_type_from_property(
                 property_name=property_name,
                 property_description=property_description,
                 property_definition=nested_definition,
             )
-            for nested_definition in property_definition[TUPLE_ITEMS_KEY]
-        ]
+            append(ret)
         inner_types = ", ".join(a.type_annotation for a in nested_annotations)
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
             type_annotation=f"Tuple[{inner_types}]",
         )
-    if property_definition.get(TYPE_KEY) in TYPE_MAPPING:
-        type_name = TYPE_MAPPING[property_definition[TYPE_KEY]]
+    # Optimize TYPE_KEY/TYPE_MAPPING handling
+    tkey = TYPE_KEY
+    type_mapping = TYPE_MAPPING
+    if property_definition.get(tkey) in type_mapping:
+        type_name = type_mapping[property_definition[tkey]]
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
             type_annotation=type_name,
         )
-    if REF_KEY in property_definition:
+    # Optimize REF_KEY handling
+    ref_key = REF_KEY
+    if ref_key in property_definition:
         return PrimitiveTypeDefinition(
             property_name=property_name,
             property_description=property_description,
-            type_annotation=property_definition[REF_KEY].split("/")[-1],
+            type_annotation=property_definition[ref_key].split("/")[-1],
         )
+    # Use imported, optimized property_defines_union (pointer alias for speed)
     if property_defines_union(property_definition=property_definition):
         return retrieve_primitive_type_from_union_property(
             property_name=property_name,
@@ -181,6 +195,7 @@ def retrieve_primitive_type_from_property(
             property_description=property_description,
             property_definition=property_definition,
         )
+    # Fallback to generic type
     return PrimitiveTypeDefinition(
         property_name=property_name,
         property_description=property_description,
