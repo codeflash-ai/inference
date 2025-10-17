@@ -1016,48 +1016,66 @@ class VideoConsumer:
     def _frame_should_be_adaptively_dropped(
         self, declared_source_fps: Optional[float]
     ) -> bool:
-        if self._buffer_filling_strategy not in ADAPTIVE_STRATEGIES:
+        # Pull used variables to local scope
+        bfs = self._buffer_filling_strategy
+        dropped_in_row = self._adaptive_frames_dropped_in_row
+        max_dropped = self._maximum_adaptive_frames_dropped_in_row
+        min_samples = self._minimum_adaptive_mode_samples
+        scpm = self._stream_consumption_pace_monitor
+        rpm = self._reader_pace_monitor
+        dpm = self._decoding_pace_monitor
+
+        if bfs not in ADAPTIVE_STRATEGIES:
             return False
-        if (
-            self._adaptive_frames_dropped_in_row
-            >= self._maximum_adaptive_frames_dropped_in_row
-        ):
+        if dropped_in_row >= max_dropped:
             return False
-        if (
-            len(self._stream_consumption_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
-        ):
+
+        scpm_timestamps = scpm.all_timestamps
+        scpm_len = len(scpm_timestamps)
+        if scpm_len <= min_samples:
             # not enough observations
             return False
-        if hasattr(self._stream_consumption_pace_monitor, "fps"):
-            stream_consumption_pace = self._stream_consumption_pace_monitor.fps
-        else:
-            stream_consumption_pace = self._stream_consumption_pace_monitor()
-        announced_stream_fps = stream_consumption_pace
-        if declared_source_fps is not None and declared_source_fps > 0:
-            announced_stream_fps = declared_source_fps
+
+        # This pattern appears at least twice in the code, so factor it for efficiency
+        stream_consumption_pace = getattr(scpm, "fps", None)
+        if stream_consumption_pace is None:
+            stream_consumption_pace = scpm()
+
+        announced_stream_fps = (
+            declared_source_fps
+            if declared_source_fps is not None and declared_source_fps > 0
+            else stream_consumption_pace
+        )
+
         if (
             announced_stream_fps - stream_consumption_pace
             > self._adaptive_mode_stream_pace_tolerance
         ):
             # cannot keep up with stream emission
             return True
-        if (
-            len(self._reader_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
-        ) or (
-            len(self._decoding_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
-        ):
+
+        rpm_timestamps = rpm.all_timestamps
+        dpm_timestamps = dpm.all_timestamps
+        rpm_len = len(rpm_timestamps)
+        dpm_len = len(dpm_timestamps)
+        if (rpm_len <= min_samples) or (dpm_len <= min_samples):
             # not enough observations
             return False
-        actual_reader_pace = get_fps_if_tick_happens_now(
-            fps_monitor=self._reader_pace_monitor
-        )
-        if hasattr(self._decoding_pace_monitor, "fps"):
-            decoding_pace = self._decoding_pace_monitor.fps
+
+        # avoid function call overhead by inlining get_fps_if_tick_happens_now
+        # (one less Python function call each time)
+        if rpm_len == 0:
+            actual_reader_pace = 0.0
         else:
-            decoding_pace = self._decoding_pace_monitor()
+            min_reader_timestamp = rpm_timestamps[0]
+            now = time.monotonic()
+            epsilon = 1e-8
+            reader_taken_time = (now - min_reader_timestamp) + epsilon
+            actual_reader_pace = (rpm_len + 1) / reader_taken_time
+
+        decoding_pace = getattr(dpm, "fps", None)
+        if decoding_pace is None:
+            decoding_pace = dpm()
         if (
             decoding_pace - actual_reader_pace
             > self._adaptive_mode_reader_pace_tolerance
