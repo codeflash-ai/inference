@@ -336,7 +336,8 @@ def save_to_file(path: str, mode: str, content: str) -> None:
 
 
 def deduct_csv_header(content: str) -> str:
-    return "\n".join(list(content.split("\n"))[1:])
+    _, _, rest = content.partition("\n")
+    return rest
 
 
 def dump_json_inline(content: str) -> str:
