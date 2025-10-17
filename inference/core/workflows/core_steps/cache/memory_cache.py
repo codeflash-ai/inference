@@ -3,10 +3,14 @@ class WorkflowMemoryCache:
 
     @classmethod
     def get_dict(cls, namespace):
-        if namespace not in WorkflowMemoryCache.cache:
-            WorkflowMemoryCache.cache[namespace] = {}
-
-        return WorkflowMemoryCache.cache[namespace]
+        try:
+            # Fast path: direct read (dict __getitem__ faster than not-in check)
+            return cls.cache[namespace]
+        except KeyError:
+            # Only create if truly missing (avoid double lookup)
+            value = {}
+            cls.cache[namespace] = value
+            return value
 
     @classmethod
     def clear_namespace(cls, namespace):
