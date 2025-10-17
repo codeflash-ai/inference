@@ -67,11 +67,9 @@ if DEVICE is None:
 
 def to_corners(box):
     cx, cy, w, h = box.unbind(-1)
-    x1 = cx - w / 2
-    y1 = cy - h / 2
-    x2 = cx + w / 2
-    y2 = cy + h / 2
-    return torch.stack([x1, y1, x2, y2], dim=-1)
+    half_w = w * 0.5
+    half_h = h * 0.5
+    return torch.stack((cx - half_w, cy - half_h, cx + half_w, cy + half_h), dim=-1)
 
 
 from collections import OrderedDict
