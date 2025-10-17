@@ -242,7 +242,11 @@ def calculate_line_coeffs(
     if x1 == x2:
         return None, x1
     # Solved a and b for ax + b = y
-    return (y2 - y1) / (x2 - x1), (y1 * x2 - y2 * x1) / (x2 - x1)
+    dx = x2 - x1
+    dy = y2 - y1
+    a = dy / dx
+    b = (y1 * x2 - y2 * x1) / dx
+    return a, b
 
 
 def calculate_line_intercept_to_contain_point(
@@ -261,17 +265,20 @@ def solve_line_intersection(
     a2: Optional[float],
     b2: float,
 ) -> Tuple[float, float]:
+    # Optimize by single branch check and avoid unnecessary multiplications
     if a1 is None and a2 is None:
         raise ValueError("Both lines are vertical")
     if a1 is None:
         x = b1
         y = a2 * x + b2
-    elif a2 is None:
+        return x, y
+    if a2 is None:
         x = b2
         y = a1 * x + b1
-    else:
-        x = (b2 - b1) / (a1 - a2)
-        y = a1 * x + b1
+        return x, y
+    denom = a1 - a2
+    x = (b2 - b1) / denom
+    y = a1 * x + b1
     return x, y
 
 
@@ -283,53 +290,21 @@ def calculate_vertices_to_contain_point(
     x: int,
     y: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    a, _ = calculate_line_coeffs(
-        x1=vertex_1[0],
-        y1=vertex_1[1],
-        x2=vertex_2[0],
-        y2=vertex_2[1],
-    )
-    b = calculate_line_intercept_to_contain_point(
-        a=a,
-        x=x,
-        y=y,
-    )
-    a_3_1, b_3_1 = calculate_line_coeffs(
-        x1=vertex_1[0],
-        y1=vertex_1[1],
-        x2=vertex_3_from_1[0],
-        y2=vertex_3_from_1[1],
-    )
-    vertex_1 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_3_1,
-                b1=b_3_1,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
-    )
-    a_4_2, b_4_2 = calculate_line_coeffs(
-        x1=vertex_2[0],
-        y1=vertex_2[1],
-        x2=vertex_4_from_2[0],
-        y2=vertex_4_from_2[1],
-    )
-    vertex_2 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_4_2,
-                b1=b_4_2,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
-    )
+    # Avoid repeated field extraction by unpacking outside function calls
+    v1_x, v1_y = vertex_1[0], vertex_1[1]
+    v2_x, v2_y = vertex_2[0], vertex_2[1]
+    v3_x, v3_y = vertex_3_from_1[0], vertex_3_from_1[1]
+    v4_x, v4_y = vertex_4_from_2[0], vertex_4_from_2[1]
+
+    a, _ = calculate_line_coeffs(v1_x, v1_y, v2_x, v2_y)
+    b = calculate_line_intercept_to_contain_point(a, x, y)
+    a_3_1, b_3_1 = calculate_line_coeffs(v1_x, v1_y, v3_x, v3_y)
+    vertex_1_result = solve_line_intersection(a_3_1, b_3_1, a, b)
+    a_4_2, b_4_2 = calculate_line_coeffs(v2_x, v2_y, v4_x, v4_y)
+    vertex_2_result = solve_line_intersection(a_4_2, b_4_2, a, b)
+    # Use np.rint instead of .round() for performance and avoid temporary objects
+    vertex_1 = np.rint(vertex_1_result).astype(int)
+    vertex_2 = np.rint(vertex_2_result).astype(int)
     return vertex_1, vertex_2
 
 
