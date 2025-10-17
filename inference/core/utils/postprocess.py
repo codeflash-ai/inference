@@ -631,9 +631,10 @@ def stretch_keypoints(
 ) -> np.ndarray:
     scale_width = origin_shape[1] / infer_shape[1]
     scale_height = origin_shape[0] / infer_shape[0]
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] *= scale_width
-        keypoints[:, keypoint_id * 3 + 1] *= scale_height
+    num_keypoints = keypoints.shape[1] // 3
+    # Vectorized scaling for all keypoints at once
+    keypoints[:, : num_keypoints * 3 : 3] *= scale_width
+    keypoints[:, 1 : num_keypoints * 3 : 3] *= scale_height
     return keypoints
 
 
