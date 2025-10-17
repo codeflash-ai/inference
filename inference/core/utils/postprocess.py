@@ -390,11 +390,17 @@ def preprocess_segmentation_masks(
     shape: Tuple[int, int],
 ) -> np.ndarray:
     c, mh, mw = protos.shape  # CHW
-    masks = protos.astype(np.float32)
-    masks = masks.reshape((c, -1))
+    masks = protos.astype(np.float32, copy=False)  # Avoid copy if unnecessary
+    masks = masks.reshape(c, -1)
     masks = masks_in @ masks
-    masks = sigmoid(masks)
-    masks = masks.reshape((-1, mh, mw))
+
+    # Fused sigmoid for improved performance
+    np.negative(masks, out=masks)  # in-place negation to avoid an intermediate array
+    np.exp(masks, out=masks)  # in-place exponentiation
+    np.add(masks, 1, out=masks)  # in-place addition
+    np.reciprocal(masks, out=masks)  # in-place reciprocal
+
+    masks = masks.reshape(-1, mh, mw)
     gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
     pad = (mw - shape[1] * gain) / 2, (mh - shape[0] * gain) / 2  # wh padding
     top, left = int(pad[1]), int(pad[0])  # y, x
