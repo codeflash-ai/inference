@@ -485,10 +485,15 @@ def scale_polygons(
     x_scale: float,
     y_scale: float,
 ) -> List[List[Tuple[float, float]]]:
+    # Optimized by using tuple unpacking and local variables
     result = []
     for poly in polygons:
-        poly = [(p[0] * x_scale, p[1] * y_scale) for p in poly]
-        result.append(poly)
+        # Reduce attribute and indexing lookups in loop by unpacking tuple directly
+        append = result.append
+        poly_scaled = []
+        for x, y in poly:
+            poly_scaled.append((x * x_scale, y * y_scale))
+        append(poly_scaled)
     return result
 
 
