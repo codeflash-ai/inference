@@ -244,18 +244,24 @@ def is_block_compatible_with_execution_engine(
 ) -> bool:
     if block_execution_engine_compatibility is None or execution_engine_version is None:
         return True
-    try:
-        return SpecifierSet(block_execution_engine_compatibility).contains(
-            execution_engine_version
-        )
-    except ValueError as error:
-        raise PluginInterfaceError(
-            public_message=f"Could not parse either version of Execution Engine ({execution_engine_version}) or "
-            f"EE version requirements ({block_execution_engine_compatibility}) for "
-            f"block `{block_identifier}` loaded from `{block_source}`.",
-            inner_error=error,
-            context="blocks_loading",
-        )
+    cache = getattr(is_block_compatible_with_execution_engine, "_specset_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(is_block_compatible_with_execution_engine, "_specset_cache", cache)
+    spec = cache.get(block_execution_engine_compatibility)
+    if spec is None:
+        try:
+            spec = SpecifierSet(block_execution_engine_compatibility)
+            cache[block_execution_engine_compatibility] = spec
+        except ValueError as error:
+            raise PluginInterfaceError(
+                public_message=f"Could not parse either version of Execution Engine ({execution_engine_version}) or "
+                f"EE version requirements ({block_execution_engine_compatibility}) for "
+                f"block `{block_identifier}` loaded from `{block_source}`.",
+                inner_error=error,
+                context="blocks_loading",
+            )
+    return spec.contains(execution_engine_version)
 
 
 @execution_phase(
