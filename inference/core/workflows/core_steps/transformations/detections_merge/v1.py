@@ -81,16 +81,16 @@ class DetectionsMergeManifest(WorkflowBlockManifest):
 def calculate_union_bbox(detections: sv.Detections) -> np.ndarray:
     """Calculate a single bounding box that contains all input detections."""
     if len(detections) == 0:
-        return np.array([], dtype=np.float32).reshape(0, 4)
+        return np.empty((0, 4), dtype=np.float32)
 
     # Get all bounding boxes
     xyxy = detections.xyxy
 
     # Calculate the union by taking min/max coordinates
-    x1 = np.min(xyxy[:, 0])
-    y1 = np.min(xyxy[:, 1])
-    x2 = np.max(xyxy[:, 2])
-    y2 = np.max(xyxy[:, 3])
+    x1 = xyxy[:, 0].min()
+    y1 = xyxy[:, 1].min()
+    x2 = xyxy[:, 2].max()
+    y2 = xyxy[:, 3].max()
 
     return np.array([[x1, y1, x2, y2]])
 
@@ -113,11 +113,7 @@ class DetectionsMergeBlockV1(WorkflowBlock):
         class_name: str = "merged_detection",
     ) -> BlockResult:
         if predictions is None or len(predictions) == 0:
-            return {
-                OUTPUT_KEY: sv.Detections(
-                    xyxy=np.array([], dtype=np.float32).reshape(0, 4)
-                )
-            }
+            return {OUTPUT_KEY: sv.Detections(xyxy=np.empty((0, 4), dtype=np.float32))}
 
         # Calculate the union bounding box
         union_bbox = calculate_union_bbox(predictions)
