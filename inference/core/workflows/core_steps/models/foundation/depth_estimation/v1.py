@@ -24,6 +24,12 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Using a pre-built constant list to avoid recreating the list and OutputDefinition objects on each method call.
+_OUTPUT_DEFINITIONS: List[OutputDefinition] = [
+    OutputDefinition(name="image", kind=[IMAGE_KIND]),
+    OutputDefinition(name="normalized_depth", kind=[NUMPY_ARRAY_KIND]),
+]
+
 
 class BlockManifest(WorkflowBlockManifest):
     # Standard model configuration for UI, schema, etc.
@@ -84,10 +90,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="image", kind=[IMAGE_KIND]),
-            OutputDefinition(name="normalized_depth", kind=[NUMPY_ARRAY_KIND]),
-        ]
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
