@@ -158,43 +158,44 @@ def post_process_bboxes(
         List[List[List[float]]]: The scaled and shifted predictions, indices are: batch x prediction x [x1, y1, x2, y2, ...].
     """
 
-    # Get static crop params
     scaled_predictions = []
-    # Loop through batches
+    resize_stretch = resize_method == "Stretch to"
+    resize_fit = (
+        resize_method == "Fit (black edges) in"
+        or resize_method == "Fit (white edges) in"
+        or resize_method == "Fit (grey edges) in"
+    )
+
+    # Pre-allocate numpy arrays for all batch predictions with results
     for i, batch_predictions in enumerate(predictions):
-        if len(batch_predictions) == 0:
+        if not batch_predictions:
             scaled_predictions.append([])
             continue
+
         np_batch_predictions = np.array(batch_predictions)
-        # Get bboxes from predictions (x1,y1,x2,y2)
         predicted_bboxes = np_batch_predictions[:, :4]
         (crop_shift_x, crop_shift_y), origin_shape = get_static_crop_dimensions(
             img_dims[i],
             preproc,
             disable_preproc_static_crop=disable_preproc_static_crop,
         )
-        if resize_method == "Stretch to":
+        # Switch branches only once
+        if resize_stretch:
             predicted_bboxes = stretch_bboxes(
                 predicted_bboxes=predicted_bboxes,
                 infer_shape=infer_shape,
                 origin_shape=origin_shape,
             )
-        elif (
-            resize_method == "Fit (black edges) in"
-            or resize_method == "Fit (white edges) in"
-            or resize_method == "Fit (grey edges) in"
-        ):
+        elif resize_fit:
             predicted_bboxes = undo_image_padding_for_predicted_boxes(
                 predicted_bboxes=predicted_bboxes,
                 infer_shape=infer_shape,
                 origin_shape=origin_shape,
             )
-        predicted_bboxes = clip_boxes_coordinates(
+        # Fused coordinate clipping and shifting for improved efficiency
+        predicted_bboxes = clip_and_shift_boxes(
             predicted_bboxes=predicted_bboxes,
             origin_shape=origin_shape,
-        )
-        predicted_bboxes = shift_bboxes(
-            bboxes=predicted_bboxes,
             shift_x=crop_shift_x,
             shift_y=crop_shift_y,
         )
@@ -227,9 +228,8 @@ def undo_image_padding_for_predicted_boxes(
     inter_w = round(origin_shape[1] * scale)
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    predicted_bboxes = shift_bboxes(
-        bboxes=predicted_bboxes, shift_x=-pad_x, shift_y=-pad_y
-    )
+    # Use in-place shift then in-place scale for best memory efficiency
+    shift_bboxes(predicted_bboxes, shift_x=-pad_x, shift_y=-pad_y)
     predicted_bboxes /= scale
     return predicted_bboxes
 
@@ -695,3 +695,22 @@ def sigmoid(x: Union[float, np.ndarray]) -> Union[float, np.number, np.ndarray]:
         float or numpy.ndarray: The computed sigmoid value(s).
     """
     return 1 / (1 + np.exp(-x))
+
+
+def clip_and_shift_boxes(
+    predicted_bboxes: np.ndarray,
+    origin_shape: Tuple[int, int],
+    shift_x: Union[int, float],
+    shift_y: Union[int, float],
+) -> np.ndarray:
+    # This helper fuses clipping and coordinate shift, reducing slow memory ops
+    # First clip and round, then shift in-place
+    x0 = np.round(np.clip(predicted_bboxes[:, 0], 0, origin_shape[1]))
+    y0 = np.round(np.clip(predicted_bboxes[:, 1], 0, origin_shape[0]))
+    x1 = np.round(np.clip(predicted_bboxes[:, 2], 0, origin_shape[1]))
+    y1 = np.round(np.clip(predicted_bboxes[:, 3], 0, origin_shape[0]))
+    predicted_bboxes[:, 0] = x0 + shift_x
+    predicted_bboxes[:, 1] = y0 + shift_y
+    predicted_bboxes[:, 2] = x1 + shift_x
+    predicted_bboxes[:, 3] = y1 + shift_y
+    return predicted_bboxes
