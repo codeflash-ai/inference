@@ -778,15 +778,10 @@ class VideoConsumer:
         desired_fps: Optional[Union[float, int]] = None,
     ) -> "VideoConsumer":
         minimum_adaptive_mode_samples = max(minimum_adaptive_mode_samples, 2)
-        reader_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
-        stream_consumption_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
-        decoding_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
+        sample_size = 10 * minimum_adaptive_mode_samples
+        reader_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
+        stream_consumption_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
+        decoding_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
         return cls(
             buffer_filling_strategy=buffer_filling_strategy,
             adaptive_mode_stream_pace_tolerance=adaptive_mode_stream_pace_tolerance,
