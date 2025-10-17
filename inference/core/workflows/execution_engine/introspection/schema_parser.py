@@ -263,7 +263,7 @@ def retrieve_selectors_from_schema(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Dict[str, SelectorDefinition]:
-    result = []
+    result = OrderedDict()
     for property_name, property_definition in schema[PROPERTIES_KEY].items():
         if property_name in EXCLUDED_PROPERTIES:
             continue
@@ -312,8 +312,8 @@ def retrieve_selectors_from_schema(
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
         if selector is not None:
-            result.append(selector)
-    return OrderedDict((r.property_name, r) for r in result)
+            result[property_name] = selector
+    return result
 
 
 def retrieve_selectors_from_simple_property(
