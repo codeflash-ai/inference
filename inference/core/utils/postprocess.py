@@ -497,16 +497,18 @@ def undo_image_padding_for_predicted_polygons(
     origin_shape: Tuple[int, int],
     infer_shape: Tuple[int, int],
 ) -> List[List[Tuple[float, float]]]:
+    # Precompute scale and padding
     scale = min(infer_shape[0] / origin_shape[0], infer_shape[1] / origin_shape[1])
     inter_w = int(origin_shape[1] * scale)
     inter_h = int(origin_shape[0] * scale)
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    result = []
-    for poly in polygons:
-        poly = [((p[0] - pad_x) / scale, (p[1] - pad_y) / scale) for p in poly]
-        result.append(poly)
-    return result
+
+    # Use list comprehensions at top-level for better cache locality, avoiding append in Python loop
+    return [
+        [((px - pad_x) / scale, (py - pad_y) / scale) for (px, py) in poly]
+        for poly in polygons
+    ]
 
 
 def get_static_crop_dimensions(
