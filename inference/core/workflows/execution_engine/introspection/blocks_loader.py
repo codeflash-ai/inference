@@ -310,10 +310,24 @@ def _validate_loaded_blocks_manifest_type_identifiers(
 ) -> None:
     types_already_defined = {}
     for block in blocks:
-        all_types = [
-            block.manifest_type_identifier
-        ] + block.manifest_type_identifier_aliases
-        for type_name in all_types:
+        # Check main identifier first to avoid list concatenation
+        if block.manifest_type_identifier in types_already_defined:
+            clashing_block = types_already_defined[block.manifest_type_identifier]
+            block_identifier = _produce_readable_block_identifier(block=block)
+            clashing_block_identifier = _produce_readable_block_identifier(
+                block=clashing_block
+            )
+            raise PluginLoadingError(
+                public_message=f"Block `{block_identifier}`, defined in `{block.block_source}` plugin,"
+                f"clashes in terms of the manifest type identifier (or its alias): "
+                f"`{block.manifest_type_identifier}` with `{clashing_block_identifier}` defined in "
+                f"`{clashing_block.block_source}` plugin.",
+                context="blocks_loading",
+            )
+        types_already_defined[block.manifest_type_identifier] = block
+
+        # Check aliases separately
+        for type_name in block.manifest_type_identifier_aliases:
             if type_name in types_already_defined:
                 clashing_block = types_already_defined[type_name]
                 block_identifier = _produce_readable_block_identifier(block=block)
