@@ -168,10 +168,16 @@ def pick_largest_perspective_polygons(
         perspective_polygons_batch = [perspective_polygons_batch]
 
     largest_perspective_polygons: List[np.ndarray] = []
+    # Pre-bind frequently-used function for speed
+    contour_area = cv.contourArea
+    np_array = np.array
+    np_around = np.around
+    np_int32 = np.int32
+
     for polygons in perspective_polygons_batch:
         if polygons is None:
             continue
-        if not isinstance(polygons, list) and not isinstance(polygons, np.ndarray):
+        if not isinstance(polygons, (list, np.ndarray)):
             raise ValueError("Unexpected type of batch element")
         if len(polygons) == 0:
             raise ValueError("Unexpected empty batch element")
@@ -183,14 +189,20 @@ def pick_largest_perspective_polygons(
         if len(polygons) == 4 and all(
             isinstance(p, list) and len(p) == 2 for p in polygons
         ):
-            largest_perspective_polygons.append(np.array(polygons))
+            largest_perspective_polygons.append(np_array(polygons))
             continue
-        polygons = [p if isinstance(p, np.ndarray) else np.array(p) for p in polygons]
-        polygons = [p for p in polygons if p.shape == (4, 2)]
-        if not polygons:
+
+        # Convert and filter polygons in a single, memory-efficient pass
+        valid_polygons = []
+        for p in polygons:
+            arr = p if isinstance(p, np.ndarray) else np_array(p)
+            if arr.shape == (4, 2):
+                arr = np_around(arr).astype(np_int32)
+                valid_polygons.append(arr)
+        if not valid_polygons:
             raise ValueError("No batch element consists of 4 vertices")
-        polygons = [np.around(p).astype(np.int32) for p in polygons]
-        largest_polygon = max(polygons, key=lambda p: cv.contourArea(p))
+        # Use built-in max with a fast contour area calculation
+        largest_polygon = max(valid_polygons, key=contour_area)
         largest_perspective_polygons.append(largest_polygon)
     return largest_perspective_polygons
 
