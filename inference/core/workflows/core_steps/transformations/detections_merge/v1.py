@@ -18,6 +18,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+OUTPUT_KEY = "predictions"
+
 OUTPUT_KEY: str = "predictions"
 
 SHORT_DESCRIPTION = "Merge multiple detections into a single bounding box."
@@ -69,6 +71,9 @@ class DetectionsMergeManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
+        # Use tuple for kind argument instead of list because tuple is immutable and slightly faster for iteration,
+        # but must preserve input type. Since OutputDefinition probably expects a list, we must preserve the input type as List.
+        # Thus, keep as list for exact behavioral preservation.
         return [
             OutputDefinition(name=OUTPUT_KEY, kind=[OBJECT_DETECTION_PREDICTION_KIND]),
         ]
