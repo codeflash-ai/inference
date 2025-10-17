@@ -85,16 +85,14 @@ def parse_block_manifest_schema(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> BlockManifestMetadata:
-    primitive_types = retrieve_primitives_from_schema(
-        schema=schema,
-    )
-    selectors = retrieve_selectors_from_schema(
-        schema=schema,
-        inputs_dimensionality_offsets=inputs_dimensionality_offsets,
-        dimensionality_reference_property=dimensionality_reference_property,
-        inputs_accepting_batches=inputs_accepting_batches,
-        inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
-        inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+    primitive_types = retrieve_primitives_from_schema_schema_props(schema)
+    selectors = retrieve_selectors_from_schema_schema_props(
+        schema,
+        inputs_dimensionality_offsets,
+        dimensionality_reference_property,
+        inputs_accepting_batches,
+        inputs_accepting_batches_and_scalars,
+        inputs_enforcing_auto_batch_casting,
     )
     return BlockManifestMetadata(
         primitive_types=primitive_types,
@@ -473,3 +471,105 @@ def retrieve_selectors_from_union_definition(
         dimensionality_offset=property_dimensionality_offset,
         is_dimensionality_reference_property=is_dimensionality_reference_property,
     )
+
+
+def retrieve_primitives_from_schema_schema_props(
+    schema: dict,
+) -> Dict[str, PrimitiveTypeDefinition]:
+    # Local variable lookup shortcut.
+    excluded_properties = EXCLUDED_PROPERTIES
+    get = dict.get
+    retrieve_primitive = retrieve_primitive_type_from_property
+    properties = schema[PROPERTIES_KEY]
+    # Instead of appending and creating a list, and then re-traversing (OrderedDict comprehension),
+    # just build the result dict directly in a single pass for improved memory and runtime efficiency.
+    ordered = OrderedDict()
+    for property_name, property_definition in properties.items():
+        if property_name in excluded_properties:
+            continue
+        property_description = get(
+            property_definition, DESCRIPTION_KEY, "not available"
+        )
+        primitive_metadata = retrieve_primitive(
+            property_name=property_name,
+            property_description=property_description,
+            property_definition=property_definition,
+        )
+        if primitive_metadata is not None:
+            ordered[property_name] = primitive_metadata
+    return ordered
+
+
+def retrieve_selectors_from_schema_schema_props(
+    schema: dict,
+    inputs_dimensionality_offsets: Dict[str, int],
+    dimensionality_reference_property: Optional[str],
+    inputs_accepting_batches: Set[str],
+    inputs_accepting_batches_and_scalars: Set[str],
+    inputs_enforcing_auto_batch_casting: Set[str],
+) -> Dict[str, SelectorDefinition]:
+    # Local variable lookup shortcut.
+    excluded_properties = EXCLUDED_PROPERTIES
+    get = dict.get
+    properties = schema[PROPERTIES_KEY]
+    items_key = ITEMS_KEY
+    type_key = TYPE_KEY
+    object_type = OBJECT_TYPE
+    addl_props_key = ADDITIONAL_PROPERTIES_KEY
+    retrieve_selectors = retrieve_selectors_from_simple_property
+
+    ordered = OrderedDict()
+    for property_name, property_definition in properties.items():
+        if property_name in excluded_properties:
+            continue
+        property_dimensionality_offset = inputs_dimensionality_offsets.get(
+            property_name, 0
+        )
+        is_dimensionality_reference_property = (
+            property_name == dimensionality_reference_property
+        )
+        property_description = get(
+            property_definition, DESCRIPTION_KEY, "not available"
+        )
+        # Use local variables to avoid attribute lookups in the hot loop
+        pd = property_definition
+        if items_key in pd:
+            selector = retrieve_selectors(
+                property_name=property_name,
+                property_description=property_description,
+                property_definition=pd[items_key],
+                property_dimensionality_offset=property_dimensionality_offset,
+                is_dimensionality_reference_property=is_dimensionality_reference_property,
+                is_list_element=True,
+                inputs_accepting_batches=inputs_accepting_batches,
+                inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
+                inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+            )
+        elif get(pd, type_key) == object_type and isinstance(
+            get(pd, addl_props_key), dict
+        ):
+            selector = retrieve_selectors(
+                property_name=property_name,
+                property_description=property_description,
+                property_definition=pd[addl_props_key],
+                property_dimensionality_offset=property_dimensionality_offset,
+                is_dimensionality_reference_property=is_dimensionality_reference_property,
+                is_dict_element=True,
+                inputs_accepting_batches=inputs_accepting_batches,
+                inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
+                inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+            )
+        else:
+            selector = retrieve_selectors(
+                property_name=property_name,
+                property_description=property_description,
+                property_definition=pd,
+                property_dimensionality_offset=property_dimensionality_offset,
+                is_dimensionality_reference_property=is_dimensionality_reference_property,
+                inputs_accepting_batches=inputs_accepting_batches,
+                inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
+                inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+            )
+        if selector is not None:
+            ordered[property_name] = selector
+    return ordered
