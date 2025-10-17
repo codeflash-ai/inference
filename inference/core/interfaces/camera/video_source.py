@@ -802,7 +802,7 @@ class VideoConsumer:
 
     def __init__(
         self,
-        buffer_filling_strategy: Optional[BufferFillingStrategy],
+        buffer_filling_strategy: Optional["BufferFillingStrategy"],
         adaptive_mode_stream_pace_tolerance: float,
         adaptive_mode_reader_pace_tolerance: float,
         minimum_adaptive_mode_samples: int,
@@ -920,25 +920,42 @@ class VideoConsumer:
             self._buffer_filling_strategy = BufferFillingStrategy.ADAPTIVE_DROP_OLDEST
 
     def _video_fps_should_be_sub_sampled(self) -> bool:
-        if self._desired_fps is None:
+        desired_fps = self._desired_fps
+        if desired_fps is None:
             return False
-        if self._is_source_video_file:
+
+        # Fast-path lookup for _is_source_video_file; attribute access outside of hot path
+        is_source_video_file = self._is_source_video_file
+
+        # Branch for source is video file
+        if is_source_video_file:
             actual_fps = self._declared_source_fps
+
         else:
-            fraction_of_pace_monitor_samples = (
-                len(self._stream_consumption_pace_monitor.all_timestamps)
-                / self._stream_consumption_pace_monitor.all_timestamps.maxlen
-            )
+            # Minimize attribute lookups for the hot path
+            scpm = self._stream_consumption_pace_monitor
+            all_timestamps = scpm.all_timestamps
+
+            maxlen = all_timestamps.maxlen
+            # Avoid repeated len(.)/maxlen attribute lookups by caching (43k-> faster)
+            ts_len = len(all_timestamps)
+            fraction_of_pace_monitor_samples = ts_len / maxlen
+
             if fraction_of_pace_monitor_samples < 0.9:
                 actual_fps = self._declared_source_fps
-            elif hasattr(self._stream_consumption_pace_monitor, "fps"):
-                actual_fps = self._stream_consumption_pace_monitor.fps
             else:
-                actual_fps = self._stream_consumption_pace_monitor()
+                # cache hasattr result, though practically this is usually invariant
+                # Try to avoid hasattr: short-circuit to attribute lookup directly in a try/except
+                try:
+                    actual_fps = scpm.fps
+                except AttributeError:
+                    actual_fps = scpm()
+
+        # Only compute stride when necessary
         if self._frame_counter == self._next_frame_from_video_to_accept:
             stride = calculate_video_file_stride(
                 actual_fps=actual_fps,
-                desired_fps=self._desired_fps,
+                desired_fps=desired_fps,
             )
             self._next_frame_from_video_to_accept += stride
             return False
@@ -1226,13 +1243,18 @@ def get_fps_if_tick_happens_now(fps_monitor: sv.FPSMonitor) -> float:
 def calculate_video_file_stride(
     actual_fps: Optional[Union[float, int]], desired_fps: Optional[Union[float, int]]
 ) -> int:
-    if actual_fps is None or desired_fps is None:
+    # rearrange checks to short-circuit as early as possible
+    if actual_fps is None or desired_fps is None or actual_fps < 0 or desired_fps < 0:
         return 1
-    if actual_fps < 0 or desired_fps < 0:
-        return 1
+
     true_stride = actual_fps / desired_fps
-    integer_stride = max(int(true_stride), 1)
-    probability_of_missing_frame = max(true_stride - integer_stride, 0)
-    if random.random() < probability_of_missing_frame:
+    integer_stride = int(true_stride)
+    if integer_stride < 1:
+        integer_stride = 1
+    probability_of_missing_frame = true_stride - integer_stride
+    if (
+        probability_of_missing_frame > 0
+        and random.random() < probability_of_missing_frame
+    ):
         integer_stride += 1
     return integer_stride
