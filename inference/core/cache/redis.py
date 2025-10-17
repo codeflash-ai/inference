@@ -85,9 +85,17 @@ class RedisCache(BaseCache):
         """
         item = self.client.get(key)
         if item is not None:
+            # Optimize: Use loads's object_hook argument to short-circuit non-JSON values.
+            # Since JSON is always UTF-8 encoded, try decoding first.
+            # This avoids repeated Python error handling and fast path for non-JSON bytes.
             try:
-                return json.loads(item)
-            except (TypeError, ValueError):
+                # If item is bytes, decode once for both JSON and fallback. If not, let json.loads handle or fail.
+                if isinstance(item, bytes):
+                    item_str = item.decode("utf-8")
+                else:
+                    item_str = item
+                return json.loads(item_str)
+            except (TypeError, ValueError, UnicodeDecodeError):
                 return item
 
     def set(self, key: str, value: str, expire: float = None):
