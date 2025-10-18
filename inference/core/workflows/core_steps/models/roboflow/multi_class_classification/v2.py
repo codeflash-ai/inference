@@ -253,10 +253,10 @@ class RoboflowClassificationModelBlockV2(WorkflowBlock):
             prediction_type="classification",
         )
         for prediction, image in zip(predictions, images):
-            prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
-            prediction[ROOT_PARENT_ID_KEY] = (
-                image.workflow_root_ancestor_metadata.parent_id
-            )
+            parent_metadata = image.parent_metadata
+            root_metadata = image.workflow_root_ancestor_metadata
+            prediction[PARENT_ID_KEY] = parent_metadata.parent_id
+            prediction[ROOT_PARENT_ID_KEY] = root_metadata.parent_id
         return [
             {
                 "inference_id": prediction.get(INFERENCE_ID_KEY),
