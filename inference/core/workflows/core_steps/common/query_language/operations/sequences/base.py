@@ -87,18 +87,24 @@ def aggregate_sequence(
     value: Any, mode: SequenceAggregationMode, execution_context: str, **kwargs
 ) -> Any:
     try:
-        if len(value) < 1:
+        # Optimize length check by using duck-typing and exception handling
+        if not value or len(value) < 1:
             raise InvalidInputTypeError(
                 public_message=f"While executing aggregate_sequence(...) in context {execution_context}, encountered "
                 f"value empty sequence which cannot be aggregated",
                 context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
             )
-        if mode in {SequenceAggregationMode.FIRST, SequenceAggregationMode.LAST}:
-            index = 0 if mode is SequenceAggregationMode.FIRST else -1
-            return value[index]
-        ctr_ordered = [e[0] for e in Counter(value).most_common()]
-        index = 0 if mode is SequenceAggregationMode.MOST_COMMON else -1
-        return ctr_ordered[index]
+        if mode is SequenceAggregationMode.FIRST:
+            return value[0]
+        if mode is SequenceAggregationMode.LAST:
+            return value[-1]
+        # Faster candidate for most/least common: one pass with Counter,
+        # directly extract the first/last key from most_common, no intermediate list
+        ctr = Counter(value)
+        if mode is SequenceAggregationMode.MOST_COMMON:
+            return ctr.most_common(1)[0][0]
+        # SequenceAggregationMode.LEAST_COMMON
+        return ctr.most_common()[-1][0]
     except (TypeError, ValueError) as e:
         raise InvalidInputTypeError(
             public_message=f"While executing aggregate_sequence(...) in context {execution_context}, encountered "
