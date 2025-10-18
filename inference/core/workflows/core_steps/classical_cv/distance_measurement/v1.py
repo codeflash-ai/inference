@@ -181,12 +181,12 @@ class DistanceMeasurementBlockV1(WorkflowBlock):
         pixel_ratio: float,
     ) -> BlockResult:
         if calibration_method == "reference object":
-            reference_predictions = predictions
+            # Pass predictions directly as reference_predictions (no copy needed)
             distances = measure_distance_with_reference_object(
                 detections=predictions,
                 object_1_class_name=object_1_class_name,
                 object_2_class_name=object_2_class_name,
-                reference_predictions=reference_predictions,
+                reference_predictions=predictions,
                 reference_object_class_name=reference_object_class_name,
                 reference_width=reference_width,
                 reference_height=reference_height,
@@ -216,12 +216,11 @@ def measure_distance_with_reference_object(
     reference_height: float,
     reference_axis: Literal["horizontal", "vertical"],
 ):
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
-    reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
-        detections, object_1_class_name, object_2_class_name
-    )
+    # Use pre-rounded, integer-indexed numpy array for bbox extraction, which is much faster than per-item round()/astype(int)
+    xyxy = detections.xyxy
+    class_names = detections.data["class_name"]
+    reference_bbox_1 = _find_bbox_fast(xyxy, class_names, object_1_class_name)
+    reference_bbox_2 = _find_bbox_fast(xyxy, class_names, object_2_class_name)
 
     if not reference_bbox_1 or not reference_bbox_2:
         raise ValueError(
@@ -234,14 +233,11 @@ def measure_distance_with_reference_object(
         return {OUTPUT_KEY_CENTIMETER: 0, OUTPUT_KEY_PIXEL: 0}
 
     # get the reference object bounding box
-    reference_bbox = None
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        reference_predictions.xyxy.round().astype(dtype=int),
-        reference_predictions.data["class_name"],
-    ):
-        if class_name == reference_object_class_name:
-            reference_bbox = (x_min, y_min, x_max, y_max)
-            break
+    xyxy_ref = reference_predictions.xyxy
+    class_names_ref = reference_predictions.data["class_name"]
+    reference_bbox = _find_bbox_fast(
+        xyxy_ref, class_names_ref, reference_object_class_name
+    )
 
     if not reference_bbox:
         raise ValueError(
@@ -278,12 +274,11 @@ def measure_distance_with_pixel_ratio(
     object_2_class_name: str,
     reference_axis: Literal["horizontal", "vertical"],
 ) -> List[Dict[str, Union[str, float]]]:
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
-    reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
-        detections, object_1_class_name, object_2_class_name
-    )
+    # Use optimized bbox search
+    xyxy = detections.xyxy
+    class_names = detections.data["class_name"]
+    reference_bbox_1 = _find_bbox_fast(xyxy, class_names, object_1_class_name)
+    reference_bbox_2 = _find_bbox_fast(xyxy, class_names, object_2_class_name)
 
     if not reference_bbox_1 or not reference_bbox_2:
         raise ValueError(
@@ -396,3 +391,17 @@ def measure_distance_pixels(
             else abs(reference_bbox_1[0] - reference_bbox_2[2])
         )
     return distance_pixels
+
+
+def _find_bbox_fast(xyxy, class_names, target_class_name: str) -> Union[tuple, None]:
+    # Scans arrays in parallel for single class instance, returns after first hit.
+    for i in range(len(class_names)):
+        if class_names[i] == target_class_name:
+            x_min, y_min, x_max, y_max = xyxy[i]
+            return (
+                int(round(x_min)),
+                int(round(y_min)),
+                int(round(x_max)),
+                int(round(y_max)),
+            )
+    return None
