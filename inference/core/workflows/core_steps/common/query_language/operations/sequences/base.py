@@ -124,11 +124,9 @@ def get_sequence_elements_count(
     value: Any, execution_context: str, **kwargs
 ) -> Dict[Any, int]:
     try:
-        res = {}
-        for v in value:
-            value_as_str = safe_stringify(value=v)
-            res[value_as_str] = res.setdefault(value_as_str, 0) + 1
-        return res
+        # Use Counter with a generator to avoid repeated dictionary accesses and leverage optimized C code
+        result = Counter(safe_stringify(value=v) for v in value)
+        return dict(result)
     except (TypeError, ValueError) as e:
         raise InvalidInputTypeError(
             public_message=f"While executing get_sequence_elements_count(...) in context {execution_context}, encountered "
