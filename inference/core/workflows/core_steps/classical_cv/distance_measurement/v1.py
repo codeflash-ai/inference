@@ -278,14 +278,12 @@ def measure_distance_with_pixel_ratio(
     object_2_class_name: str,
     reference_axis: Literal["horizontal", "vertical"],
 ) -> List[Dict[str, Union[str, float]]]:
-    reference_bbox_1 = None
-    reference_bbox_2 = None
-
+    # Find the reference bounding boxes for the given classes as early as possible
     reference_bbox_1, reference_bbox_2 = find_reference_bboxes(
         detections, object_1_class_name, object_2_class_name
     )
 
-    if not reference_bbox_1 or not reference_bbox_2:
+    if reference_bbox_1 is None or reference_bbox_2 is None:
         raise ValueError(
             f"Reference class '{object_1_class_name}' or '{object_2_class_name}' not found in predictions."
         )
@@ -329,6 +327,7 @@ def has_overlap(
     x1_min, y1_min, x1_max, y1_max = bbox1
     x2_min, y2_min, x2_max, y2_max = bbox2
 
+    # Efficient comparison for non-overlapping boxes
     if x1_max < x2_min or x2_max < x1_min:
         return False
     if y1_max < y2_min or y2_max < y1_min:
@@ -342,38 +341,40 @@ def has_axis_gap(
     reference_bbox_2: Tuple[int, int, int, int],
     reference_axis: str,
 ) -> bool:
+    # Combine "horizontal" and "vertical" early exit logic for fast check
     if reference_axis == "horizontal":
-        if (
+        return not (
             reference_bbox_1[0] < reference_bbox_2[2]
             and reference_bbox_1[2] > reference_bbox_2[0]
-        ):
-            return False
+        )
     else:
-        if (
+        return not (
             reference_bbox_1[1] < reference_bbox_2[3]
             and reference_bbox_1[3] > reference_bbox_2[1]
-        ):
-            return False
-
-    return True
+        )
 
 
 def find_reference_bboxes(
     detections: sv.Detections, object_1_class_name: str, object_2_class_name: str
 ):
+    # Use local variables, minimize repeated lookups
+    xyxy = detections.xyxy.round().astype(int)
+    class_names = detections.data["class_name"]
     reference_bbox_1 = None
     reference_bbox_2 = None
 
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        detections.xyxy.round().astype(dtype=int), detections.data["class_name"]
-    ):
+    for i in range(len(class_names)):
+        class_name = class_names[i]
         if class_name == object_1_class_name:
-            reference_bbox_1 = (x_min, y_min, x_max, y_max)
+            reference_bbox_1 = tuple(xyxy[i])
+            # Early exit if second bbox already found
+            if reference_bbox_2 is not None:
+                break
         elif class_name == object_2_class_name:
-            reference_bbox_2 = (x_min, y_min, x_max, y_max)
-
-        if reference_bbox_1 and reference_bbox_2:
-            break
+            reference_bbox_2 = tuple(xyxy[i])
+            # Early exit if first bbox already found
+            if reference_bbox_1 is not None:
+                break
 
     return reference_bbox_1, reference_bbox_2
 
@@ -383,16 +384,14 @@ def measure_distance_pixels(
     reference_bbox_1: Tuple[int, int, int, int],
     reference_bbox_2: Tuple[int, int, int, int],
 ):
+    # Reduce unnecessary abs() calls, keep logic flat
     if reference_axis == "vertical":
-        distance_pixels = (
-            abs(reference_bbox_2[1] - reference_bbox_1[3])
-            if reference_bbox_2[1] > reference_bbox_1[3]
-            else abs(reference_bbox_1[1] - reference_bbox_2[3])
-        )
+        if reference_bbox_2[1] > reference_bbox_1[3]:
+            return reference_bbox_2[1] - reference_bbox_1[3]
+        else:
+            return reference_bbox_1[1] - reference_bbox_2[3]
     else:
-        distance_pixels = (
-            abs(reference_bbox_2[0] - reference_bbox_1[2])
-            if reference_bbox_2[0] > reference_bbox_1[2]
-            else abs(reference_bbox_1[0] - reference_bbox_2[2])
-        )
-    return distance_pixels
+        if reference_bbox_2[0] > reference_bbox_1[2]:
+            return reference_bbox_2[0] - reference_bbox_1[2]
+        else:
+            return reference_bbox_1[0] - reference_bbox_2[2]
