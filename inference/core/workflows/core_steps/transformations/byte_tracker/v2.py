@@ -22,6 +22,13 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Cache the OutputDefinition instance at class level to avoid reallocating it on each call
+_OUTPUT_DEFINITIONS: List[OutputDefinition] = [
+    OutputDefinition(
+        name="tracked_detections", kind=[OBJECT_DETECTION_PREDICTION_KIND]
+    ),
+]
+
 OUTPUT_KEY: str = "tracked_detections"
 SHORT_DESCRIPTION = (
     "Track and update object positions across video frames using ByteTrack."
@@ -97,9 +104,7 @@ class ByteTrackerBlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=OUTPUT_KEY, kind=[OBJECT_DETECTION_PREDICTION_KIND]),
-        ]
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
