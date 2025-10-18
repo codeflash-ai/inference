@@ -43,6 +43,12 @@ from inference.core.workflows.prototypes.block import (
 )
 from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 
+_OUTPUTS = [
+    OutputDefinition(name="predictions", kind=[CLASSIFICATION_PREDICTION_KIND]),
+    OutputDefinition(name=INFERENCE_ID_KEY, kind=[INFERENCE_ID_KIND]),
+    OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
+]
+
 LONG_DESCRIPTION = """
 Run inference on a multi-class classification model hosted on or uploaded to Roboflow.
 
@@ -104,11 +110,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="predictions", kind=[CLASSIFICATION_PREDICTION_KIND]),
-            OutputDefinition(name=INFERENCE_ID_KEY, kind=[INFERENCE_ID_KIND]),
-            OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
