@@ -1,7 +1,6 @@
 import hashlib
 import logging
 import re
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
@@ -336,6 +335,7 @@ def format_message(
     message_parameters_operations: Dict[str, List[AllOperationsType]],
     length_limit: int,
 ) -> str:
+    # Find all placeholders and valid parameters in a single scan
     matching_parameters = PARAMETER_REGEX.findall(message)
     parameters_to_get_values = {
         p[1] for p in matching_parameters if p[1] in message_parameters
@@ -351,16 +351,17 @@ def format_message(
         parameters_values[parameter_name] = operations_chain(
             parameter_value, global_parameters={}
         )
-    parameter_to_placeholders = defaultdict(list)
-    for placeholder, parameter_name in matching_parameters:
-        if parameter_name not in parameters_to_get_values:
-            continue
-        parameter_to_placeholders[parameter_name].append(placeholder)
-    for parameter_name, placeholders in parameter_to_placeholders.items():
-        for placeholder in placeholders:
-            message = message.replace(
-                placeholder, str(parameters_values[parameter_name])
-            )
+    # Fast placeholder replacement using regex and a callback
+    if parameters_values:
+
+        def _replace_param(match):
+            parameter_name = match.group(2)
+            if parameter_name in parameters_values:
+                return str(parameters_values[parameter_name])
+            return match.group(0)
+
+        message = PARAMETER_REGEX.sub(_replace_param, message)
+    # Only truncate if necessary
     if len(message) > length_limit:
         truncated_message = message[: length_limit - 1 - len(TRUNCATION_MARKER)]
         message = f"{truncated_message} {TRUNCATION_MARKER}"
