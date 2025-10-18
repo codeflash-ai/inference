@@ -364,14 +364,22 @@ def find_reference_bboxes(
     reference_bbox_1 = None
     reference_bbox_2 = None
 
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        detections.xyxy.round().astype(dtype=int), detections.data["class_name"]
-    ):
-        if class_name == object_1_class_name:
-            reference_bbox_1 = (x_min, y_min, x_max, y_max)
-        elif class_name == object_2_class_name:
-            reference_bbox_2 = (x_min, y_min, x_max, y_max)
+    # Precompute variables and references for efficiency
+    xyxy = detections.xyxy
+    class_names = detections.data["class_name"]
+    # Avoid repeated .round() and .astype()
+    rounded_xyxy = xyxy.round().astype(int)
 
+    # Since we are searching for two specific class names, find their indices quickly
+    # Use enumerate to avoid zip overhead
+    for i, class_name in enumerate(class_names):
+        # Avoid unpacking unless necessary
+        if class_name == object_1_class_name:
+            reference_bbox_1 = tuple(rounded_xyxy[i])
+        elif class_name == object_2_class_name:
+            reference_bbox_2 = tuple(rounded_xyxy[i])
+
+        # Early termination when both are found
         if reference_bbox_1 and reference_bbox_2:
             break
 
