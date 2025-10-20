@@ -236,16 +236,18 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
-    if isinstance(value, WorkflowImageData):
-        value = serialise_image(image=value)
-    elif isinstance(value, dict):
-        value = serialize_dict(elements=value)
-    elif isinstance(value, list):
-        value = serialize_list(elements=value)
-    elif isinstance(value, sv.Detections):
-        value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
-        value = serialize_timestamp(timestamp=value)
+    # Speed optimization: use if-elif in fastest likely-to-match order:
+    typ = type(value)
+    if typ is WorkflowImageData:
+        return serialise_image(image=value)
+    elif typ is dict:
+        return serialize_dict(elements=value)
+    elif typ is list:
+        return serialize_list(elements=value)
+    elif typ is sv.Detections:
+        return serialise_sv_detections(detections=value)
+    elif typ is datetime:
+        return serialize_timestamp(timestamp=value)
     return value
 
 
@@ -258,11 +260,8 @@ def serialize_list(elements: List[Any]) -> List[Any]:
 
 
 def serialize_dict(elements: Dict[str, Any]) -> Dict[str, Any]:
-    serialized_result = {}
-    for key, value in elements.items():
-        value = serialize_wildcard_kind(value=value)
-        serialized_result[key] = value
-    return serialized_result
+    # Performance: use dictionary comprehension for faster and more memory-efficient creation
+    return {key: serialize_wildcard_kind(value) for key, value in elements.items()}
 
 
 def serialize_secret(secret: str) -> str:
