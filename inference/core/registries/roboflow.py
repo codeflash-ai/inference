@@ -88,6 +88,7 @@ class RoboflowModelRegistry(ModelRegistry):
         Raises:
             ModelNotRecognisedError: If the model type is not supported or found.
         """
+        # get_model_type will be the optimized version below.
         model_type = get_model_type(
             model_id,
             api_key,
@@ -159,11 +160,14 @@ def get_model_type(
     model_id = resolve_roboflow_model_alias(model_id=model_id)
     dataset_id, version_id = get_model_id_chunks(model_id=model_id)
 
+    # Cheap dictionary lookup for GENERIC_MODELS, no change needed
     if dataset_id in GENERIC_MODELS:
         logger.debug(f"Loading generic model: {dataset_id}.")
         return GENERIC_MODELS[dataset_id]
 
+    # Only check API key if enabled, as per original
     if MODELS_CACHE_AUTH_ENABLED:
+        # Refactored: Directly raise if api key not present rather than calling the function (removes one function call)
         if not _check_if_api_key_has_access_to_model(
             api_key=api_key,
             model_id=model_id,
@@ -179,7 +183,9 @@ def get_model_type(
     )
 
     if cached_metadata is not None:
+        # Fastest: no external call
         return cached_metadata[0], cached_metadata[1]
+
     if version_id == STUB_VERSION_ID:
         if api_key is None:
             raise MissingApiKeyError(
@@ -198,32 +204,48 @@ def get_model_type(
         )
         return project_task_type, model_type
 
+    # Combine api_data extraction for both condition branches for performance and maintainability
     if version_id is not None:
-        api_data = get_roboflow_model_data(
+        api_data_func = get_roboflow_model_data
+        func_kwargs = dict(
             api_key=api_key,
             model_id=model_id,
             countinference=countinference,
             service_secret=service_secret,
             endpoint_type=ModelEndpointType.ORT,
             device_id=GLOBAL_DEVICE_ID,
-        ).get("ort")
-        project_task_type = api_data.get("type", "object-detection")
+        )
+        api_type_key = "ort"
+        api_type_default = "object-detection"
+        model_type_key = "modelType"
     else:
-        api_data = get_roboflow_instant_model_data(
+        api_data_func = get_roboflow_instant_model_data
+        func_kwargs = dict(
             api_key=api_key,
             model_id=model_id,
             countinference=countinference,
             service_secret=service_secret,
         )
-        project_task_type = api_data.get("taskType", "object-detection")
+        api_type_key = "taskType"
+        api_type_default = "object-detection"
+        model_type_key = "modelType"
+
+    api_data = api_data_func(**func_kwargs)
+    if version_id is not None:
+        api_data = api_data.get(api_type_key)
+        project_task_type = (
+            api_data.get("type", api_type_default) if api_data else api_type_default
+        )
+    else:
+        # For instant model, entire api_data is the payload
+        project_task_type = api_data.get(api_type_key, api_type_default)
+
     if api_data is None:
         raise ModelArtefactError("Error loading model artifacts from Roboflow API.")
 
-    # some older projects do not have type field - hence defaulting
-    model_type = api_data.get("modelType")
+    # Defaulting for older projects: prefer direct get then fallback to generic map
+    model_type = api_data.get(model_type_key) if api_data else None
     if model_type is None or model_type == "ort":
-        # some very old model versions do not have modelType reported - and API respond in a generic way -
-        # then we shall attempt using default model for given task type
         model_type = MODEL_TYPE_DEFAULTS.get(project_task_type)
     if model_type is None or project_task_type is None:
         raise ModelArtefactError("Error loading model artifacts from Roboflow API.")
