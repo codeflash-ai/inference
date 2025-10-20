@@ -128,6 +128,7 @@ class PathDeviationAnalyticsBlockV2(WorkflowBlock):
             ref_path = np.array(reference_path)
 
             frechet_distance = self._calculate_frechet_distance(object_path, ref_path)
+
             detection[PATH_DEVIATION_KEY_IN_SV_DETECTIONS] = np.array(
                 [frechet_distance], dtype=np.float64
             )
@@ -180,3 +181,6 @@ class PathDeviationAnalyticsBlockV2(WorkflowBlock):
 
     def _euclidean_distance(self, point1: np.ndarray, point2: np.ndarray) -> float:
         return np.sqrt(np.sum((point1 - point2) ** 2))
+
+    def _euclidean_distance(self, point1: np.ndarray, point2: np.ndarray) -> float:
+        return np.linalg.norm(point1 - point2)
