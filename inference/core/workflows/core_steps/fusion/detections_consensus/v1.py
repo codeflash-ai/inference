@@ -531,16 +531,29 @@ def merge_detections(
     class_name, class_id = AGGREGATION_MODE2CLASS_SELECTOR[confidence_aggregation_mode](
         detections
     )
+
+    # Prepare mask and bounding box only as required
     if detections.mask is not None:
-        mask = np.array(
-            [AGGREGATION_MODE2MASKS_AGGREGATOR[mask_aggregation_mode](detections)]
-        )
+        # Avoid creating unnecessary new arrays by allocating the minimum array size and dtype
+        mask_agg = AGGREGATION_MODE2MASKS_AGGREGATOR[mask_aggregation_mode](detections)
+        if not isinstance(mask_agg, np.ndarray):
+            mask_agg = np.array(mask_agg)
+        if mask_agg.ndim == 2:
+            mask = mask_agg[None]  # shape (1, H, W)
+        else:
+            mask = mask_agg
         x1, y1, x2, y2 = sv.mask_to_xyxy(mask)[0]
     else:
         mask = None
-        x1, y1, x2, y2 = AGGREGATION_MODE2BOXES_AGGREGATOR[boxes_aggregation_mode](
-            detections
-        )
+        box = AGGREGATION_MODE2BOXES_AGGREGATOR[boxes_aggregation_mode](detections)
+        if isinstance(box, np.ndarray):
+            x1, y1, x2, y2 = (
+                map(float, box.tolist()) if box.shape else (float(box),) * 4
+            )
+        else:
+            x1, y1, x2, y2 = box
+
+    # Bulk creation of numpy arrays directly without intermediate Python lists
     data = {
         "class_name": np.array([class_name]),
         PARENT_ID_KEY: np.array([detections[PARENT_ID_KEY][0]]),
@@ -557,6 +570,7 @@ def merge_detections(
         ),
         IMAGE_DIMENSIONS_KEY: np.array([detections[IMAGE_DIMENSIONS_KEY][0]]),
     }
+
     if SCALING_RELATIVE_TO_PARENT_KEY in detections.data:
         data[SCALING_RELATIVE_TO_PARENT_KEY] = np.array(
             [detections[SCALING_RELATIVE_TO_PARENT_KEY][0]]
@@ -569,6 +583,7 @@ def merge_detections(
         )
     else:
         data[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array([1.0])
+
     return sv.Detections(
         xyxy=np.array([[x1, y1, x2, y2]], dtype=np.float64),
         class_id=np.array([class_id]),
@@ -699,13 +714,21 @@ def aggregate_field_values(
     field: str,
     aggregation_mode: AggregationMode = AggregationMode.AVERAGE,
 ) -> float:
-    values = []
+    # No unnecessary Python list conversion; use numpy arrays for performance
     if hasattr(detections, field):
         values = getattr(detections, field)
         if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+            values = values.astype(float, copy=False)
+        else:
+            values = np.asarray(values, dtype=float)
     elif hasattr(detections, "data") and field in detections.data:
         values = detections[field]
         if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+            values = values.astype(float, copy=False)
+        else:
+            values = np.asarray(values, dtype=float)
+    else:
+        values = np.array([], dtype=float)  # Safety, should not occur
+
+    # AGGREGATION_MODE2FIELD_AGGREGATOR expects a sequence
     return AGGREGATION_MODE2FIELD_AGGREGATOR[aggregation_mode](values)
