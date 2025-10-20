@@ -257,7 +257,10 @@ class DetectionsConsensusBlockV1(WorkflowBlock):
 def does_not_detect_objects_in_any_source(
     detections_from_sources: List[sv.Detections],
 ) -> bool:
-    return all(len(p) == 0 for p in detections_from_sources)
+    for p in detections_from_sources:
+        if len(p) != 0:
+            return False
+    return True
 
 
 def get_parent_id_of_detections_from_sources(
