@@ -198,8 +198,13 @@ def manage_crops_metadata(
         raise ValueError(
             "To process non-empty detections offset is needed, but not given"
         )
-    if SCALING_RELATIVE_TO_PARENT_KEY in detections.data:
-        scale = detections[SCALING_RELATIVE_TO_PARENT_KEY][0]
+
+    data = detections.data
+
+    # Fast path for checking scaling key
+    scale_data = data.get(SCALING_RELATIVE_TO_PARENT_KEY)
+    if scale_data is not None:
+        scale = scale_data[0]
         if abs(scale - 1.0) > 1e-4:
             raise ValueError(
                 f"Scaled bounding boxes were passed to Detections Stitch block "
@@ -208,11 +213,21 @@ def manage_crops_metadata(
                 f"scaling cannot be used in the meantime. This error probably indicate "
                 f"wrong step output plugged as input of this step."
             )
-    if PARENT_COORDINATES_KEY in detections.data:
-        detections.data[PARENT_COORDINATES_KEY] -= offset
-    if ROOT_PARENT_COORDINATES_KEY in detections.data:
-        detections.data[ROOT_PARENT_COORDINATES_KEY] -= offset
-    detections.data[PARENT_ID_KEY] = np.array([parent_id] * len(detections))
+
+    # Subtract offset in-place only if the key exists.
+    parent_coords = data.get(PARENT_COORDINATES_KEY)
+    if parent_coords is not None:
+        np.subtract(parent_coords, offset, out=parent_coords)
+
+    root_parent_coords = data.get(ROOT_PARENT_COORDINATES_KEY)
+    if root_parent_coords is not None:
+        np.subtract(root_parent_coords, offset, out=root_parent_coords)
+
+    # Efficiently fill parent id -- avoids temporaries if possible
+    count = len(detections)
+    # Use numpy.full for possible performance/memory gain over creating Python list
+    data[PARENT_ID_KEY] = np.full(count, parent_id, dtype=object)
+
     return detections
 
 
