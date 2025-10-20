@@ -133,15 +133,21 @@ class DetectionsStitchBlockV1(WorkflowBlock):
         overlap_filtering_strategy: Optional[Literal["none", "nms", "nmm"]],
         iou_threshold: Optional[float],
     ) -> BlockResult:
+        # PRE: deepcopy(detections) is used to ensure input mutation isolation.
+        # Optimization: Replace deepcopy with more efficient custom copying for sv.Detections.
         re_aligned_predictions = []
+        parent_id = reference_image.parent_metadata.parent_id
         for detections in predictions:
-            detections_copy = deepcopy(detections)
+            if len(detections) == 0:
+                re_aligned_predictions.append(detections)
+                continue
+            detections_copy = _shallow_sv_detections_copy(detections)
             resolution_wh = retrieve_crop_wh(detections=detections_copy)
             offset = retrieve_crop_offset(detections=detections_copy)
             detections_copy = manage_crops_metadata(
                 detections=detections_copy,
                 offset=offset,
-                parent_id=reference_image.parent_metadata.parent_id,
+                parent_id=parent_id,
             )
             re_aligned_detections = move_detections(
                 detections=detections_copy,
@@ -163,28 +169,31 @@ class DetectionsStitchBlockV1(WorkflowBlock):
 def retrieve_crop_wh(detections: sv.Detections) -> Optional[Tuple[int, int]]:
     if len(detections) == 0:
         return None
-    if PARENT_DIMENSIONS_KEY not in detections.data:
+    dimensions = detections.data.get(PARENT_DIMENSIONS_KEY)
+    if dimensions is None:
         raise RuntimeError(
             f"Dimensions for crops is expected to be saved in data key {PARENT_DIMENSIONS_KEY} "
             f"of sv.Detections, but could not be found. Probably block producing sv.Detections "
             f"lack this part of implementation or has a bug."
         )
-    return (
-        detections.data[PARENT_DIMENSIONS_KEY][0][1].item(),
-        detections.data[PARENT_DIMENSIONS_KEY][0][0].item(),
-    )
+    arr = dimensions[0]
+    # Inline .item() to avoid repeated attribute access
+    return (arr[1].item(), arr[0].item())
 
 
 def retrieve_crop_offset(detections: sv.Detections) -> Optional[np.ndarray]:
     if len(detections) == 0:
         return None
-    if PARENT_COORDINATES_KEY not in detections.data:
+    coords = detections.data.get(PARENT_COORDINATES_KEY)
+    if coords is None:
         raise RuntimeError(
             f"Offset for crops is expected to be saved in data key {PARENT_COORDINATES_KEY} "
             f"of sv.Detections, but could not be found. Probably block producing sv.Detections "
             f"lack this part of implementation or has a bug."
         )
-    return detections.data[PARENT_COORDINATES_KEY][0][:2].copy()
+    # Slice + copy efficiently
+    # parent coordinates: [x_offset, y_offset, ...]
+    return coords[0][:2].copy()
 
 
 def manage_crops_metadata(
@@ -198,8 +207,9 @@ def manage_crops_metadata(
         raise ValueError(
             "To process non-empty detections offset is needed, but not given"
         )
-    if SCALING_RELATIVE_TO_PARENT_KEY in detections.data:
-        scale = detections[SCALING_RELATIVE_TO_PARENT_KEY][0]
+    scale_arr = detections.data.get(SCALING_RELATIVE_TO_PARENT_KEY)
+    if scale_arr is not None:
+        scale = scale_arr[0]
         if abs(scale - 1.0) > 1e-4:
             raise ValueError(
                 f"Scaled bounding boxes were passed to Detections Stitch block "
@@ -208,11 +218,15 @@ def manage_crops_metadata(
                 f"scaling cannot be used in the meantime. This error probably indicate "
                 f"wrong step output plugged as input of this step."
             )
+    # Use get + mutation only if key present, avoids repeated lookups
     if PARENT_COORDINATES_KEY in detections.data:
         detections.data[PARENT_COORDINATES_KEY] -= offset
     if ROOT_PARENT_COORDINATES_KEY in detections.data:
         detections.data[ROOT_PARENT_COORDINATES_KEY] -= offset
-    detections.data[PARENT_ID_KEY] = np.array([parent_id] * len(detections))
+    # Use np.full for clearer intent, possible speedup for large arrays
+    # Avoid list multiplication inside np.array for large N
+    arr_len = len(detections)
+    detections.data[PARENT_ID_KEY] = np.full(arr_len, parent_id, dtype=object)
     return detections
 
 
@@ -231,7 +245,7 @@ def move_detections(
     if offset is None:
         raise ValueError("To move non-empty detections offset is needed, but not given")
     detections.xyxy = move_boxes(xyxy=detections.xyxy, offset=offset)
-    if detections.mask is not None:
+    if getattr(detections, "mask", None) is not None:
         if resolution_wh is None:
             raise ValueError(
                 "To move non-empty detections with segmentation mask, resolution_wh is needed, but not given."
@@ -254,3 +268,41 @@ def choose_overlap_filter_strategy(
     raise ValueError(
         f"Invalid overlap filtering strategy: {overlap_filtering_strategy}"
     )
+
+
+def _shallow_sv_detections_copy(detections: sv.Detections) -> sv.Detections:
+    # More efficient than deepcopy for sv.Detections since deep copying array data/metadata is expensive
+    # Only perform a copy of mutable parts, leave immutable objects as references
+    # This helper is only for optimizing Detections copying, not for generic objects
+    # The interface of sv.Detections may vary -- adjust only if contract changes.
+    cls = type(detections)
+    new_obj = cls.__new__(cls)
+    # Copy basic attributes
+    # Avoid copying mask if it's None
+    new_obj.xyxy = (
+        detections.xyxy.copy() if hasattr(detections.xyxy, "copy") else detections.xyxy
+    )
+    new_obj.confidence = (
+        detections.confidence.copy()
+        if hasattr(detections.confidence, "copy")
+        else detections.confidence
+    )
+    new_obj.class_id = (
+        detections.class_id.copy()
+        if hasattr(detections.class_id, "copy")
+        else detections.class_id
+    )
+    new_obj.data = {
+        k: v.copy() if hasattr(v, "copy") else v for k, v in detections.data.items()
+    }
+    new_obj.mask = (
+        detections.mask.copy()
+        if getattr(detections, "mask", None) is not None
+        else None
+    )
+    # Copy any other custom attributes present
+    for key in detections.__dict__:
+        if key in ("xyxy", "confidence", "class_id", "data", "mask"):
+            continue
+        setattr(new_obj, key, getattr(detections, key))
+    return new_obj
