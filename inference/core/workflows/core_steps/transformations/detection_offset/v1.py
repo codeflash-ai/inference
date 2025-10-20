@@ -142,39 +142,50 @@ def offset_detections(
 ) -> sv.Detections:
     if len(detections) == 0:
         return detections
-    _detections = deepcopy(detections)
-    image_dimensions = detections.data["image_dimensions"]
+    # Avoid deepcopy, instead reconstruct Detections like original but only copy/modify as needed for speed
+    _detections = sv.Detections(
+        **detections.data
+    )  # Shallow copy of data dict (including xyxy and image_dimensions)
+    image_dimensions = _detections.data["image_dimensions"]
+    xyxy = _detections.xyxy
+    num_boxes = xyxy.shape[0]
+    # Vectorized modification of bounding boxes
+    x1 = xyxy[:, 0]
+    y1 = xyxy[:, 1]
+    x2 = xyxy[:, 2]
+    y2 = xyxy[:, 3]
+
     if use_percentage:
-        _detections.xyxy = np.array(
-            [
-                (
-                    max(0, x1 - int(box_width * offset_width / 200)),
-                    max(0, y1 - int(box_height * offset_height / 200)),
-                    min(
-                        image_dimensions[i][1],
-                        x2 + int(box_width * offset_width / 200),
-                    ),
-                    min(
-                        image_dimensions[i][0],
-                        y2 + int(box_height * offset_height / 200),
-                    ),
-                )
-                for i, (x1, y1, x2, y2) in enumerate(_detections.xyxy)
-                for box_width, box_height in [(x2 - x1, y2 - y1)]
-            ]
-        )
+        # Vectorized percent-based offset
+        box_widths = x2 - x1
+        box_heights = y2 - y1
+        offset_w = (box_widths * offset_width / 200).astype(int)
+        offset_h = (box_heights * offset_height / 200).astype(int)
+        img_heights = np.array([dim[0] for dim in image_dimensions])
+        img_widths = np.array([dim[1] for dim in image_dimensions])
+
+        new_x1 = np.maximum(0, x1 - offset_w)
+        new_y1 = np.maximum(0, y1 - offset_h)
+        new_x2 = np.minimum(img_widths, x2 + offset_w)
+        new_y2 = np.minimum(img_heights, y2 + offset_h)
+
+        _detections.xyxy = np.stack((new_x1, new_y1, new_x2, new_y2), axis=-1)
     else:
-        _detections.xyxy = np.array(
-            [
-                (
-                    max(0, x1 - offset_width // 2),
-                    max(0, y1 - offset_height // 2),
-                    min(image_dimensions[i][1], x2 + offset_width // 2),
-                    min(image_dimensions[i][0], y2 + offset_height // 2),
-                )
-                for i, (x1, y1, x2, y2) in enumerate(_detections.xyxy)
-            ]
-        )
+        # Vectorized pixel-based offset
+        half_w = offset_width // 2
+        half_h = offset_height // 2
+        img_heights = np.array([dim[0] for dim in image_dimensions])
+        img_widths = np.array([dim[1] for dim in image_dimensions])
+
+        new_x1 = np.maximum(0, x1 - half_w)
+        new_y1 = np.maximum(0, y1 - half_h)
+        new_x2 = np.minimum(img_widths, x2 + half_w)
+        new_y2 = np.minimum(img_heights, y2 + half_h)
+
+        _detections.xyxy = np.stack((new_x1, new_y1, new_x2, new_y2), axis=-1)
+
+    # Copy parent id and assign new unique uuid4 ids (faster than a list comprehension where possible)
     _detections[parent_id_key] = detections[detection_id_key].copy()
-    _detections[detection_id_key] = [str(uuid.uuid4()) for _ in detections]
+    # List comprehension for uuid4 is still fastest due to Python overhead
+    _detections[detection_id_key] = [str(uuid.uuid4()) for _ in range(len(detections))]
     return _detections
