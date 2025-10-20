@@ -10,6 +10,8 @@ from inference.core.devices.utils import GLOBAL_INFERENCE_SERVER_ID
 from inference.core.logger import logger
 from inference.core.managers.metrics import get_model_metrics
 
+_SANITIZE_PATTERN = re.compile(r"[^a-zA-Z0-9_]")
+
 
 class InferenceInstrumentator:
     """
@@ -57,7 +59,7 @@ class CustomCollector(Collector):
         return results
 
     def sanitize_string(self, input_string):
-        sanitized_string = re.sub(r"[^a-zA-Z0-9_]", "_", input_string)
+        sanitized_string = _SANITIZE_PATTERN.sub("_", input_string)
         return sanitized_string
 
     def collect(self):
