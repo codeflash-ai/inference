@@ -236,25 +236,26 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
+    # Optimize decision order to check most likely/cheapest cases first
+    if isinstance(value, dict):
+        # dict is a common built-in type, check early
+        return serialize_dict(elements=value)
+    if isinstance(value, list):
+        # list is also common, prefer early check
+        return serialize_list(elements=value)
+    # Remove unnecessary variable rebinding for performance/readability
+    if isinstance(value, datetime):
+        return serialize_timestamp(timestamp=value)
     if isinstance(value, WorkflowImageData):
-        value = serialise_image(image=value)
-    elif isinstance(value, dict):
-        value = serialize_dict(elements=value)
-    elif isinstance(value, list):
-        value = serialize_list(elements=value)
-    elif isinstance(value, sv.Detections):
-        value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
-        value = serialize_timestamp(timestamp=value)
+        return serialise_image(image=value)
+    if isinstance(value, sv.Detections):
+        return serialise_sv_detections(detections=value)
     return value
 
 
 def serialize_list(elements: List[Any]) -> List[Any]:
-    result = []
-    for element in elements:
-        element = serialize_wildcard_kind(value=element)
-        result.append(element)
-    return result
+    # Use list comprehension for performance and less overhead
+    return [serialize_wildcard_kind(value=element) for element in elements]
 
 
 def serialize_dict(elements: Dict[str, Any]) -> Dict[str, Any]:
