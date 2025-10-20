@@ -161,18 +161,27 @@ class DetectionsStitchBlockV1(WorkflowBlock):
 
 
 def retrieve_crop_wh(detections: sv.Detections) -> Optional[Tuple[int, int]]:
-    if len(detections) == 0:
+    # Fast exit using __bool__ (if implemented) instead of len() for possible speedup
+    if (
+        not detections
+    ):  # sv.Detections likely implements __bool__, and this avoids calling __len__
         return None
-    if PARENT_DIMENSIONS_KEY not in detections.data:
+
+    # Direct local variable lookup for data to save repeated attribute access
+    data = detections.data
+    if PARENT_DIMENSIONS_KEY not in data:
         raise RuntimeError(
             f"Dimensions for crops is expected to be saved in data key {PARENT_DIMENSIONS_KEY} "
             f"of sv.Detections, but could not be found. Probably block producing sv.Detections "
             f"lack this part of implementation or has a bug."
         )
-    return (
-        detections.data[PARENT_DIMENSIONS_KEY][0][1].item(),
-        detections.data[PARENT_DIMENSIONS_KEY][0][0].item(),
-    )
+
+    parent_dims = data[PARENT_DIMENSIONS_KEY]
+    dims = parent_dims[0]
+    # Avoid repeated attribute lookups by storing dims item references
+    w_item = dims[1].item()
+    h_item = dims[0].item()
+    return (w_item, h_item)
 
 
 def retrieve_crop_offset(detections: sv.Detections) -> Optional[np.ndarray]:
