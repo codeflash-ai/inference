@@ -86,4 +86,4 @@ class DetectionsCombineBlockV1(WorkflowBlock):
         prediction_one: sv.Detections,
         prediction_two: sv.Detections,
     ) -> BlockResult:
-        return {"predictions": sv.Detections.merge([prediction_one, prediction_two])}
+        return {"predictions": prediction_one.merge_with(prediction_two)}
