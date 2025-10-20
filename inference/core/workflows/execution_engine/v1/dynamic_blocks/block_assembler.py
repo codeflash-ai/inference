@@ -458,17 +458,24 @@ def assembly_manifest_class_methods(
 def pick_dimensionality_reference_property(
     block_type: str, inputs: Dict[str, DynamicInputDefinition]
 ) -> Optional[str]:
-    references = []
+    # Scan once and return early for performance and memory efficiency.
+    reference_name = None
+    found_second = False
     for name, definition in inputs.items():
         if definition.is_dimensionality_reference:
-            references.append(name)
-    if not references:
+            if reference_name is None:
+                reference_name = name
+            else:
+                found_second = True
+                break
+    if reference_name is None:
         return None
-    if len(references) == 1:
-        return references[0]
-    raise DynamicBlockError(
-        public_message=f"For dynamic block {block_type} detected multiple inputs declared to be "
-        f"dimensionality reference: {references}, whereas at max one should be declared "
-        f"to be reference.",
-        context="workflow_compilation | dynamic_block_compilation | manifest_compilation",
-    )
+    if found_second:
+        references = [reference_name] + [name]
+        raise DynamicBlockError(
+            public_message=f"For dynamic block {block_type} detected multiple inputs declared to be "
+            f"dimensionality reference: {references}, whereas at max one should be declared "
+            f"to be reference.",
+            context="workflow_compilation | dynamic_block_compilation | manifest_compilation",
+        )
+    return reference_name
