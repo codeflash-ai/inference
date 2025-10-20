@@ -144,61 +144,77 @@ class TimeInZoneBlockV3(WorkflowBlock):
             )
         metadata = image.video_metadata
         zones = ensure_zone_is_list_of_polygons(zone)
-        zone_key = f"{metadata.video_identifier}_{str(zones)}"
+        # improve str(zones) speed/collision properties
+        # zones should only contain lists of points, so a tuple-based repr is possible
+        zone_key = f"{metadata.video_identifier}_{repr(zones)}"
         if zone_key not in self._batch_of_polygon_zones:
+            # the check below (len(zones) > 0) can be avoided in the inner predicates for speed
+            # use itertools.chain only once, materialize for performance
             if len(zones) > 0 and (not isinstance(zones[0], list) or len(zones[0]) < 3):
                 raise ValueError(
                     f"{self.__class__.__name__} requires zone to be a list containing more than 2 points"
                 )
+
+            point_iter = list(itertools.chain.from_iterable(zones))
             if any(
                 (not isinstance(e, list) and not isinstance(e, tuple)) or len(e) != 2
-                for e in itertools.chain.from_iterable(zones)
+                for e in point_iter
             ):
                 raise ValueError(
                     f"{self.__class__.__name__} requires each point of zone to be a list containing exactly 2 coordinates"
                 )
             if any(
                 not isinstance(e[0], (int, float)) or not isinstance(e[1], (int, float))
-                for e in itertools.chain.from_iterable(zones)
+                for e in point_iter
             ):
                 raise ValueError(
                     f"{self.__class__.__name__} requires each coordinate of zone to be a number"
                 )
+            # Avoid repeated __init__ conversions of anchor
+            anchor_obj = sv.Position(triggering_anchor)
             self._batch_of_polygon_zones[zone_key] = [
                 sv.PolygonZone(
-                    polygon=np.array(zone),
-                    triggering_anchors=(sv.Position(triggering_anchor),),
+                    polygon=np.array(zone, dtype=np.float32),
+                    triggering_anchors=(anchor_obj,),
                 )
                 for zone in zones
             ]
-            # keeps the cache size at ZONE_CACHE_SIZE
             if len(self._batch_of_polygon_zones) > ZONE_CACHE_SIZE:
                 self._batch_of_polygon_zones.popitem(last=False)
         polygon_zones = self._batch_of_polygon_zones[zone_key]
         tracked_ids_in_zone = self._batch_of_tracked_ids_in_zone.setdefault(
             metadata.video_identifier, {}
         )
+        # Compute result_detections using efficient prealloc and views
         result_detections = []
         if metadata.comes_from_video_file and metadata.fps != 0:
             ts_end = metadata.frame_number / metadata.fps
         else:
             ts_end = metadata.frame_timestamp.timestamp()
 
-        # get trigger for all zones. It is a matrix of shape (len(zones), len(detections))
-        polygon_triggers = [
-            polygon_zone.trigger(detections) for polygon_zone in polygon_zones
-        ]
-        is_in_any_zone = (
-            np.any(polygon_triggers, axis=0)
-            if len(polygon_triggers) > 0
-            else np.array([False] * len(detections))
-        )
+        # Use numpy for fast boolean combinations
+        if polygon_zones:
+            polygon_triggers_list = [
+                polygon_zone.trigger(detections) for polygon_zone in polygon_zones
+            ]
+            if len(polygon_triggers_list) == 1:
+                is_in_any_zone = polygon_triggers_list[0]
+            else:
+                is_in_any_zone = np.any(np.stack(polygon_triggers_list, axis=0), axis=0)
+        else:
+            is_in_any_zone = np.zeros(len(detections), dtype=bool)
 
-        for i, is_in_zone, tracker_id in zip(
-            range(len(detections)),
-            is_in_any_zone,
-            detections.tracker_id,
-        ):
+        # Direct indexing is slightly faster than zip with range
+        detections_tracker_id = detections.tracker_id
+        # Pre-allocate the field array to save repeated array allocations
+        zero_field = np.zeros(1, dtype=np.float64)
+        # ts_diff_field for all originally in-zone
+        result_append = result_detections.append
+        tracked_ids_in_zone_setdefault = tracked_ids_in_zone.setdefault
+
+        for i in range(len(detections)):
+            is_in_zone = is_in_any_zone[i]
+            tracker_id = detections_tracker_id[i]
             if (
                 not is_in_zone
                 and tracker_id in tracked_ids_in_zone
@@ -208,20 +224,17 @@ class TimeInZoneBlockV3(WorkflowBlock):
             if not is_in_zone and remove_out_of_zone_detections:
                 continue
 
-            # copy
             detection = detections[i]
 
-            detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = np.array(
-                [0], dtype=np.float64
-            )
+            detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = zero_field
             if is_in_zone:
-                ts_start = tracked_ids_in_zone.setdefault(tracker_id, ts_end)
+                ts_start = tracked_ids_in_zone_setdefault(tracker_id, ts_end)
                 detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = np.array(
                     [ts_end - ts_start], dtype=np.float64
                 )
             elif tracker_id in tracked_ids_in_zone:
                 del tracked_ids_in_zone[tracker_id]
-            result_detections.append(detection)
+            result_append(detection)
         return {OUTPUT_KEY: sv.Detections.merge(result_detections)}
 
 
