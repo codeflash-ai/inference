@@ -353,8 +353,13 @@ def _validate_used_kinds_uniqueness(declared_kinds: List[Kind]) -> None:
 def load_all_defined_kinds() -> List[Kind]:
     core_blocks_kinds = load_kinds()
     plugins_kinds = load_plugins_kinds()
-    declared_kinds = core_blocks_kinds + plugins_kinds
-    declared_kinds = list(set(declared_kinds))
+    # Deduplicate kinds by their unique name, preserving only one Kind per name
+    kinds_by_name = {}
+    for kind in core_blocks_kinds:
+        kinds_by_name[kind.name] = kind
+    for kind in plugins_kinds:
+        kinds_by_name[kind.name] = kind
+    declared_kinds = list(kinds_by_name.values())
     _validate_used_kinds_uniqueness(declared_kinds=declared_kinds)
     return declared_kinds
 
