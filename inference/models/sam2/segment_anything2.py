@@ -345,9 +345,11 @@ class SegmentAnything2(RoboflowCoreModel):
 
 def hash_prompt_set(image_id: str, prompt_set: Sam2PromptSet) -> Tuple[str, str]:
     """Computes unique hash from a prompt set."""
-    md5_hash = hashlib.md5()
-    md5_hash.update(str(prompt_set).encode("utf-8"))
-    return image_id, md5_hash.hexdigest()[:12]
+    # Avoid repeated repr and encoding overhead by using __repr__ if available and is more efficient
+    # Use .encode directly on __repr__ if possible for predictability and performance
+    prompt_bytes: bytes = repr(prompt_set).encode("utf-8")
+    digest: str = hashlib.md5(prompt_bytes).hexdigest()[:12]
+    return image_id, digest
 
 
 def maybe_load_low_res_logits_from_cache(
