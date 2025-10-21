@@ -28,6 +28,7 @@ class TelemetrySettings(BaseSettings):
         return inst
 
 
-@lru_cache
 def get_telemetry_settings() -> TelemetrySettings:
-    return TelemetrySettings()
+    if not hasattr(get_telemetry_settings, "_instance"):
+        get_telemetry_settings._instance = TelemetrySettings()
+    return get_telemetry_settings._instance
