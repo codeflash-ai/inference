@@ -188,8 +188,9 @@ def detect_reading_direction(detections: sv.Detections) -> str:
     widths = xyxy[:, 2] - xyxy[:, 0]
     heights = xyxy[:, 3] - xyxy[:, 1]
 
-    avg_width = np.mean(widths)
-    avg_height = np.mean(heights)
+    n = xyxy.shape[0]
+    avg_width = np.add.reduce(widths) / n
+    avg_height = np.add.reduce(heights) / n
 
     if avg_width > avg_height:
         return "left_to_right"
