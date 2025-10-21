@@ -13,6 +13,9 @@ import pybase64
 import requests
 import tldextract
 from _io import _IOBase
+from line_profiler import profile as codeflash_line_profile
+
+codeflash_line_profile.enable(output_prefix="/tmp/codeflash_8p0z4d9w/baseline_lprof")
 from PIL import Image
 from requests import RequestException
 from tldextract.tldextract import ExtractResult
@@ -36,6 +39,12 @@ from inference.core.exceptions import (
 )
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
+
+_TLD_EXTRACT_INSTANCE = tldextract.TLDExtract(suffix_list_urls=())
+
+_IMREAD_FLAGS_WITH_ORIENT = cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+
+_IMREAD_FLAGS_NO_ORIENT = cv2.IMREAD_COLOR
 
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
@@ -104,6 +113,7 @@ def load_image(
     return np_image, is_bgr
 
 
+@codeflash_line_profile
 def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     """Choose the appropriate OpenCV image decoding flags.
 
@@ -113,10 +123,10 @@ def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     Returns:
         int: OpenCV image decoding flags.
     """
-    cv_imread_flags = cv2.IMREAD_COLOR
+    # Use precomputed flags for faster selection
     if disable_preproc_auto_orient:
-        cv_imread_flags = cv_imread_flags | cv2.IMREAD_IGNORE_ORIENTATION
-    return cv_imread_flags
+        return _IMREAD_FLAGS_WITH_ORIENT
+    return _IMREAD_FLAGS_NO_ORIENT
 
 
 def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]]:
@@ -398,14 +408,13 @@ def load_image_from_url(
             public_message=message,
         ) from error
     _ensure_resource_schema_allowed(schema=parsed_url.scheme)
-    domain_extraction_result = tldextract.TLDExtract(suffix_list_urls=())(
+    domain_extraction_result = _TLD_EXTRACT_INSTANCE(
         parsed_url.netloc
-    )  # we get rid of potential ports and parse FQDNs
+    )  # Use singleton instance
     _ensure_resource_fqdn_allowed(fqdn=domain_extraction_result.fqdn)
     address_parts_concatenated = _concatenate_chunks_of_network_location(
         extraction_result=domain_extraction_result
-    )  # concatenation of chunks - even if there is no FQDN, but address
-    # it allows white-/black-list verification
+    )
     _ensure_location_matches_destination_whitelist(
         destination=address_parts_concatenated
     )
@@ -456,13 +465,16 @@ def _ensure_resource_fqdn_allowed(fqdn: str) -> None:
 
 
 def _concatenate_chunks_of_network_location(extraction_result: ExtractResult) -> str:
-    chunks = [
-        extraction_result.subdomain,
-        extraction_result.domain,
-        extraction_result.suffix,
-    ]
-    non_empty_chunks = [chunk for chunk in chunks if chunk]
-    result = ".".join(non_empty_chunks)
+    # Use generator expression instead of list comprehension for better memory efficiency
+    result = ".".join(
+        chunk
+        for chunk in (
+            extraction_result.subdomain,
+            extraction_result.domain,
+            extraction_result.suffix,
+        )
+        if chunk
+    )
     if result.startswith("[") and result.endswith("]"):
         # dropping brackets for IPv6
         return result[1:-1]
@@ -506,7 +518,8 @@ def load_image_from_encoded_bytes(
     Returns:
         np.ndarray: The loaded image as a numpy array.
     """
-    image_np = np.asarray(bytearray(value), dtype=np.uint8)
+    # Use np.frombuffer for fast, memory-efficient conversion from bytes to numpy array
+    image_np = np.frombuffer(value, dtype=np.uint8)
     image = cv2.imdecode(image_np, cv_imread_flags)
     if image is None:
         raise InputImageLoadError(
