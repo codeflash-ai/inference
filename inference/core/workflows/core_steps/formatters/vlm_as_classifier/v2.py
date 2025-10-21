@@ -269,4 +269,9 @@ def create_classes_index(classes: List[str]) -> Dict[str, int]:
 
 
 def scale_confidence(value: float) -> float:
-    return min(max(float(value), 0.0), 1.0)
+    value = float(value)
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
