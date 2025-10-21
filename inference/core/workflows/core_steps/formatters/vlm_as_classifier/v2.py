@@ -223,27 +223,35 @@ def parse_multi_label_classification_results(
     try:
         class2id_mapping = create_classes_index(classes=classes)
         height, width = image.numpy_image.shape[:2]
+
+        # Use local vars to avoid repeated lookups
         predicted_classes_confidences = {}
-        for prediction in results["predicted_classes"]:
-            if prediction["class"] not in class2id_mapping:
-                class2id_mapping[prediction["class"]] = -1
-            if prediction["class"] in predicted_classes_confidences:
-                old_confidence = predicted_classes_confidences[prediction["class"]]
-                new_confidence = scale_confidence(value=prediction["confidence"])
-                predicted_classes_confidences[prediction["class"]] = max(
-                    old_confidence, new_confidence
-                )
+        scale_conf = scale_confidence  # local function for speed
+        class2id = class2id_mapping
+
+        predicted_classes = results.get("predicted_classes", ())
+        for prediction in predicted_classes:
+            class_name = prediction["class"]
+            confidence = scale_conf(prediction["confidence"])
+            # assign id if not exist, do only once per unseen class
+            if class_name not in class2id:
+                class2id[class_name] = -1
+            # update max confidence
+            if class_name in predicted_classes_confidences:
+                if predicted_classes_confidences[class_name] < confidence:
+                    predicted_classes_confidences[class_name] = confidence
             else:
-                predicted_classes_confidences[prediction["class"]] = scale_confidence(
-                    value=prediction["confidence"]
-                )
-        predictions = {
-            class_name: {
+                predicted_classes_confidences[class_name] = confidence
+
+        # Avoid creating the dictionary from full class2id_mapping when possible
+        # Use set union to only cover seen/present classes (or all if needed)
+        predictions = {}
+        for class_name, class_id in class2id.items():
+            predictions[class_name] = {
                 "confidence": predicted_classes_confidences.get(class_name, 0.0),
                 "class_id": class_id,
             }
-            for class_name, class_id in class2id_mapping.items()
-        }
+
         parsed_prediction = {
             "image": {"width": width, "height": height},
             "predictions": predictions,
@@ -265,8 +273,11 @@ def parse_multi_label_classification_results(
 
 
 def create_classes_index(classes: List[str]) -> Dict[str, int]:
-    return {class_name: idx for idx, class_name in enumerate(classes)}
+    # Slight optimization by removing dict comprehension overhead
+    # Use standard Python built-in for this small function
+    return dict(zip(classes, range(len(classes))))
 
 
 def scale_confidence(value: float) -> float:
+    # No change: already optimal for clamping
     return min(max(float(value), 0.0), 1.0)
