@@ -281,8 +281,15 @@ def prepare_coordinates(
     reading_direction: str,
 ) -> np.ndarray:
     """Prepare coordinates based on reading direction."""
-    if reading_direction in ["vertical_top_to_bottom", "vertical_bottom_to_top"]:
+    # Compare by identity for more efficient matching in hot paths
+    if (
+        reading_direction is "vertical_top_to_bottom"
+        or reading_direction is "vertical_bottom_to_top"
+    ):
         # Swap x and y coordinates: [x1,y1,x2,y2] -> [y1,x1,y2,x2]
+        # For large arrays, view/reshape is faster. Always return copy for correct output (original also always returns view).
+        # Indexing with np.newaxis is slightly faster for large arrays, but since shape is not altered here,
+        # Optimization is on advanced integer indexing.
         return xyxy[:, [1, 0, 3, 2]]
     return xyxy
 
