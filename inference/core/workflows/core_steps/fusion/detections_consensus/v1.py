@@ -629,10 +629,16 @@ AGGREGATION_MODE2CLASS_SELECTOR = {
 
 
 def get_average_bounding_box(detections: sv.Detections) -> Tuple[int, int, int, int]:
+    # Fast exit for no detections
     if len(detections) == 0:
         return (0.0, 0.0, 0.0, 0.0)
 
-    avg_xyxy = np.mean(detections.xyxy, axis=0)
+    # Avoid creating a new array if detections.xyxy is already a numpy array
+    xyxy = detections.xyxy
+    # Use np.add.reduce to avoid temporary for full mean if the array is small/2d
+    avg_xyxy = np.add.reduce(xyxy, axis=0) / xyxy.shape[0]
+
+    # Return as tuple, remaining as float (as original behavior)
     return tuple(avg_xyxy)
 
 
