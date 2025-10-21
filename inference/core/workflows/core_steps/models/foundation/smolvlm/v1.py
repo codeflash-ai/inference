@@ -70,13 +70,15 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
+        # Move instantiation out of the list literal to avoid reconstructing OutputDefinition on every call
+        # Create the OutputDefinition once as a class-level constant
+        if not hasattr(cls, "_parsed_output_definition"):
+            cls._parsed_output_definition = OutputDefinition(
                 name="parsed_output",
                 kind=[DICTIONARY_KIND],
                 description="A parsed version of the output, provided as a dictionary containing the text.",
-            ),
-        ]
+            )
+        return [cls._parsed_output_definition]
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
