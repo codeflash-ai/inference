@@ -600,8 +600,9 @@ def get_majority_class(detections: sv.Detections) -> Tuple[str, int]:
 
 
 def get_class_of_most_confident_detection(detections: sv.Detections) -> Tuple[str, int]:
-    confidences: List[float] = detections.confidence.astype(float).tolist()
-    max_confidence_index = confidences.index(max(confidences))
+    # Use numpy operations for efficiency instead of converting to lists
+    confidences = detections.confidence
+    max_confidence_index = int(confidences.argmax())  # numpy's argmax is fast
     max_confidence_detection = detections[max_confidence_index]
     return (
         max_confidence_detection["class_name"][0],
