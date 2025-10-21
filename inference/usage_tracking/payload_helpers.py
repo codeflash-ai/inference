@@ -40,11 +40,10 @@ def merge_usage_dicts(d1: UsagePayload, d2: UsagePayload):
 def get_api_key_usage_containing_resource(
     api_key_hash: APIKey, usage_payloads: List[APIKeyUsage]
 ) -> Optional[ResourceUsage]:
-    for usage_payload in usage_payloads:
-        for other_api_key_hash, resource_payloads in usage_payload.items():
-            if api_key_hash and other_api_key_hash != api_key_hash:
-                continue
-            if other_api_key_hash == "":
+    if api_key_hash:
+        for usage_payload in usage_payloads:
+            resource_payloads = usage_payload.get(api_key_hash)
+            if not resource_payloads:
                 continue
             for resource_id, resource_usage in resource_payloads.items():
                 if not resource_id:
@@ -52,6 +51,17 @@ def get_api_key_usage_containing_resource(
                 if not resource_usage or "resource_id" not in resource_usage:
                     continue
                 return resource_usage
+    else:
+        for usage_payload in usage_payloads:
+            for other_api_key_hash, resource_payloads in usage_payload.items():
+                if other_api_key_hash == "":
+                    continue
+                for resource_id, resource_usage in resource_payloads.items():
+                    if not resource_id:
+                        continue
+                    if not resource_usage or "resource_id" not in resource_usage:
+                        continue
+                    return resource_usage
     return
 
 
