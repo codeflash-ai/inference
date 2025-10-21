@@ -127,7 +127,10 @@ class TimeInZoneBlockV2(WorkflowBlock):
                 f"tracker_id not initialized, {self.__class__.__name__} requires detections to be tracked"
             )
         metadata = image.video_metadata
-        if metadata.video_identifier not in self._batch_of_polygon_zones:
+        video_identifier = metadata.video_identifier
+
+        # Zone initialization (branch only if not is already initialized for this video)
+        if video_identifier not in self._batch_of_polygon_zones:
             if not isinstance(zone, list) or len(zone) < 3:
                 raise ValueError(
                     f"{self.__class__.__name__} requires zone to be a list containing more than 2 points"
@@ -146,24 +149,35 @@ class TimeInZoneBlockV2(WorkflowBlock):
                 raise ValueError(
                     f"{self.__class__.__name__} requires each coordinate of zone to be a number"
                 )
-            self._batch_of_polygon_zones[metadata.video_identifier] = sv.PolygonZone(
+            self._batch_of_polygon_zones[video_identifier] = sv.PolygonZone(
                 polygon=np.array(zone),
                 triggering_anchors=(sv.Position(triggering_anchor),),
             )
-        polygon_zone = self._batch_of_polygon_zones[metadata.video_identifier]
+        polygon_zone = self._batch_of_polygon_zones[video_identifier]
         tracked_ids_in_zone = self._batch_of_tracked_ids_in_zone.setdefault(
-            metadata.video_identifier, {}
+            video_identifier, {}
         )
-        result_detections = []
+
+        # Calculate timestamp only once
         if metadata.comes_from_video_file and metadata.fps != 0:
             ts_end = metadata.frame_number / metadata.fps
         else:
             ts_end = metadata.frame_timestamp.timestamp()
-        for i, is_in_zone, tracker_id in zip(
-            range(len(detections)),
-            polygon_zone.trigger(detections),
-            detections.tracker_id,
-        ):
+
+        # Precompute zone mask and tracker_ids
+        triggered_zone_mask = polygon_zone.trigger(detections)
+        tracker_ids = detections.tracker_id
+        num_detections = len(detections)
+
+        # Use local variables/functions to minimize dot lookups and attribute access
+        # Only append if detection should be included
+        result_detections = []
+        # Avoid repeated np.array allocation -- create static instances for assignment.
+        zero_time_np = np.array([0], dtype=np.float64)
+        for i in range(num_detections):
+            is_in_zone = triggered_zone_mask[i]
+            tracker_id = tracker_ids[i]
+
             if (
                 not is_in_zone
                 and tracker_id in tracked_ids_in_zone
@@ -173,18 +187,19 @@ class TimeInZoneBlockV2(WorkflowBlock):
             if not is_in_zone and remove_out_of_zone_detections:
                 continue
 
-            # copy
             detection = detections[i]
+            detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = zero_time_np
 
-            detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = np.array(
-                [0], dtype=np.float64
-            )
             if is_in_zone:
                 ts_start = tracked_ids_in_zone.setdefault(tracker_id, ts_end)
-                detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = np.array(
-                    [ts_end - ts_start], dtype=np.float64
-                )
+                if ts_end == ts_start:
+                    detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = zero_time_np
+                else:
+                    detection[TIME_IN_ZONE_KEY_IN_SV_DETECTIONS] = np.array(
+                        [ts_end - ts_start], dtype=np.float64
+                    )
             elif tracker_id in tracked_ids_in_zone:
                 del tracked_ids_in_zone[tracker_id]
+
             result_detections.append(detection)
         return {OUTPUT_KEY: sv.Detections.merge(result_detections)}
