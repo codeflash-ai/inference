@@ -159,35 +159,57 @@ def apply_template_matching(
     template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
     w, h = template_gray.shape[::-1]
     res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-    loc = np.where(res >= matching_threshold)
-    xyxy, confidence, class_id, class_name, detections_id = [], [], [], [], []
-    for pt in zip(*loc[::-1]):
-        top_left = pt
-        bottom_right = (pt[0] + w, pt[1] + h)
-        xyxy.append(top_left + bottom_right)
-        confidence.append(1.0)
-        class_id.append(0)
-        class_name.append("template_match")
-        detections_id.append(str(uuid4()))
-    if len(xyxy) == 0:
+    loc_mask = res >= matching_threshold
+    count = np.count_nonzero(loc_mask)
+    if count == 0:
         return sv.Detections.empty()
+    coords = np.where(loc_mask)
+    pts = np.stack((coords[1], coords[0]), axis=-1)
+    # Preallocate arrays for maximum efficiency
+    xyxy = np.empty((count, 4), dtype=np.int32)
+    xyxy[:, 0] = pts[:, 0]
+    xyxy[:, 1] = pts[:, 1]
+    xyxy[:, 2] = pts[:, 0] + w
+    xyxy[:, 3] = pts[:, 1] + h
+
+    confidence_arr = np.full(count, 1.0, dtype=np.float32)
+    class_id_arr = np.zeros(count, dtype=np.uint32)
+    class_name_arr = np.full(count, "template_match", dtype=object)
+    detections_id_arr = np.array([str(uuid4()) for _ in range(count)], dtype=object)
+
     detections = sv.Detections(
-        xyxy=np.array(xyxy).astype(np.int32),
-        confidence=np.array(confidence),
-        class_id=np.array(class_id).astype(np.uint32),
-        data={CLASS_NAME_DATA_FIELD: np.array(class_name)},
+        xyxy=xyxy,
+        confidence=confidence_arr,
+        class_id=class_id_arr,
+        data={CLASS_NAME_DATA_FIELD: class_name_arr},
     )
     if apply_nms:
         detections = detections.with_nms(threshold=nms_threshold)
-    detections[PARENT_ID_KEY] = np.array(
-        [image.parent_metadata.parent_id] * len(detections)
+        n = len(detections)
+    else:
+        n = count
+
+    if n == 0:
+        return sv.Detections.empty()
+
+    # These arrays may be truncated if NMS was applied
+    if apply_nms:
+        # Get the indexes that survive NMS (sv.Detections.with_nms returns a new object, might change idx order)
+        idx = detections.index if hasattr(detections, "index") else np.arange(n)
+        # slice all data arrays accordingly
+        detections_id_arr = detections_id_arr[idx]
+        class_name_arr = class_name_arr[idx]
+
+    detections[PARENT_ID_KEY] = np.full(
+        n, image.parent_metadata.parent_id, dtype=object
     )
-    detections[PREDICTION_TYPE_KEY] = np.array(["object-detection"] * len(detections))
-    detections[DETECTION_ID_KEY] = np.array(detections_id)
+    detections[PREDICTION_TYPE_KEY] = np.full(n, "object-detection", dtype=object)
+    detections[DETECTION_ID_KEY] = detections_id_arr
     image_height, image_width = image.numpy_image.shape[:2]
-    detections[IMAGE_DIMENSIONS_KEY] = np.array(
-        [[image_height, image_width]] * len(detections)
+    detections[IMAGE_DIMENSIONS_KEY] = np.full(
+        (n, 2), [image_height, image_width], dtype=np.int32
     )
+
     return attach_parents_coordinates_to_sv_detections(
         detections=detections,
         image=image,
