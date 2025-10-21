@@ -703,9 +703,15 @@ def aggregate_field_values(
     if hasattr(detections, field):
         values = getattr(detections, field)
         if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+            if values.dtype != float:
+                values = values.astype(float, copy=False).tolist()
+            else:
+                values = values.tolist()
     elif hasattr(detections, "data") and field in detections.data:
         values = detections[field]
         if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+            if values.dtype != float:
+                values = values.astype(float, copy=False).tolist()
+            else:
+                values = values.tolist()
     return AGGREGATION_MODE2FIELD_AGGREGATOR[aggregation_mode](values)
