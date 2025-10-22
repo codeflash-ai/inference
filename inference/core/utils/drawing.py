@@ -72,7 +72,11 @@ def _aggregate_images_shape(
 def _establish_grid_size(
     images: List[np.ndarray], grid_size: Optional[Tuple[Optional[int], Optional[int]]]
 ) -> Tuple[int, int]:
-    if grid_size is None or all(e is None for e in grid_size):
+    # Short-circuit to avoid all(...) call if grid_size is not None and all entries are not None
+    if grid_size is None:
+        return _negotiate_grid_size(images=images)
+    # This prevents a generator from being created if first value is not None
+    if grid_size[0] is None and grid_size[1] is None:
         return _negotiate_grid_size(images=images)
     if grid_size[0] is None:
         return math.ceil(len(images) / grid_size[1]), grid_size[1]
@@ -82,13 +86,17 @@ def _establish_grid_size(
 
 
 def _negotiate_grid_size(images: List[np.ndarray]) -> Tuple[int, int]:
-    if len(images) <= MAX_COLUMNS_FOR_SINGLE_ROW_GRID:
-        return 1, len(images)
-    nearest_sqrt = math.ceil(np.sqrt(len(images)))
-    proposed_columns = nearest_sqrt
-    proposed_rows = nearest_sqrt
-    while proposed_columns * (proposed_rows - 1) >= len(images):
-        proposed_rows -= 1
+    n_images = len(images)
+    if n_images <= MAX_COLUMNS_FOR_SINGLE_ROW_GRID:
+        return 1, n_images
+    sqrt_n = math.isqrt(n_images)
+    if sqrt_n * sqrt_n < n_images:
+        sqrt_n += 1
+    proposed_columns = sqrt_n
+    # Directly calculate the optimal proposed_rows instead of decrementing in a loop
+    # While proposed_columns*(proposed_rows-1) >= n_images, reduce row by 1
+    # So: (proposed_rows-1) >= ceil(n_images / proposed_columns), so proposed_rows = ceil(n_images / proposed_columns)
+    proposed_rows = (n_images + proposed_columns - 1) // proposed_columns
     return proposed_rows, proposed_columns
 
 
