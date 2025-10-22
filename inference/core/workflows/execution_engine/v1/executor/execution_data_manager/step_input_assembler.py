@@ -944,10 +944,11 @@ def get_batch_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
             result[name] = value
         elif isinstance(value, list) and any(isinstance(v, Batch) for v in value):
             result[name] = value
-        elif isinstance(value, dict) and any(
-            isinstance(v, Batch) for v in value.values()
-        ):
-            result[name] = value
+        elif isinstance(value, dict):
+            for v in value.values():
+                if isinstance(v, Batch):
+                    result[name] = value
+                    break
     return result
 
 
