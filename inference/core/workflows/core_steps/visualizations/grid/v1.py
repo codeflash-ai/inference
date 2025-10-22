@@ -130,9 +130,11 @@ class GridVisualizationBlockV1(WorkflowBlock):
             )
 
     def getEmptyImage(self, width: int, height: int) -> WorkflowImageData:
+        numpy_image = np.zeros((height, width, 3), dtype=np.uint8)
+        parent_metadata = ImageParentMetadata(parent_id=str(uuid.uuid4()))
         return WorkflowImageData(
-            parent_metadata=ImageParentMetadata(parent_id=str(uuid.uuid4())),
-            numpy_image=np.zeros((height, width, 3), dtype=np.uint8),
+            parent_metadata=parent_metadata,
+            numpy_image=numpy_image,
         )
 
     def createGrid(
