@@ -218,7 +218,10 @@ class WithFixedSizeCache(ModelManagerDecorator):
                 raise ModelManagerLockAcquisitionError(
                     "Could not acquire lock on Model Manager state to refresh model position in active models queue."
                 )
-            self._safe_remove_model_from_queue(model_id=model_id)
+            try:
+                self._key_queue.remove(model_id)
+            except ValueError:
+                pass
             self._key_queue.append(model_id)
 
     def _safe_remove_model_from_queue(self, model_id: str) -> None:
