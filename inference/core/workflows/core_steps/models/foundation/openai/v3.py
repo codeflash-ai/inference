@@ -36,6 +36,15 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_SYSTEM_MSG = {
+    "role": "system",
+    "content": (
+        "You act as OCR model. Your task is to read text from the image and return it in "
+        "paragraphs representing the structure of texts in the image. You should only return "
+        "recognised text, nothing else."
+    ),
+}
+
 SUPPORTED_TASK_TYPES_LIST = [
     "unconstrained",
     "ocr",
@@ -589,12 +598,7 @@ def prepare_ocr_prompt(
     base64_image: str, gpt_image_detail: str, **kwargs
 ) -> List[dict]:
     return [
-        {
-            "role": "system",
-            "content": "You act as OCR model. Your task is to read text from the image and return it in "
-            "paragraphs representing the structure of texts in the image. You should only return "
-            "recognised text, nothing else.",
-        },
+        _SYSTEM_MSG,
         {
             "role": "user",
             "content": [
