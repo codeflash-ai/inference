@@ -670,11 +670,12 @@ def prepare_structured_answering_prompt(
 
 
 def _get_openai_client(api_key: str):
-    client = _openai_client_cache.get(api_key)
-    if client is None:
+    try:
+        return _openai_client_cache[api_key]
+    except KeyError:
         client = OpenAI(api_key=api_key)
         _openai_client_cache[api_key] = client
-    return client
+        return client
 
 
 PROMPT_BUILDERS = {
