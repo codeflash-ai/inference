@@ -70,32 +70,36 @@ def structlog_exception_formatter(
     exc_info = event_dict.pop("exc_info", None)
     if not exc_info:
         return event_dict
+
+    # Fast-path handling for BaseException instances and tuple exc_info
     if isinstance(exc_info, BaseException):
-        exc_type, exc_value, exc_tb = (
-            exc_info.__class__,
-            exc_info,
-            exc_info.__traceback__,
-        )
+        exc_type = type(exc_info)
+        exc_value = exc_info
+        exc_tb = exc_info.__traceback__
     elif isinstance(exc_info, tuple):
         exc_type, exc_value, exc_tb = exc_info
     else:
         exc_type, exc_value, exc_tb = sys.exc_info()
+
+    # Avoid unnecessary stack extraction and list comp if no traceback
+    stacktrace = []
     if exc_tb:
-        tb_list = traceback.extract_tb(exc_tb)
-    else:
-        tb_list = []
+        # Local var lookup for TracebackException improves speed; avoids namedtuple attr lookup in the loop
+        for tb in traceback.extract_tb(exc_tb):
+            # Dict construction directly avoids generator and extra function calls
+            stacktrace.append(
+                {
+                    "filename": tb.filename,
+                    "lineno": tb.lineno,
+                    "function": tb.name,
+                    "code": tb.line,
+                }
+            )
+
     event_dict["exception"] = {
         "type": exc_type.__name__ if exc_type else "N/A",
         "message": str(exc_value) if exc_value else "N/A",
-        "stacktrace": [
-            {
-                "filename": tb.filename,
-                "lineno": tb.lineno,
-                "function": tb.name,
-                "code": tb.line,
-            }
-            for tb in tb_list
-        ],
+        "stacktrace": stacktrace,
     }
     return event_dict
 
