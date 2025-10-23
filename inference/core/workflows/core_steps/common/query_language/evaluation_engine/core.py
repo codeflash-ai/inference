@@ -67,14 +67,12 @@ def build_eval_function(
         return build_binary_statement(definition, execution_context=execution_context)
     if isinstance(definition, UnaryStatement):
         return build_unary_statement(definition, execution_context=execution_context)
-    statements_functions = []
-    for statement_id, statement in enumerate(definition.statements):
-        statement_execution_context = f"{execution_context}.statements[{statement_id}]"
-        statements_functions.append(
-            build_eval_function(
-                statement, execution_context=statement_execution_context
-            )
+    statements_functions = [
+        build_eval_function(
+            statement, execution_context=f"{execution_context}.statements[{statement_id}]"
         )
+        for statement_id, statement in enumerate(definition.statements)
+    ]
     return partial(
         compound_eval,
         statements_functions=statements_functions,

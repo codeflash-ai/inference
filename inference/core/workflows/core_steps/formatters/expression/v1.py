@@ -1,4 +1,3 @@
-from copy import copy
 from typing import Any, Dict, List, Literal, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -160,11 +159,16 @@ class ExpressionBlockV1(WorkflowBlock):
         data_operations: Dict[str, List[AllOperationsType]],
         switch: CasesDefinition,
     ) -> BlockResult:
-        variables = copy(data)
-        for variable_name, operations in data_operations.items():
-            operations_chain = build_operations_chain(operations=operations)
-            variables[variable_name] = operations_chain(
-                variables[variable_name], global_parameters={}
+        # Batch process and assign transformed variables using dict comprehension for better cache locality and single scan
+        variables = {**data}
+        if data_operations:
+            variables.update(
+                {
+                    variable_name: build_operations_chain(operations=operations)(
+                        data[variable_name], global_parameters={}
+                    )
+                    for variable_name, operations in data_operations.items()
+                }
             )
         for case in switch.cases:
             case_eval_operation = build_eval_function(definition=case.condition)
