@@ -141,7 +141,9 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [OutputDefinition(name="output")]
+        if not hasattr(cls, "_describe_outputs_cache"):
+            cls._describe_outputs_cache = [OutputDefinition(name="output")]
+        return cls._describe_outputs_cache
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
