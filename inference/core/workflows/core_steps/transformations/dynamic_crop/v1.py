@@ -253,7 +253,10 @@ def overlay_crop_with_mask(
     background_color: Union[str, Tuple[int, int, int]],
 ) -> np.ndarray:
     bgr_color = convert_color_to_bgr_tuple(color=background_color)
-    background = (np.ones_like(crop) * bgr_color).astype(np.uint8)
+    # Optimize: Use broadcasting to avoid multiplying full array, .astype() only once.
+    background = np.empty_like(crop)
+    background[:] = bgr_color
+    # Use np.where with proper copy avoidance for performance
     blended_crop = np.where(mask > 0, crop, background)
     return cv2.addWeighted(blended_crop, mask_opacity, crop, 1.0 - mask_opacity, 0)
 
