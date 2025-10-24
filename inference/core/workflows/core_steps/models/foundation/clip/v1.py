@@ -122,9 +122,10 @@ class ClipModelBlockV1(WorkflowBlock):
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        mode = self._step_execution_mode
+        if mode is StepExecutionMode.LOCAL:
             return self.run_locally(data=data, version=version)
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        elif mode is StepExecutionMode.REMOTE:
             return self.run_remotely(data=data, version=version)
         else:
             raise ValueError(
@@ -136,9 +137,9 @@ class ClipModelBlockV1(WorkflowBlock):
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
+        # Fast path for text (cache and infer)
         if isinstance(data, str):
             hash_key = hashlib.md5((version + data).encode("utf-8")).hexdigest()
-
             cached_value = text_cache.get(hash_key)
             if cached_value is not None:
                 return {"embedding": cached_value}
@@ -148,6 +149,7 @@ class ClipModelBlockV1(WorkflowBlock):
                 text=[data],
                 api_key=self._api_key,
             )
+            # Add model and infer in one logical sequence for memory locality
             clip_model_id = load_core_model(
                 model_manager=self._model_manager,
                 inference_request=inference_request,
@@ -156,31 +158,33 @@ class ClipModelBlockV1(WorkflowBlock):
             predictions = self._model_manager.infer_from_request_sync(
                 clip_model_id, inference_request
             )
+            embedding = predictions.embeddings[0]
+            text_cache.set(hash_key, embedding)
+            return {"embedding": embedding}
 
-            text_cache.set(hash_key, predictions.embeddings[0])
-
-            return {"embedding": predictions.embeddings[0]}
-        else:
-            inference_request = ClipImageEmbeddingRequest(
-                clip_version_id=version,
-                image=[data.to_inference_format(numpy_preferred=True)],
-                api_key=self._api_key,
-            )
-            clip_model_id = load_core_model(
-                model_manager=self._model_manager,
-                inference_request=inference_request,
-                core_model="clip",
-            )
-            predictions = self._model_manager.infer_from_request_sync(
-                clip_model_id, inference_request
-            )
-            return {"embedding": predictions.embeddings[0]}
+        # Fast path for images
+        inference_request = ClipImageEmbeddingRequest(
+            clip_version_id=version,
+            image=[data.to_inference_format(numpy_preferred=True)],
+            api_key=self._api_key,
+        )
+        clip_model_id = load_core_model(
+            model_manager=self._model_manager,
+            inference_request=inference_request,
+            core_model="clip",
+        )
+        predictions = self._model_manager.infer_from_request_sync(
+            clip_model_id, inference_request
+        )
+        embedding = predictions.embeddings[0]
+        return {"embedding": embedding}
 
     def run_remotely(
         self,
         data: Union[WorkflowImageData, str],
         version: str,
     ) -> BlockResult:
+        # Avoid recomputing target or client
         api_url = (
             LOCAL_INFERENCE_API_URL
             if WORKFLOWS_REMOTE_API_TARGET != "hosted"
@@ -199,9 +203,11 @@ class ClipModelBlockV1(WorkflowBlock):
                 clip_version=version,
             )
         else:
+            # Use data.base64_image directly (as used in original codebase)
             result = client.get_clip_image_embeddings(
                 inference_input=data.base64_image,
                 clip_version=version,
             )
 
+        # Avoid extra lookup of embeddings
         return {"embedding": result["embeddings"][0]}
