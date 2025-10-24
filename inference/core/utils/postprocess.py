@@ -390,15 +390,34 @@ def preprocess_segmentation_masks(
     shape: Tuple[int, int],
 ) -> np.ndarray:
     c, mh, mw = protos.shape  # CHW
-    masks = protos.astype(np.float32)
-    masks = masks.reshape((c, -1))
-    masks = masks_in @ masks
-    masks = sigmoid(masks)
+
+    # Combine astype, reshape, and @ product using float32 for input to avoid unneeded copy if already float32
+    if protos.dtype != np.float32:
+        masks_2d = protos.astype(np.float32, copy=False).reshape(c, -1)
+    else:
+        masks_2d = protos.reshape(c, -1)
+
+    # matmul: masks_in shape [N, C], masks_2d shape [C, mh*mw] => [N, mh*mw]
+    masks = masks_in @ masks_2d
+
+    # Use numexpr for fast sigmoid if available, otherwise in-place np
+    # But since only numpy is available, optimize sigmoid in-place to reduce memory usage:
+    np.negative(masks, out=masks)
+    np.exp(masks, out=masks)
+    np.add(masks, 1, out=masks)
+    np.reciprocal(masks, out=masks)
+
     masks = masks.reshape((-1, mh, mw))
+
     gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
-    pad = (mw - shape[1] * gain) / 2, (mh - shape[0] * gain) / 2  # wh padding
-    top, left = int(pad[1]), int(pad[0])  # y, x
-    bottom, right = int(mh - pad[1]), int(mw - pad[0])
+    pad_w = (mw - shape[1] * gain) / 2
+    pad_h = (mh - shape[0] * gain) / 2  # wh padding
+
+    # Compute crops directly without tuple unpack/unpack for marginal savings
+    top = int(pad_h)
+    left = int(pad_w)
+    bottom = int(mh - pad_h)
+    right = int(mw - pad_w)
     return masks[:, top:bottom, left:right]
 
 
