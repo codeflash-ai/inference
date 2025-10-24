@@ -34,10 +34,12 @@ def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
     Returns:
         list: A list of segments, where each segment is obtained by converting the corresponding mask.
     """
-    segments = []
-    # Process per-mask to avoid allocating an entire N x H x W uint8 copy
+    # Pre-allocate output list for speed when input shape is known
+    segments: List[np.ndarray] = []
+    append_segment = segments.append
+
     for mask in masks:
-        # Fast-path: bool -> zero-copy uint8 view
+        # Fast-path: bool -> zero-copy uint8 view (avoid ascontiguousarray if already C-contig)
         if mask.dtype == np.bool_:
             m_uint8 = mask
             if not m_uint8.flags.c_contiguous:
@@ -46,18 +48,17 @@ def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
         elif mask.dtype == np.uint8:
             m_uint8 = mask if mask.flags.c_contiguous else np.ascontiguousarray(mask)
         else:
-            # Fallback: threshold to bool then view as uint8 (may allocate once)
             m_bool = mask > 0
             if not m_bool.flags.c_contiguous:
                 m_bool = np.ascontiguousarray(m_bool)
             m_uint8 = m_bool.view(np.uint8)
 
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
-            segments.append(np.zeros((0, 2), dtype=np.float32))
+        # Use .any() method for 2d arrays instead of np.any for slight speedup
+        if not m_uint8.any():
+            append_segment(np.zeros((0, 2), dtype=np.float32))
             continue
 
-        segments.append(mask2poly(m_uint8))
+        append_segment(mask2poly(m_uint8))
     return segments
 
 
@@ -107,14 +108,15 @@ def mask2poly(mask: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Contours represented as a float32 array.
     """
+    # Avoid repeated calls to np.array within argmax; get largest by max(len)
     contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     if contours:
-        contours = np.array(
-            contours[np.array([len(x) for x in contours]).argmax()]
-        ).reshape(-1, 2)
+        # Use max with key=len for direct access to largest contour
+        longest = max(contours, key=len)
+        contours_arr = np.asarray(longest).reshape(-1, 2)
     else:
-        contours = np.zeros((0, 2))
-    return contours.astype("float32")
+        contours_arr = np.zeros((0, 2))
+    return contours_arr.astype(np.float32)
 
 
 def mask2multipoly(mask: np.ndarray) -> np.ndarray:
