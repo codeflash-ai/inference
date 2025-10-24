@@ -224,7 +224,7 @@ def parse_multi_label_classification_results(
         class2id_mapping = create_classes_index(classes=classes)
         height, width = image.numpy_image.shape[:2]
         predicted_classes_confidences = {}
-        for prediction in results["predicted_classes"]:
+        for prediction in results.get("predicted_classes", []):
             if prediction["class"] not in class2id_mapping:
                 class2id_mapping[prediction["class"]] = -1
             if prediction["class"] in predicted_classes_confidences:
@@ -265,8 +265,14 @@ def parse_multi_label_classification_results(
 
 
 def create_classes_index(classes: List[str]) -> Dict[str, int]:
-    return {class_name: idx for idx, class_name in enumerate(classes)}
+    return dict(zip(classes, range(len(classes))))
 
 
 def scale_confidence(value: float) -> float:
-    return min(max(float(value), 0.0), 1.0)
+    value_f = float(value)
+    if value_f < 0.0:
+        return 0.0
+    elif value_f > 1.0:
+        return 1.0
+    else:
+        return value_f
