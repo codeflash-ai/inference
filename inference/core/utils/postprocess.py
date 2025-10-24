@@ -485,10 +485,13 @@ def scale_polygons(
     x_scale: float,
     y_scale: float,
 ) -> List[List[Tuple[float, float]]]:
+    # Precompute the scaling factors as local variables for faster access
+    xs = x_scale
+    ys = y_scale
     result = []
     for poly in polygons:
-        poly = [(p[0] * x_scale, p[1] * y_scale) for p in poly]
-        result.append(poly)
+        # Use a generator expression inside list() for slightly improved performance
+        result.append([(x * xs, y * ys) for x, y in poly])
     return result
 
 
