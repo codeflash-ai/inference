@@ -94,18 +94,30 @@ class AbsoluteStaticCropBlockV1(WorkflowBlock):
         width: int,
         height: int,
     ) -> BlockResult:
-        return [
-            {
-                "crops": take_static_crop(
-                    image=image,
-                    x_center=x_center,
-                    y_center=y_center,
-                    width=width,
-                    height=height,
-                )
-            }
-            for image in images
-        ]
+        # Precompute crop bounds once for the batch if x/y/width/height are the same for all images
+        x_min = round(x_center - width / 2)
+        y_min = round(y_center - height / 2)
+        x_max = (
+            x_min + width
+        )  # round is not needed here, as width is int, and x_min is already rounded
+        y_max = (
+            y_min + height
+        )  # round is not needed here, as height is int, and y_min is already rounded
+
+        uuid_prefix = f"absolute_static_crop.{uuid4()}"
+
+        result = []
+        for idx, image in enumerate(images):
+            crop = _take_static_crop_with_bounds(
+                image=image,
+                x_min=x_min,
+                y_min=y_min,
+                x_max=x_max,
+                y_max=y_max,
+                crop_identifier=f"{uuid_prefix}.{idx}",
+            )
+            result.append({"crops": crop})
+        return result
 
 
 def take_static_crop(
@@ -125,6 +137,43 @@ def take_static_crop(
     return WorkflowImageData.create_crop(
         origin_image_data=image,
         crop_identifier=f"absolute_static_crop.{uuid4()}",
+        cropped_image=cropped_image,
+        offset_x=x_min,
+        offset_y=y_min,
+        preserve_video_metadata=True,
+    )
+
+
+def _take_static_crop_with_bounds(
+    image: WorkflowImageData,
+    x_min: int,
+    y_min: int,
+    x_max: int,
+    y_max: int,
+    crop_identifier: str,
+) -> Optional[WorkflowImageData]:
+    # Fast check for bounds without unnecessary slicing
+    img_array = image.numpy_image
+    h, w = img_array.shape[:2]
+    # Ensure crop bounds are within image boundaries (otherwise returns None)
+    # Only crop if the crop region is non-empty and inside the image bounds
+    if (
+        x_min < 0
+        or y_min < 0
+        or x_max > w
+        or y_max > h
+        or x_max <= x_min
+        or y_max <= y_min
+    ):
+        return None
+
+    cropped_image = img_array[y_min:y_max, x_min:x_max]
+    if cropped_image.size == 0:
+        return None
+
+    return WorkflowImageData.create_crop(
+        origin_image_data=image,
+        crop_identifier=crop_identifier,
         cropped_image=cropped_image,
         offset_x=x_min,
         offset_y=y_min,
