@@ -501,15 +501,10 @@ class CountDistinctState(AggregationState):
         self._distinct = set()
 
     def on_data(self, value: Any) -> None:
-        if (
-            isinstance(value, list)
-            or isinstance(value, set)
-            or isinstance(value, tuple)
-        ):
-            for v in value:
-                self._distinct.add(v)
-            return None
-        self._distinct.add(value)
+        if isinstance(value, (list, set, tuple)):
+            self._distinct.update(value)
+        else:
+            self._distinct.add(value)
 
     def get_result(self) -> Any:
         return len(self._distinct)
@@ -541,11 +536,16 @@ class ValuesDifferenceState(AggregationState):
         if self._min_value is None:
             self._min_value = value
             return None
-        if self._max_value is None:
+        elif self._max_value is None:
             self._max_value = value
             return None
-        self._min_value = min(self._min_value, value)
-        self._max_value = max(self._max_value, value)
+        # Manually compare values instead of calling min/max for better performance
+        min_value = self._min_value
+        max_value = self._max_value
+        if value < min_value:
+            self._min_value = value
+        if value > max_value:
+            self._max_value = value
 
     def get_result(self) -> Any:
         if self._min_value is None or self._max_value is None:
