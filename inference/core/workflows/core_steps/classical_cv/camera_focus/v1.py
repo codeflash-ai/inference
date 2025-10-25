@@ -59,18 +59,20 @@ class CameraFocusManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_IMAGE_KEY,
-                kind=[IMAGE_KIND],
-            ),
-            OutputDefinition(
-                name="focus_measure",
-                kind=[
-                    FLOAT_KIND,
-                ],
-            ),
-        ]
+        if not hasattr(cls, "_describe_outputs_cache"):
+            cls._describe_outputs_cache = [
+                OutputDefinition(
+                    name=OUTPUT_IMAGE_KEY,
+                    kind=[IMAGE_KIND],
+                ),
+                OutputDefinition(
+                    name="focus_measure",
+                    kind=[
+                        FLOAT_KIND,
+                    ],
+                ),
+            ]
+        return cls._describe_outputs_cache.copy()
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
