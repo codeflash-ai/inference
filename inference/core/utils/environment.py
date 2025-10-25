@@ -38,13 +38,14 @@ def str2bool(value: Any) -> bool:
     """
     if isinstance(value, bool):
         return value
-    if not issubclass(type(value), str):
+    if not isinstance(value, str):
         raise InvalidEnvironmentVariableError(
             f"Expected a boolean environment variable (true or false) but got '{value}'"
         )
-    if value.lower() == "true":
+    val = value.lower()
+    if val == "true":
         return True
-    elif value.lower() == "false":
+    elif val == "false":
         return False
     else:
         raise InvalidEnvironmentVariableError(
