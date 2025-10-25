@@ -245,7 +245,7 @@ def is_block_compatible_with_execution_engine(
     if block_execution_engine_compatibility is None or execution_engine_version is None:
         return True
     try:
-        return SpecifierSet(block_execution_engine_compatibility).contains(
+        return _get_specifier_set(block_execution_engine_compatibility).contains(
             execution_engine_version
         )
     except ValueError as error:
@@ -507,3 +507,8 @@ def _cached_model_json_schema(manifest_class):
 @lru_cache(maxsize=256)
 def _cached_describe_outputs(manifest_class):
     return manifest_class.describe_outputs()
+
+
+@lru_cache(maxsize=128)
+def _get_specifier_set(compatibility: str) -> SpecifierSet:
+    return SpecifierSet(compatibility)
