@@ -8,15 +8,12 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from inference.core.env import (
-    LOCAL_INFERENCE_API_URL,
-    WORKFLOWS_REMOTE_API_TARGET,
     WORKFLOWS_REMOTE_EXECUTION_MAX_STEP_CONCURRENT_REQUESTS,
 )
 from inference.core.managers.base import ModelManager
 from inference.core.utils.image_utils import encode_image_to_jpeg_bytes, load_image
 from inference.core.workflows.core_steps.common.entities import StepExecutionMode
 from inference.core.workflows.core_steps.common.utils import (
-    load_core_model,
     run_in_parallel,
 )
 from inference.core.workflows.execution_engine.constants import (
@@ -44,7 +41,6 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlock,
     WorkflowBlockManifest,
 )
-from inference_sdk import InferenceHTTPClient
 
 GPT_4V_MODEL_TYPE = "gpt_4v"
 NOT_DETECTED_VALUE = "not_detected"
@@ -193,28 +189,22 @@ class LMMBlockV1(WorkflowBlock):
         remote_api_key: Optional[str],
         json_output: Optional[Dict[str, str]],
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
-            return self.run_locally(
-                images=images,
-                prompt=prompt,
-                lmm_type=lmm_type,
-                lmm_config=lmm_config,
-                remote_api_key=remote_api_key,
-                json_output=json_output,
-            )
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
-            return self.run_remotely(
-                images=images,
-                prompt=prompt,
-                lmm_type=lmm_type,
-                lmm_config=lmm_config,
-                remote_api_key=remote_api_key,
-                json_output=json_output,
-            )
+        execution_mode = self._step_execution_mode
+        # Directly select function to avoid repeated if-else
+        if execution_mode is StepExecutionMode.LOCAL:
+            fn = self.run_locally
+        elif execution_mode is StepExecutionMode.REMOTE:
+            fn = self.run_remotely
         else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+            raise ValueError(f"Unknown step execution mode: {execution_mode}")
+        return fn(
+            images=images,
+            prompt=prompt,
+            lmm_type=lmm_type,
+            lmm_config=lmm_config,
+            remote_api_key=remote_api_key,
+            json_output=json_output,
+        )
 
     def run_locally(
         self,
