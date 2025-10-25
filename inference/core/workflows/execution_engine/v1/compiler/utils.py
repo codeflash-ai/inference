@@ -17,10 +17,7 @@ NodeTypeVar = TypeVar("NodeTypeVar", bound=ExecutionGraphNode)
 
 
 def get_input_parameters_selectors(inputs: List[InputType]) -> Set[str]:
-    return {
-        construct_input_selector(input_name=input_definition.name)
-        for input_definition in inputs
-    }
+    return {f"$inputs.{input_definition.name}" for input_definition in inputs}
 
 
 def construct_input_selector(input_name: str) -> str:
@@ -44,18 +41,22 @@ def construct_output_selector(name: str) -> str:
 
 
 def is_input_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    # Fast path: avoid redundant startswith and type checks
+    if type(selector_or_value) is str:
+        # Fast-fail the minimum length and $-prefix for "$inputs" (7 chars)
+        if selector_or_value[:7] == "$inputs":
+            return True
+        if selector_or_value and selector_or_value[0] == "$":
+            return False
         return False
-    return selector_or_value.startswith("$inputs")
+    return False
 
 
 def is_step_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    s = str(selector_or_value)
+    if not s.startswith("$steps."):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 2
-    )
+    return s.count(".") == 1
 
 
 def is_step_output_selector(selector_or_value: Any) -> bool:
