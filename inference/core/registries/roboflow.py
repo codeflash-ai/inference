@@ -159,11 +159,22 @@ def get_model_type(
     model_id = resolve_roboflow_model_alias(model_id=model_id)
     dataset_id, version_id = get_model_id_chunks(model_id=model_id)
 
+    # Fast path for generic models - no API/caching necessary
     if dataset_id in GENERIC_MODELS:
         logger.debug(f"Loading generic model: {dataset_id}.")
         return GENERIC_MODELS[dataset_id]
 
+    # Try cache before anything else
+    cached_metadata = get_model_metadata_from_cache(
+        dataset_id=dataset_id, version_id=version_id
+    )
+
+    if cached_metadata is not None:
+        return cached_metadata[0], cached_metadata[1]
+
+    # Authorization check - only if cache missed and setting enabled
     if MODELS_CACHE_AUTH_ENABLED:
+        # We do a single access check up front, which internally caches for repeated calls
         if not _check_if_api_key_has_access_to_model(
             api_key=api_key,
             model_id=model_id,
@@ -174,12 +185,7 @@ def get_model_type(
                 f"API key {api_key} does not have access to model {model_id}"
             )
 
-    cached_metadata = get_model_metadata_from_cache(
-        dataset_id=dataset_id, version_id=version_id
-    )
-
-    if cached_metadata is not None:
-        return cached_metadata[0], cached_metadata[1]
+    # For stub version, only need workspace/project task type; avoid unneeded API model calls
     if version_id == STUB_VERSION_ID:
         if api_key is None:
             raise MissingApiKeyError(
@@ -199,6 +205,7 @@ def get_model_type(
         return project_task_type, model_type
 
     if version_id is not None:
+        # API call via get_roboflow_model_data
         api_data = get_roboflow_model_data(
             api_key=api_key,
             model_id=model_id,
@@ -209,6 +216,7 @@ def get_model_type(
         ).get("ort")
         project_task_type = api_data.get("type", "object-detection")
     else:
+        # Instant API call
         api_data = get_roboflow_instant_model_data(
             api_key=api_key,
             model_id=model_id,
