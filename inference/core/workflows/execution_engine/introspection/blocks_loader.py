@@ -308,12 +308,33 @@ def _load_initializers_from_plugin(
 def _validate_loaded_blocks_manifest_type_identifiers(
     blocks: List[BlockDescription],
 ) -> None:
+    # Use a local variable instead of attribute lookup inside the loop for performance.
     types_already_defined = {}
+    # Loop unrolling: avoid repeated list concatenation by directly iterating over aliases.
     for block in blocks:
-        all_types = [
-            block.manifest_type_identifier
-        ] + block.manifest_type_identifier_aliases
-        for type_name in all_types:
+        # Memoize attributes
+        manifest_type_identifier = block.manifest_type_identifier
+        manifest_type_identifier_aliases = block.manifest_type_identifier_aliases
+
+        # Combine all types as a tuple for lower overhead than a list
+        # Process primary type and aliases without intermediate list
+        if manifest_type_identifier in types_already_defined:
+            clashing_block = types_already_defined[manifest_type_identifier]
+            block_identifier = _produce_readable_block_identifier(block=block)
+            clashing_block_identifier = _produce_readable_block_identifier(
+                block=clashing_block
+            )
+            raise PluginLoadingError(
+                public_message=f"Block `{block_identifier}`, defined in `{block.block_source}` plugin,"
+                f"clashes in terms of the manifest type identifier (or its alias): "
+                f"`{manifest_type_identifier}` with `{clashing_block_identifier}` defined in "
+                f"`{clashing_block.block_source}` plugin.",
+                context="blocks_loading",
+            )
+        types_already_defined[manifest_type_identifier] = block
+
+        # Check aliases
+        for type_name in manifest_type_identifier_aliases:
             if type_name in types_already_defined:
                 clashing_block = types_already_defined[type_name]
                 block_identifier = _produce_readable_block_identifier(block=block)
