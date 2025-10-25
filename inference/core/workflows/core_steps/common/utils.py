@@ -131,41 +131,56 @@ def add_inference_keypoints_to_sv_detections(
             f"Detected missmatch in number of detections in sv.Detections instance ({len(detections)}) "
             f"and `inference` predictions ({len(inference_prediction)}) while attempting to add keypoints metadata."
         )
-    keypoints_class_names = []
-    keypoints_class_ids = []
-    keypoints_confidences = []
-    keypoints_xy = []
-    for inference_detection in inference_prediction:
-        keypoints = inference_detection.get(KEYPOINTS_KEY_IN_INFERENCE_RESPONSE, [])
-        keypoints_class_names.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_class_ids.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_confidences.append(
-            np.array(
-                [k[KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE] for k in keypoints],
-                dtype=np.float32,
-            )
-        )
-        keypoints_xy.append(
-            np.array([[k[X_KEY], k[Y_KEY]] for k in keypoints], dtype=np.float32)
-        )
-    detections[KEYPOINTS_CLASS_NAME_KEY_IN_SV_DETECTIONS] = np.array(
+
+    # Pre-allocate lists for results
+    keypoints_class_names = [None] * len(inference_prediction)
+    keypoints_class_ids = [None] * len(inference_prediction)
+    keypoints_confidences = [None] * len(inference_prediction)
+    keypoints_xy = [None] * len(inference_prediction)
+
+    # Localize for speed
+    k_name = KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE
+    k_id = KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE
+    k_conf = KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE
+    k_keypoints = KEYPOINTS_KEY_IN_INFERENCE_RESPONSE
+
+    x_key = X_KEY
+    y_key = Y_KEY
+
+    float32 = np.float32
+    nparray = np.array
+
+    for idx, inference_detection in enumerate(inference_prediction):
+        keypoints = inference_detection.get(k_keypoints, [])
+        # Only do list comprehensions with generator-style local integer index resolution
+        if keypoints:
+            # Combine all value lists in one go before np.array for better cache and reduced interpreter overhead
+            names = [k[k_name] for k in keypoints]
+            ids = [k[k_id] for k in keypoints]
+            confs = [k[k_conf] for k in keypoints]
+            xys = [(k[x_key], k[y_key]) for k in keypoints]
+
+            keypoints_class_names[idx] = nparray(names)
+            keypoints_class_ids[idx] = nparray(ids)
+            keypoints_confidences[idx] = nparray(confs, dtype=float32)
+            keypoints_xy[idx] = nparray(xys, dtype=float32)
+        else:
+            keypoints_class_names[idx] = nparray([])
+            keypoints_class_ids[idx] = nparray([])
+            keypoints_confidences[idx] = nparray([], dtype=float32)
+            keypoints_xy[idx] = nparray([], dtype=float32)
+
+    # Set all columns with single construction of object arrays
+    detections[KEYPOINTS_CLASS_NAME_KEY_IN_SV_DETECTIONS] = nparray(
         keypoints_class_names, dtype="object"
     )
-    detections[KEYPOINTS_CLASS_ID_KEY_IN_SV_DETECTIONS] = np.array(
+    detections[KEYPOINTS_CLASS_ID_KEY_IN_SV_DETECTIONS] = nparray(
         keypoints_class_ids, dtype="object"
     )
-    detections[KEYPOINTS_CONFIDENCE_KEY_IN_SV_DETECTIONS] = np.array(
+    detections[KEYPOINTS_CONFIDENCE_KEY_IN_SV_DETECTIONS] = nparray(
         keypoints_confidences, dtype="object"
     )
-    detections[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS] = np.array(
+    detections[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS] = nparray(
         keypoints_xy, dtype="object"
     )
     return detections
