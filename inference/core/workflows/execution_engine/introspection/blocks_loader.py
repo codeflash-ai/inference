@@ -297,7 +297,7 @@ def load_initializers_from_plugin(
 def _load_initializers_from_plugin(
     plugin_name: str,
 ) -> Dict[str, Callable[[None], Any]]:
-    module = importlib.import_module(plugin_name)
+    module = __import__(plugin_name, fromlist=["REGISTERED_INITIALIZERS"])
     registered_initializers = getattr(module, "REGISTERED_INITIALIZERS", {})
     return {
         f"{plugin_name}.{parameter_name}": initializer
