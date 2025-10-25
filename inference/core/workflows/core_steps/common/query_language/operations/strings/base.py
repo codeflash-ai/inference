@@ -7,6 +7,7 @@ from inference.core.workflows.core_steps.common.query_language.errors import (
 from inference.core.workflows.core_steps.common.query_language.operations.utils import (
     safe_stringify,
 )
+from functools import lru_cache
 
 
 def string_to_lower(value: Any, execution_context: str, **kwargs) -> str:
@@ -62,4 +63,10 @@ def string_matches(value: Any, regex: str, execution_context: str, **kwargs) -> 
             f"got value which of type {type(value)}: {value_as_str}",
             context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
         )
-    return not re.match(pattern=regex, string=value)
+    return not _get_compiled_regex(regex).match(value)
+
+
+# Cache compiled regular expressions for performance
+@lru_cache(maxsize=128)
+def _get_compiled_regex(pattern: str):
+    return re.compile(pattern)
