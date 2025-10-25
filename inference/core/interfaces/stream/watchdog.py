@@ -104,13 +104,13 @@ class LatencyMonitor:
         self._generate_report()
 
     def summarise_reports(self) -> LatencyMonitorReport:
-        avg_frame_decoding_latency = average_property_values(
+        avg_frame_decoding_latency = fast_average_property_values(
             examined_objects=self._reports, property_name="frame_decoding_latency"
         )
-        avg_inference_latency = average_property_values(
+        avg_inference_latency = fast_average_property_values(
             examined_objects=self._reports, property_name="inference_latency"
         )
-        avg_e2e_latency = average_property_values(
+        avg_e2e_latency = fast_average_property_values(
             examined_objects=self._reports, property_name="e2e_latency"
         )
         return LatencyMonitorReport(
@@ -195,6 +195,22 @@ def are_events_compatible(events: List[Optional[ModelActivityEvent]]) -> bool:
         return False
     frame_ids = [e.frame_id for e in events]
     return all(e == frame_ids[0] for e in frame_ids)
+
+
+def fast_average_property_values(
+    examined_objects: Iterable, property_name: str
+) -> Optional[float]:
+    # Optimized single-pass property extraction and average calculation
+    total = 0.0
+    count = 0
+    for examined_object in examined_objects:
+        value = getattr(examined_object, property_name, None)
+        if value is not None:
+            total += value
+            count += 1
+    if count == 0:
+        return None
+    return total / count
 
 
 class BasePipelineWatchDog(PipelineWatchDog):
