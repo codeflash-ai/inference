@@ -101,7 +101,10 @@ def get_model_class(name: str) -> Any:
 
 def __getattr__(name: str) -> Any:
     """Implement lazy loading for model classes."""
-    if name in __all__:
+    if not hasattr(__getattr__, "_all_set"):
+        __getattr__._all_set = set(__all__)
+
+    if name in __getattr__._all_set:
         return get_model_class(name)
     raise AttributeError(f"module 'inference.models' has no attribute '{name}'")
 
