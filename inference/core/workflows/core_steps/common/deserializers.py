@@ -164,19 +164,31 @@ def deserialize_detections_kind(
     parsed_detections = sv.Detections.from_inference(detections)
     if len(parsed_detections) == 0:
         return parsed_detections
-    height, width = detections["image"]["height"], detections["image"]["width"]
-    image_metadata = np.array([[height, width]] * len(parsed_detections))
+
+    predictions = detections["predictions"]
+    num_pred = len(parsed_detections)
+    image = detections["image"]
+    height, width = image["height"], image["width"]
+    # Allocate once for image_metadata to avoid Python's list * operator which
+    # can be slower than direct broadcast with numpy
+    image_metadata = np.empty((num_pred, 2), dtype=np.int32)
+    image_metadata[:, 0] = height
+    image_metadata[:, 1] = width
     parsed_detections.data[IMAGE_DIMENSIONS_KEY] = image_metadata
+
+    # Use list comprehensions instead of .get() in loops for a slight performance gain
     detection_ids = [
-        detection.get(DETECTION_ID_KEY, str(uuid4()))
-        for detection in detections["predictions"]
+        (d.get(DETECTION_ID_KEY) if DETECTION_ID_KEY in d else str(uuid4()))
+        for d in predictions
     ]
-    parsed_detections.data[DETECTION_ID_KEY] = np.array(detection_ids)
+    parsed_detections.data[DETECTION_ID_KEY] = np.array(detection_ids, dtype="object")
+
     parent_ids = [
-        detection.get(PARENT_ID_KEY, parameter)
-        for detection in detections["predictions"]
+        (d.get(PARENT_ID_KEY) if PARENT_ID_KEY in d else parameter) for d in predictions
     ]
-    parsed_detections[PARENT_ID_KEY] = np.array(parent_ids)
+    parsed_detections[PARENT_ID_KEY] = np.array(parent_ids, dtype="object")
+
+    # The keys as tuple pairs for optional element mapping
     optional_elements_keys = [
         (PATH_DEVIATION_KEY_IN_INFERENCE_RESPONSE, PATH_DEVIATION_KEY_IN_SV_DETECTIONS),
         (TIME_IN_ZONE_KEY_IN_INFERENCE_RESPONSE, TIME_IN_ZONE_KEY_IN_SV_DETECTIONS),
@@ -206,17 +218,27 @@ def deserialize_detections_kind(
         ),
         (VELOCITY_KEY_IN_INFERENCE_RESPONSE, VELOCITY_KEY_IN_SV_DETECTIONS),
     ]
+
+    # Use the first prediction directly for containment checks (zero copy)
+    first_detection = predictions[0]
+    # Try to batch attach all present optional keys efficiently
     for raw_detection_key, parsed_detection_key in optional_elements_keys:
-        parsed_detections = _attach_optional_detection_element(
-            raw_detections=detections["predictions"],
-            parsed_detections=parsed_detections,
-            raw_detection_key=raw_detection_key,
-            parsed_detection_key=parsed_detection_key,
+        if raw_detection_key in first_detection:
+            # Use a comprehension rather than building in a helper
+            result = [d[raw_detection_key] for d in predictions]
+            # Preallocate dtype=object for robustness (Obj arrays preferred in SV)
+            parsed_detections.data[parsed_detection_key] = np.array(
+                result, dtype="object"
+            )
+
+    # Attach keypoints using fast containment test
+    if KEYPOINTS_KEY_IN_INFERENCE_RESPONSE in first_detection:
+        return add_inference_keypoints_to_sv_detections(
+            inference_prediction=predictions,
+            detections=parsed_detections,
         )
-    return _attach_optional_key_points_detections(
-        raw_detections=detections["predictions"],
-        parsed_detections=parsed_detections,
-    )
+
+    return parsed_detections
 
 
 def _attach_optional_detection_element(
