@@ -127,26 +127,30 @@ def calculate_brenner_measure(
     # Convert image to 16-bit integer format
     converted_image = input_image.astype(np.int16)
 
-    # Get the dimensions of the image
-    height, width = converted_image.shape
+    # Directly calculate horizontal and vertical focus measures using slicing for max efficiency
+    h_diff = np.clip(converted_image[:, 2:] - converted_image[:, :-2], 0, None)
+    v_diff = np.clip(converted_image[2:, :] - converted_image[:-2, :], 0, None)
 
-    # Initialize two matrices for horizontal and vertical focus measures
-    horizontal_diff = np.zeros((height, width))
-    vertical_diff = np.zeros((height, width))
+    # Prepare an output focus_measure of correct shape; fill using maximums from diffs
+    focus_measure = np.zeros_like(converted_image, dtype=np.int32)
+    # For the overlapping regions, use the max of h_diff and v_diff
+    h_area = (slice(None), slice(0, converted_image.shape[1] - 2))
+    v_area = (slice(0, converted_image.shape[0] - 2), slice(None))
 
-    # Calculate horizontal and vertical focus measures
-    horizontal_diff[:, : width - 2] = np.clip(
-        converted_image[:, 2:] - converted_image[:, :-2], 0, None
-    )
-    vertical_diff[: height - 2, :] = np.clip(
-        converted_image[2:, :] - converted_image[:-2, :], 0, None
-    )
+    # Horizontal diff into proper location (saves memory and copying)
+    focus_measure[h_area] = h_diff
+    # Vertical diff, element-wise max
+    focus_measure[v_area] = np.maximum(focus_measure[v_area], v_diff)
 
-    # Calculate final focus measure
-    focus_measure = np.max((horizontal_diff, vertical_diff), axis=0) ** 2
+    # Square in-place for final focus measure
+    np.square(focus_measure, out=focus_measure)
 
-    # Convert focus measure matrix to 8-bit for visualization
-    focus_measure_image = ((focus_measure / focus_measure.max()) * 255).astype(np.uint8)
+    # Convert focus measure matrix to 8-bit for visualization, avoid division by zero
+    max_val = focus_measure.max()
+    if max_val == 0:
+        focus_measure_image = np.zeros_like(focus_measure, dtype=np.uint8)
+    else:
+        focus_measure_image = (focus_measure / max_val * 255).astype(np.uint8)
 
     # Display the Brenner value on the top left of the image
     cv2.putText(
