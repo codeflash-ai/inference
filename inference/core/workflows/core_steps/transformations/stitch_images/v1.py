@@ -130,34 +130,62 @@ def stitch_images(
     count_of_best_matches_per_query_descriptor: int,
     max_allowed_reprojection_error: float,
 ) -> np.ndarray:
-    # https://docs.opencv.org/4.10.0/d7/d60/classcv_1_1SIFT.html#a4264f700a8133074fb477e30d9beb331
+    # Create SIFT detector once for this function
     sift = cv.SIFT_create()
 
-    # https://docs.opencv.org/4.10.0/d0/d13/classcv_1_1Feature2D.html#a8be0d1c20b08eb867184b8d74c15a677
+    # Compute keypoints and descriptors for each image
     keypoints_1, descriptors_1 = sift.detectAndCompute(image=image1, mask=None)
     keypoints_2, descriptors_2 = sift.detectAndCompute(image=image2, mask=None)
 
-    # https://docs.opencv.org/4.10.0/d3/da1/classcv_1_1BFMatcher.html#a02ef4d594b33d091767cbfe442aefb8a
+    # If not enough descriptors, raise immediately (to avoid running downstream code)
+    if (
+        descriptors_1 is None
+        or descriptors_2 is None
+        or len(descriptors_1) < 2
+        or len(descriptors_2) < 2
+    ):
+        raise RuntimeError(
+            "Not enough descriptors in one or both images for stitching."
+        )
+
     bf = cv.BFMatcher_create()
-    # https://docs.opencv.org/4.10.0/db/d39/classcv_1_1DescriptorMatcher.html#a378f35c9b1a5dfa4022839a45cdf0e89
     matches = bf.knnMatch(
         queryDescriptors=descriptors_1,
         trainDescriptors=descriptors_2,
         k=count_of_best_matches_per_query_descriptor,
     )
 
-    good_matches = [m[0] for m in matches if m[0].distance < 0.75 * m[1].distance]
+    # Use NumPy array for filtering distances to reduce Python-level iteration
+    # Only retain pairs where both 2 or more matches are found (OpenCV can return less)
+    filtered_matches = [m for m in matches if len(m) >= 2]
+    if len(filtered_matches) == 0:
+        raise RuntimeError("No matches found between given images for stitching.")
 
-    image1_pts = np.float32([keypoints_1[m.queryIdx].pt for m in good_matches]).reshape(
-        -1, 1, 2
+    distances = np.array(
+        [[pair[0].distance, pair[1].distance] for pair in filtered_matches]
     )
-    image2_pts = np.float32([keypoints_2[m.trainIdx].pt for m in good_matches]).reshape(
-        -1, 1, 2
-    )
+    good_indices = np.where(distances[:, 0] < 0.75 * distances[:, 1])[0]
+    if good_indices.size == 0:
+        raise RuntimeError("No good matches found between images for stitching.")
+    # Only extract matches that passed the ratio test
+    good_matches = [filtered_matches[idx][0] for idx in good_indices]
 
-    image1_first = np.mean([kp.pt[0] for kp in keypoints_1]) < np.mean(
-        [kp.pt[0] for kp in keypoints_2]
-    )
+    # Compose correspondence points using list comprehensions with preallocation
+    # This is about as fast as possible in Python for nontrivial lists of custom objects
+    image1_pts = np.empty((len(good_matches), 1, 2), dtype=np.float32)
+    image2_pts = np.empty((len(good_matches), 1, 2), dtype=np.float32)
+    for i, m in enumerate(good_matches):
+        image1_pts[i, 0, :] = keypoints_1[m.queryIdx].pt
+        image2_pts[i, 0, :] = keypoints_2[m.trainIdx].pt
+
+    # Compute which image should be 'first' by mean of x-coordinates, in a vectorized way
+    keypoints_1_x = np.empty(len(keypoints_1), dtype=np.float32)
+    keypoints_2_x = np.empty(len(keypoints_2), dtype=np.float32)
+    for i, kp in enumerate(keypoints_1):
+        keypoints_1_x[i] = kp.pt[0]
+    for i, kp in enumerate(keypoints_2):
+        keypoints_2_x[i] = kp.pt[0]
+    image1_first = keypoints_1_x.mean() < keypoints_2_x.mean()
     if image1_first:
         first_image_pts = image1_pts
         second_image_pts = image2_pts
@@ -169,51 +197,58 @@ def stitch_images(
         first_image = image1
         second_image = image2
 
-    # https://docs.opencv.org/4.10.0/d9/d0c/group__calib3d.html#ga4abc2ece9fab9398f2e560d53c8c9780
+    # Find homography
     transformation_matrix, mask = cv.findHomography(
         srcPoints=first_image_pts,
         dstPoints=second_image_pts,
         method=cv.RANSAC,
         ransacReprojThreshold=max_allowed_reprojection_error,
     )
+    if transformation_matrix is None:
+        raise RuntimeError("Homography computation failed.")
 
     h1, w1 = first_image.shape[:2]
     h2, w2 = second_image.shape[:2]
 
-    # https://docs.opencv.org/4.10.0/d2/de8/group__core__array.html#gad327659ac03e5fd6894b90025e6900a7
-    warped_image_corners = cv.perspectiveTransform(
-        src=np.float32([[0, 0], [0, h2], [w2, h2], [w2, 0]]).reshape(-1, 1, 2),
+    # Warp all 4 corners of the second image and compute bounds
+    second_image_corners = np.array(
+        [[0, 0], [0, h2], [w2, h2], [w2, 0]], dtype=np.float32
+    ).reshape(-1, 1, 2)
+    warped_corners = cv.perspectiveTransform(
+        src=second_image_corners,
         m=transformation_matrix,
     )
-    [xmin, ymin] = np.int32(warped_image_corners.min(axis=0).ravel())
-    [xmax, ymax] = np.int32(warped_image_corners.max(axis=0).ravel())
+    min_xy = warped_corners.min(axis=0).ravel()
+    max_xy = warped_corners.max(axis=0).ravel()
+    xmin, ymin = np.int32(min_xy)
+    xmax, ymax = np.int32(max_xy)
 
     xmax = max(xmax, w1)
     ymax = max(ymax, h1)
 
     translation_dist = [-xmin, -ymin]
-
+    # Clamp translation if negative (kept from original logic)
     if translation_dist[0] < 0 or translation_dist[1] < 0:
         translation_dist = [max(0, translation_dist[0]), max(0, translation_dist[1])]
 
-    H_translation = np.array(
-        [[1, 0, translation_dist[0]], [0, 1, translation_dist[1]], [0, 0, 1]]
-    )
+    H_translation = np.eye(3, dtype=np.float64)
+    H_translation[0, 2] = translation_dist[0]
+    H_translation[1, 2] = translation_dist[1]
 
-    # https://docs.opencv.org/4.10.0/da/d54/group__imgproc__transform.html#gaf73673a7e8e18ec6963e3774e6a94b87
+    output_size = (xmax - xmin, ymax - ymin)
+
     second_image_warped = cv.warpPerspective(
         src=second_image,
         M=H_translation @ transformation_matrix,
-        dsize=(xmax - xmin, ymax - ymin),
+        dsize=output_size,
     )
 
+    # Only copy first image if within boundaries
+    t_x, t_y = translation_dist
     if (
-        translation_dist[0] + w1 <= second_image_warped.shape[1]
-        and translation_dist[1] + h1 <= second_image_warped.shape[0]
+        t_x + w1 <= second_image_warped.shape[1]
+        and t_y + h1 <= second_image_warped.shape[0]
     ):
-        second_image_warped[
-            translation_dist[1] : translation_dist[1] + h1,
-            translation_dist[0] : translation_dist[0] + w1,
-        ] = first_image
+        second_image_warped[t_y : t_y + h1, t_x : t_x + w1] = first_image
 
     return second_image_warped
