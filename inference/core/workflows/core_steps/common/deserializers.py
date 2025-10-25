@@ -227,10 +227,11 @@ def _attach_optional_detection_element(
 ) -> sv.Detections:
     if raw_detection_key not in raw_detections[0]:
         return parsed_detections
-    result = []
-    for detection in raw_detections:
-        result.append(detection[raw_detection_key])
-    parsed_detections.data[parsed_detection_key] = np.array(result)
+    parsed_detections.data[parsed_detection_key] = np.fromiter(
+        (detection[raw_detection_key] for detection in raw_detections),
+        dtype=object,
+        count=len(raw_detections),
+    )
     return parsed_detections
 
 
