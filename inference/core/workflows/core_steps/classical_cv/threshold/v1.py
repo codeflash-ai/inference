@@ -23,6 +23,16 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Since the output definition is constant and stateless, we cache it to avoid repeated creation.
+_OUTPUTS: List[OutputDefinition] = [
+    OutputDefinition(
+        name=OUTPUT_IMAGE_KEY,
+        kind=[
+            IMAGE_KIND,
+        ],
+    ),
+]
+
 SHORT_DESCRIPTION: str = "Apply a threshold to an image."
 LONG_DESCRIPTION: str = """
 Apply a threshold to an image. The image must be in grayscale.
@@ -86,14 +96,7 @@ class ImageThresholdManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_IMAGE_KEY,
-                kind=[
-                    IMAGE_KIND,
-                ],
-            ),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
