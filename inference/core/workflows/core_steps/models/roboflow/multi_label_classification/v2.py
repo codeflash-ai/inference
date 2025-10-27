@@ -103,11 +103,15 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="predictions", kind=[CLASSIFICATION_PREDICTION_KIND]),
-            OutputDefinition(name=INFERENCE_ID_KEY, kind=[INFERENCE_ID_KIND]),
-            OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
-        ]
+        if not hasattr(cls, "_outputs"):
+            cls._outputs = [
+                OutputDefinition(
+                    name="predictions", kind=[CLASSIFICATION_PREDICTION_KIND]
+                ),
+                OutputDefinition(name=INFERENCE_ID_KEY, kind=[INFERENCE_ID_KIND]),
+                OutputDefinition(name="model_id", kind=[ROBOFLOW_MODEL_ID_KIND]),
+            ]
+        return cls._outputs.copy()
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
