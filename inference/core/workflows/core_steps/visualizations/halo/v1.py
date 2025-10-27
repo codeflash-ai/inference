@@ -103,17 +103,12 @@ class HaloVisualizationBlockV1(ColorableVisualizationBlock):
         opacity: float,
         kernel_size: int,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(
-                str,
-                [
-                    color_palette,
-                    palette_size,
-                    color_axis,
-                    opacity,
-                    kernel_size,
-                ],
-            )
+        key = (
+            color_palette,
+            palette_size,
+            color_axis,
+            opacity,
+            kernel_size,
         )
 
         if key not in self.annotatorCache:
