@@ -385,6 +385,7 @@ def prepare_unconstrained_prompt(
     gpt_image_detail: str,
     **kwargs,
 ) -> List[dict]:
+    image_url = f"data:image/jpeg;base64,{base64_image}"
     return [
         {
             "role": "user",
@@ -393,7 +394,7 @@ def prepare_unconstrained_prompt(
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
+                        "url": image_url,
                         "detail": gpt_image_detail,
                     },
                 },
