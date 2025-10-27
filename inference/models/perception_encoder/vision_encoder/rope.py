@@ -40,9 +40,11 @@ def rotate_half(x):
 def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
     dtype = t.dtype
 
+    # Avoid unnecessary indexing if shapes already match
     if t.ndim == 3:
         seq_len = t.shape[seq_dim]
-        freqs = freqs[-seq_len:]
+        if freqs.shape[-2] > seq_len:
+            freqs = freqs[-seq_len:]
 
     rot_dim = freqs.shape[-1]
     end_index = start_index + rot_dim
@@ -51,13 +53,31 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
+    # Use slices directly to avoid unnecessary tuple unpacking
+    if start_index == 0 and end_index == t.shape[-1]:
+        t_left = None
+        t_mid = t
+        t_right = None
+    else:
+        t_left = t[..., :start_index] if start_index > 0 else None
+        t_mid = t[..., start_index:end_index]
+        t_right = t[..., end_index:] if end_index < t.shape[-1] else None
+
+    cos = freqs.cos()
+    sin = freqs.sin()
+    t_mid_rot = t_mid * cos * scale + rotate_half(t_mid) * sin * scale
+
+    # Efficient concatenation, skip empty pieces
+    pieces = []
+    if t_left is not None and t_left.shape[-1] != 0:
+        pieces.append(t_left)
+    pieces.append(t_mid_rot)
+    if t_right is not None and t_right.shape[-1] != 0:
+        pieces.append(t_right)
+    if len(pieces) == 1:
+        out = pieces[0]
+    else:
+        out = torch.cat(pieces, dim=-1)
 
     return out.type(dtype)
 
@@ -70,6 +90,8 @@ def apply_learned_rotations(rotations, t, start_index=0, freq_ranges=None):
         rotations = einsum("..., f -> ... f", rotations, freq_ranges)
         rotations = rearrange(rotations, "... r f -> ... (r f)")
 
+    # Move repeat after freq-range rearrange, use torch.repeat_interleave for speed.
+    # But, since shapes may be complex, keep repeat to preserve behavior.
     rotations = repeat(rotations, "... n -> ... (n r)", r=2)
     return apply_rotary_emb(rotations, t, start_index=start_index)
 
