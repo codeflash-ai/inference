@@ -1067,9 +1067,11 @@ def get_class_names_from_environment_file(environment: Optional[dict]) -> List[s
         raise ModelArtefactError(
             f"Missing `CLASS_MAP` in environment or `CLASS_MAP` is not dict."
         )
-    class_names = []
-    for i in range(len(environment["CLASS_MAP"].keys())):
-        class_names.append(environment["CLASS_MAP"][str(i)])
+    # Direct references, no loop/index overhead; avoids repeated key access
+    class_map = environment["CLASS_MAP"]
+    # Determine max index by number of keys, and use list comprehension for efficiency
+    num_classes = len(class_map)
+    class_names = [class_map[str(i)] for i in range(num_classes)]
     return class_names
 
 
