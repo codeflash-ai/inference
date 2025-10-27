@@ -29,6 +29,21 @@ from inference.enterprise.stream_management.manager.entities import (
     OperationStatus,
 )
 
+_failure_key = {STATUS_KEY: OperationStatus.FAILURE}
+
+_logger_exception = logger.exception
+
+_exception_map = {
+    ProcessesManagerInvalidPayload: (400, "Processes Manager - invalid payload error"),
+    ProcessesManagerAuthorisationError: (
+        401,
+        "Processes Manager - authorisation error",
+    ),
+    ProcessesManagerNotFoundError: (404, "Processes Manager - not found error"),
+    ConnectivityError: (503, "Processes Manager connectivity error occurred"),
+    ProcessesManagerClientError: (500, "Processes Manager error occurred"),
+}
+
 API_HOST = os.getenv("STREAM_MANAGEMENT_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("STREAM_MANAGEMENT_API_PORT", "8080"))
 
@@ -57,51 +72,23 @@ def with_route_exceptions(route: callable) -> Callable[[Any], Awaitable[JSONResp
     async def wrapped_route(*args, **kwargs):
         try:
             return await route(*args, **kwargs)
-        except ProcessesManagerInvalidPayload as error:
-            resp = JSONResponse(
-                status_code=400,
-                content={STATUS_KEY: OperationStatus.FAILURE, "message": str(error)},
-            )
-            logger.exception("Processes Manager - invalid payload error")
-            return resp
-        except ProcessesManagerAuthorisationError as error:
-            resp = JSONResponse(
-                status_code=401,
-                content={STATUS_KEY: OperationStatus.FAILURE, "message": str(error)},
-            )
-            logger.exception("Processes Manager - authorisation error")
-            return resp
-        except ProcessesManagerNotFoundError as error:
-            resp = JSONResponse(
-                status_code=404,
-                content={STATUS_KEY: OperationStatus.FAILURE, "message": str(error)},
-            )
-            logger.exception("Processes Manager - not found error")
-            return resp
-        except ConnectivityError as error:
-            resp = JSONResponse(
-                status_code=503,
-                content={STATUS_KEY: OperationStatus.FAILURE, "message": str(error)},
-            )
-            logger.exception("Processes Manager connectivity error occurred")
-            return resp
-        except ProcessesManagerClientError as error:
-            resp = JSONResponse(
-                status_code=500,
-                content={STATUS_KEY: OperationStatus.FAILURE, "message": str(error)},
-            )
-            logger.exception("Processes Manager error occurred")
-            return resp
-        except Exception:
-            resp = JSONResponse(
-                status_code=500,
-                content={
-                    STATUS_KEY: OperationStatus.FAILURE,
-                    "message": "Internal error.",
-                },
-            )
-            logger.exception("Internal error in API")
-            return resp
+        except Exception as error:
+            error_type = type(error)
+            if error_type in _exception_map:
+                status_code, log_message = _exception_map[error_type]
+                resp = JSONResponse(
+                    status_code=status_code,
+                    content={**_failure_key, "message": str(error)},
+                )
+                _logger_exception(log_message)
+                return resp
+            else:
+                resp = JSONResponse(
+                    status_code=500,
+                    content={**_failure_key, "message": "Internal error."},
+                )
+                _logger_exception("Internal error in API")
+                return resp
 
     return wrapped_route
 
