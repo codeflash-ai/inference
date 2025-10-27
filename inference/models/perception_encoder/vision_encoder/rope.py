@@ -22,7 +22,10 @@ def default(val, d):
 
 
 def broadcat(tensors, dim=-1):
-    broadcasted_tensors = broadcast_tensors(*tensors)
+    tensors = list(tensors)
+    if len(tensors) == 1:
+        return tensors[0]
+    broadcasted_tensors = torch.broadcast_tensors(*tensors)
     return torch.cat(broadcasted_tensors, dim=dim)
 
 
