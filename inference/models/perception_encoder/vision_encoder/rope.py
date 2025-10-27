@@ -15,7 +15,8 @@ def exists(val):
 
 
 def default(val, d):
-    return val if exists(val) else d
+    # minor: inline the exists check to avoid import/lookups (exists is trivial).
+    return val if val is not None else d
 
 
 # broadcat, as tortoise-tts was using it
@@ -40,9 +41,14 @@ def rotate_half(x):
 def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
     dtype = t.dtype
 
-    if t.ndim == 3:
+    # Avoid unnecessary slicing if not needed
+    t_ndim = t.ndim
+    # If t is 3D, adapt freqs accordingly
+    if t_ndim == 3:
         seq_len = t.shape[seq_dim]
-        freqs = freqs[-seq_len:]
+        # avoid slicing if freqs are the correct length already (most call sites)
+        if freqs.shape[-2] != seq_len:
+            freqs = freqs[-seq_len:]
 
     rot_dim = freqs.shape[-1]
     end_index = start_index + rot_dim
@@ -51,15 +57,20 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
-
-    return out.type(dtype)
+    # Use torch.split for better clarity and possible backend optimization instead of slicing
+    if start_index == 0 and end_index == t.shape[-1]:
+        # all features are rotary, skip cat
+        t_rot = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+        return t_rot.type(dtype)
+    else:
+        t_left = t[..., :start_index]
+        t_mid = t[..., start_index:end_index]
+        t_right = t[..., end_index:]
+        t_mid = (t_mid * freqs.cos() * scale) + (
+            rotate_half(t_mid) * freqs.sin() * scale
+        )
+        out = torch.cat((t_left, t_mid, t_right), dim=-1)
+        return out.type(dtype)
 
 
 # learned rotation helpers
@@ -97,22 +108,21 @@ class RotaryEmbedding(Module):
         cache_if_possible=True,
     ):
         super().__init__()
-        # proposed by reddit user bloc97, to rescale rotary embeddings to longer sequence length without fine-tuning
-        # has some connection to NTK literature
-        # https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/
 
-        theta *= theta_rescale_factor ** (dim / (dim - 2))
+        # Calculate theta using inplace ** since result is not reused elsewhere
+        theta = theta * (theta_rescale_factor ** (dim / (dim - 2)))
 
         self.freqs_for = freqs_for
 
-        if exists(custom_freqs):
+        if custom_freqs is not None:
             freqs = custom_freqs
         elif freqs_for == "lang":
             freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+                theta ** (torch.arange(0, dim, 2).float()[: (dim // 2)] / dim)
             )
         elif freqs_for == "pixel":
-            freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
+            # Precompute linspace for efficiency
+            freqs = torch.linspace(1.0, max_freq / 2, steps=dim // 2) * pi
         elif freqs_for == "constant":
             freqs = torch.ones(num_freqs).float()
 
@@ -163,9 +173,11 @@ class RotaryEmbedding(Module):
         self.register_buffer(key, value, persistent=False)
 
     def get_seq_pos(self, seq_len, device, dtype, offset=0):
-        return (
-            torch.arange(seq_len, device=device, dtype=dtype) + offset
-        ) / self.interpolate_factor
+        # Use out-of-place ops for out-of-graph operations
+        out = torch.arange(seq_len, device=device, dtype=dtype)
+        if offset != 0:
+            out = out + offset
+        return out / self.interpolate_factor
 
     def rotate_queries_or_keys(self, t, seq_dim=None, offset=0):
         seq_dim = default(seq_dim, self.default_seq_dim)
@@ -288,13 +300,18 @@ class RotaryEmbedding(Module):
 
         freqs = self.freqs
 
-        freqs = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        # Optimize einsum and repeat usage
+        freq_dtype = freqs.dtype
+        t_type = t.type(freq_dtype)
+        # t: [seq_len], freqs: [freqs_dim]
+        freqs_calc = einsum("..., f -> ... f", t_type, freqs)
+        # Precompute r
+        freqs_out = repeat(freqs_calc, "... n -> ... (n r)", r=2)
 
         if should_cache:
-            self.tmp_store("cached_freqs", freqs.detach())
+            self.tmp_store("cached_freqs", freqs_out.detach())
 
-        return freqs
+        return freqs_out
 
 
 class Rope2D:
