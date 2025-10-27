@@ -110,11 +110,13 @@ def get_all_outputs_kind_major(
     blocks_description: BlocksDescription,
 ) -> Dict[str, Set[Type[WorkflowBlock]]]:
     kind_major_step_outputs = defaultdict(set)
+    wildcard_add = kind_major_step_outputs[WILDCARD_KIND.name].add
     for block in blocks_description.blocks:
-        kind_major_step_outputs[WILDCARD_KIND.name].add(block.block_class)
+        wildcard_add(block.block_class)
+        block_class = block.block_class
         for output in block.outputs_manifest:
             for kind in output.kind:
-                kind_major_step_outputs[kind.name].add(block.block_class)
+                kind_major_step_outputs[kind.name].add(block_class)
     return kind_major_step_outputs
 
 
