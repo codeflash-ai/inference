@@ -299,19 +299,19 @@ def convert_sam2_segmentation_response_to_inference_instances_seg_response(
         prompt_class_names,
         prompt_detection_ids,
     ):
+        if prediction.confidence < threshold:
+            continue
         for mask in prediction.masks:
             if len(mask) < 3:
                 # skipping empty masks
                 continue
-            if prediction.confidence < threshold:
-                # skipping maks below threshold
-                continue
-            x_coords = [coord[0] for coord in mask]
-            y_coords = [coord[1] for coord in mask]
-            min_x = np.min(x_coords)
-            max_x = np.max(x_coords)
-            min_y = np.min(y_coords)
-            max_y = np.max(y_coords)
+            mask_coords = np.asarray(mask)
+            x_coords = mask_coords[:, 0]
+            y_coords = mask_coords[:, 1]
+            min_x = x_coords.min()
+            max_x = x_coords.max()
+            min_y = y_coords.min()
+            max_y = y_coords.max()
             center_x = (min_x + max_x) / 2
             center_y = (min_y + max_y) / 2
             predictions.append(
@@ -329,6 +329,7 @@ def convert_sam2_segmentation_response_to_inference_instances_seg_response(
                     }
                 )
             )
+
     return InstanceSegmentationInferenceResponse(
         predictions=predictions,
         image=InferenceResponseImage(width=image_width, height=image_height),
