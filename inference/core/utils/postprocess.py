@@ -22,7 +22,13 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> Union[np.number, np.ndarr
     Returns:
         float: Cosine similarity between vectors A and B.
     """
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    # Use np.asarray to avoid unnecessary copying if already ndarray
+    a = np.asarray(a)
+    b = np.asarray(b)
+    # Fast norm calculation, avoids repeated full reduction/loop and extra function calls
+    a_norm = np.sqrt(np.dot(a, a))
+    b_norm = np.sqrt(np.dot(b, b))
+    return np.dot(a, b) / (a_norm * b_norm)
 
 
 def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
