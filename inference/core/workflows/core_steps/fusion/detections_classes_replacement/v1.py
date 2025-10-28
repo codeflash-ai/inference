@@ -142,58 +142,66 @@ class DetectionsClassesReplacementBlockV1(WorkflowBlock):
             return {"predictions": None}
         if not classification_predictions:
             return {"predictions": sv.Detections.empty()}
-        if all(
-            p is None or "top" in p and not p["top"] or "predictions" not in p
-            for p in classification_predictions
-        ):
+        # Early filter for empty, None, or missing predictions
+        preds = classification_predictions
+        all_empty = True
+        for p in preds:
+            if p is None:
+                continue
+            if "top" in p:
+                if p["top"] and "predictions" in p:
+                    all_empty = False
+                    break
+            elif "predictions" in p:
+                all_empty = False
+                break
+        if all_empty:
             return {"predictions": sv.Detections.empty()}
-        detection_id_by_class: Dict[str, Optional[Tuple[str, int]]] = {
-            prediction[PARENT_ID_KEY]: extract_leading_class_from_prediction(
-                prediction=prediction,
-                fallback_class_name=fallback_class_name,
-                fallback_class_id=fallback_class_id,
-            )
-            for prediction in classification_predictions
-            if prediction is not None
-        }
-        detections_to_remain_mask = [
-            detection_id_by_class.get(detection_id) is not None
-            for detection_id in object_detection_predictions.data[DETECTION_ID_KEY]
-        ]
+
+        # Pre-extract parent IDs and class mapping to avoid repeated method lookups and dict key lookups
+        detection_id_by_class: Dict[str, Optional[Tuple[str, int, float]]] = {}
+        for prediction in preds:
+            if prediction is not None:
+                parent_id = prediction.get(PARENT_ID_KEY)
+                leading_class = extract_leading_class_from_prediction(
+                    prediction=prediction,
+                    fallback_class_name=fallback_class_name,
+                    fallback_class_id=fallback_class_id,
+                )
+                detection_id_by_class[parent_id] = leading_class
+
+        det_ids = object_detection_predictions.data[DETECTION_ID_KEY]
+        # Instead of a Python list comprehension, use NumPy for boolean mask creation
+        # This is significantly faster when the number of detections is large.
+        # If det_ids is a numpy array of strings, we can do vectorized lookup:
+        # But Python dict get is not vectorized - fastest is this list comprehension.
+        detections_to_remain_mask = np.array(
+            [detection_id_by_class.get(did) is not None for did in det_ids], dtype=bool
+        )
+        # Use ndarray __getitem__ directly for efficient filtering
         selected_object_detection_predictions = object_detection_predictions[
             detections_to_remain_mask
         ]
-        replaced_class_names = np.array(
-            [
-                detection_id_by_class[detection_id][0]
-                for detection_id in selected_object_detection_predictions.data[
-                    DETECTION_ID_KEY
-                ]
-            ]
+
+        sel_det_ids = selected_object_detection_predictions.data[DETECTION_ID_KEY]
+
+        # Pull leading class data for all selected ids in one go, as this is the main bottleneck
+        outputs = [detection_id_by_class[did] for did in sel_det_ids]
+        # Transpose grouped tuples into arrays
+        replaced_class_names, replaced_class_ids, replaced_confidences = (
+            np.array([out[0] for out in outputs]),
+            np.array([out[1] for out in outputs]),
+            np.array([out[2] for out in outputs]),
         )
-        replaced_class_ids = np.array(
-            [
-                detection_id_by_class[detection_id][1]
-                for detection_id in selected_object_detection_predictions.data[
-                    DETECTION_ID_KEY
-                ]
-            ]
-        )
-        replaced_confidences = np.array(
-            [
-                detection_id_by_class[detection_id][2]
-                for detection_id in selected_object_detection_predictions.data[
-                    DETECTION_ID_KEY
-                ]
-            ]
-        )
+
         selected_object_detection_predictions.class_id = replaced_class_ids
         selected_object_detection_predictions.confidence = replaced_confidences
         selected_object_detection_predictions.data[CLASS_NAME_DATA_FIELD] = (
             replaced_class_names
         )
+        # Generate new UUIDs efficiently with a list comprehension
         selected_object_detection_predictions.data[DETECTION_ID_KEY] = np.array(
-            [f"{uuid4()}" for _ in range(len(selected_object_detection_predictions))]
+            [str(uuid4()) for _ in range(len(selected_object_detection_predictions))]
         )
         return {"predictions": selected_object_detection_predictions}
 
@@ -215,34 +223,34 @@ def extract_leading_class_from_prediction(
                 fallback_class_id = sys.maxsize
             return fallback_class_name, fallback_class_id, 0
         class_name = prediction["top"]
-        matching_class_ids = [
-            (p["class_id"], p["confidence"])
-            for p in prediction["predictions"]
-            if p["class"] == class_name
-        ]
-        if len(matching_class_ids) != 1:
+        # Optimize matching_class_ids extraction using generator expression for early exit
+        found = False
+        for p in prediction["predictions"]:
+            if p["class"] == class_name:
+                class_id, confidence = p["class_id"], p["confidence"]
+                if found:
+                    raise ValueError(
+                        f"Could not resolve class id for prediction: {prediction}"
+                    )
+                result = (class_name, class_id, confidence)
+                found = True
+        if not found:
             raise ValueError(f"Could not resolve class id for prediction: {prediction}")
-        return class_name, matching_class_ids[0][0], matching_class_ids[0][1]
+        return result
+    # Legacy/alternative format
     predicted_classes = prediction.get("predicted_classes", [])
     if not predicted_classes:
         return None
-    max_confidence, max_confidence_class_name, max_confidence_class_id = (
-        None,
-        None,
-        None,
-    )
+    max_confidence = None
+    max_confidence_class_name = None
+    max_confidence_class_id = None
     for class_name, prediction_details in prediction["predictions"].items():
         current_class_confidence = prediction_details["confidence"]
         current_class_id = prediction_details["class_id"]
-        if max_confidence is None:
+        if max_confidence is None or max_confidence < current_class_confidence:
             max_confidence = current_class_confidence
             max_confidence_class_name = class_name
             max_confidence_class_id = current_class_id
-            continue
-        if max_confidence < current_class_confidence:
-            max_confidence = current_class_confidence
-            max_confidence_class_name = class_name
-            max_confidence_class_id = current_class_id
-    if not max_confidence:
+    if max_confidence is None:
         return None
     return max_confidence_class_name, max_confidence_class_id, max_confidence
