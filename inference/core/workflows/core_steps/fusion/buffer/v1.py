@@ -60,12 +60,20 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="output",
-                kind=[LIST_OF_VALUES_KIND],
-            )
-        ]
+        # Use tuple for 'kind' argument since it's immutable and slightly more memory efficient than list
+        # However, since the OutputDefinition may expect a list (and input is not mutated), and the behavior must be identical,
+        # and since modifying this to a tuple could cause failures if downstream code assumes mutability,
+        # leave as list for total behavioral safety.
+        # To further optimize, cache the output definition as a class-level attribute so it's only constructed once.
+        # This avoids constructing identical lists and OutputDefinitions on every method call.
+        if not hasattr(cls, "_describe_outputs_cache"):
+            cls._describe_outputs_cache = [
+                OutputDefinition(
+                    name="output",
+                    kind=[LIST_OF_VALUES_KIND],
+                )
+            ]
+        return cls._describe_outputs_cache
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
