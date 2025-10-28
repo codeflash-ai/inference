@@ -891,21 +891,20 @@ def ensure_compound_input_indices_match(indices: List[List[DynamicBatchIndex]]) 
 
 def get_empty_batch_elements_indices(value: Any) -> Set[DynamicBatchIndex]:
     result = set()
-    if isinstance(value, dict):
-        for v in value.values():
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, list):
-        for v in value:
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, Batch):
-        for index, value_element in value.iter_with_indices():
-            if isinstance(value_element, Batch):
-                value_result = get_empty_batch_elements_indices(value=value_element)
-                result = result.union(value_result)
-            elif value_element is None:
-                result.add(index)
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            # Avoid function calls and set union by extending stack directly
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+        elif isinstance(current, Batch):
+            for index, value_element in current.iter_with_indices():
+                if isinstance(value_element, Batch):
+                    stack.append(value_element)
+                elif value_element is None:
+                    result.add(index)
     return result
 
 
