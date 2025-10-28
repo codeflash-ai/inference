@@ -216,7 +216,7 @@ class BlockManifest(WorkflowBlockManifest):
 
 # primarily used for rate limiting
 def now() -> int:
-    return int(round(time.time() * 1000))
+    return int(time.time() * 1000)
 
 
 class Limits:
