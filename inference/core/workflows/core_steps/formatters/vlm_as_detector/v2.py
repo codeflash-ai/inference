@@ -216,11 +216,10 @@ class VLMAsDetectorBlockV2(WorkflowBlock):
 def string2json(
     raw_json: str,
 ) -> Tuple[bool, dict]:
-    json_blocks_found = JSON_MARKDOWN_BLOCK_PATTERN.findall(raw_json)
-    if len(json_blocks_found) == 0:
-        return try_parse_json(raw_json)
-    first_block = json_blocks_found[0]
-    return try_parse_json(first_block)
+    match = JSON_MARKDOWN_BLOCK_PATTERN.search(raw_json)
+    if match:
+        return try_parse_json(match.group(1))
+    return try_parse_json(raw_json)
 
 
 def try_parse_json(content: str) -> Tuple[bool, dict]:
@@ -291,7 +290,14 @@ def create_classes_index(classes: List[str]) -> Dict[str, int]:
 
 
 def scale_confidence(value: float) -> float:
-    return min(max(float(value), 0.0), 1.0)
+    # Fast path: avoid redundant float conversion and function calls
+    v = value if isinstance(value, float) else float(value)
+    if v < 0.0:
+        return 0.0
+    elif v > 1.0:
+        return 1.0
+    else:
+        return v
 
 
 def parse_florence2_object_detection_response(
