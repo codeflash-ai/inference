@@ -910,13 +910,14 @@ def get_empty_batch_elements_indices(value: Any) -> Set[DynamicBatchIndex]:
 
 
 def remove_indices(value: Any, indices: Set[DynamicBatchIndex]) -> Any:
-    if isinstance(value, dict):
-        return {k: remove_indices(value=v, indices=indices) for k, v in value.items()}
-    if isinstance(value, list):
-        return [remove_indices(value=v, indices=indices) for v in value]
-    if isinstance(value, Batch):
+    if type(value) is dict:
+        return {k: remove_indices(v, indices) for k, v in value.items()}
+    elif type(value) is list:
+        return [remove_indices(v, indices) for v in value]
+    elif isinstance(value, Batch):
         return value.remove_by_indices(indices_to_remove=indices)
-    return value
+    else:
+        return value
 
 
 def unfold_parameters(
