@@ -48,6 +48,14 @@ from inference.core.workflows.prototypes.block import (
 )
 from inference_sdk import InferenceConfiguration, InferenceHTTPClient
 
+_OUTPUT_DEFINITIONS = [
+    OutputDefinition(name=INFERENCE_ID_KEY, kind=[STRING_KIND]),
+    OutputDefinition(
+        name="predictions",
+        kind=[INSTANCE_SEGMENTATION_PREDICTION_KIND],
+    ),
+]
+
 LONG_DESCRIPTION = """
 Run inference on an instance segmentation model hosted on or uploaded to Roboflow.
 
@@ -159,13 +167,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=INFERENCE_ID_KEY, kind=[STRING_KIND]),
-            OutputDefinition(
-                name="predictions",
-                kind=[INSTANCE_SEGMENTATION_PREDICTION_KIND],
-            ),
-        ]
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
