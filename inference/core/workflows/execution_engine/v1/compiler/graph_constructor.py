@@ -189,10 +189,14 @@ def add_steps_nodes_for_graph(
     steps: List[WorkflowBlockManifest],
     execution_graph: DiGraph,
 ) -> DiGraph:
+    step_node_class = StepNode
+    step_node_category = NodeCategory.STEP_NODE
+    node_compilation_output_property = NODE_COMPILATION_OUTPUT_PROPERTY
+
     for step in steps:
         step_selector = construct_step_selector(step_name=step.name)
-        compilation_output = StepNode(
-            node_category=NodeCategory.STEP_NODE,
+        compilation_output = step_node_class(
+            node_category=step_node_category,
             name=step.name,
             selector=step_selector,
             data_lineage=[],
@@ -200,9 +204,7 @@ def add_steps_nodes_for_graph(
         )
         execution_graph.add_node(
             step_selector,
-            **{
-                NODE_COMPILATION_OUTPUT_PROPERTY: compilation_output,
-            },
+            **{node_compilation_output_property: compilation_output},
         )
     return execution_graph
 
