@@ -16,6 +16,8 @@ import numpy as np
 import regex as re
 import torch
 
+_whitespace_re = re.compile(r"\s+")
+
 # https://stackoverflow.com/q/62691279
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -75,7 +77,7 @@ def basic_clean(text):
 
 
 def whitespace_clean(text):
-    text = re.sub(r"\s+", " ", text)
+    text = _whitespace_re.sub(" ", text)
     text = text.strip()
     return text
 
