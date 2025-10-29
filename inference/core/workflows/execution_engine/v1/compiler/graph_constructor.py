@@ -1658,10 +1658,10 @@ def get_lineage_support_for_auto_batch_casted_parameters(
 def find_longest_lineage_support(
     all_lineages_of_batch_parameters: List[List[str]],
 ) -> Optional[List[str]]:
-    longest_longest_lineage_support = []
-    for lineage in all_lineages_of_batch_parameters:
-        if len(lineage) > len(longest_longest_lineage_support):
-            longest_longest_lineage_support = lineage
+    # Use built-in max with key for efficient retrieval of the longest lineage
+    if not all_lineages_of_batch_parameters:
+        return None
+    longest_longest_lineage_support = max(all_lineages_of_batch_parameters, key=len)
     if len(longest_longest_lineage_support) == 0:
         return None
     return longest_longest_lineage_support
