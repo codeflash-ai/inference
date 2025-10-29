@@ -318,8 +318,10 @@ class TwilioSMSNotificationBlockV1(WorkflowBlock):
 
 
 def _hash_credentials(twilio_account_sid: str, twilio_auth_token: str) -> str:
-    sid_hash = hashlib.sha256(twilio_account_sid.encode("utf-8")).hexdigest()
-    auth_token_hash = hashlib.sha256(twilio_auth_token.encode("utf-8")).hexdigest()
+    sid_encoded = twilio_account_sid.encode("utf-8")
+    token_encoded = twilio_auth_token.encode("utf-8")
+    sid_hash = hashlib.sha256(sid_encoded).hexdigest()
+    auth_token_hash = hashlib.sha256(token_encoded).hexdigest()
     return f"{sid_hash}:{auth_token_hash}"
 
 
