@@ -69,8 +69,10 @@ def get_pairs(word):
 
 
 def basic_clean(text):
-    text = ftfy.fix_text(text)
-    text = html.unescape(html.unescape(text))
+    fix_text = ftfy.fix_text
+    unescape = html.unescape
+    text = unescape(unescape(text))
+    text = fix_text(text)
     return text.strip()
 
 
