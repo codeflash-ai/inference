@@ -1797,8 +1797,9 @@ def get_reference_lineage(
     dimensionality_reference_property: Optional[str],
 ) -> List[str]:
     if len(all_lineages) == 1:
-        return copy(all_lineages[0])
-    if dimensionality_reference_property not in input_data:
+        return all_lineages[0][:]
+    property_data = input_data.get(dimensionality_reference_property)
+    if property_data is None:
         raise AssumptionError(
             public_message=f"Workflow Compiler for step: `{step_selector}` expected dimensionality_reference_property "
             f"presence to be verified at earlier stages, which did not happen as expected. "
@@ -1807,12 +1808,11 @@ def get_reference_lineage(
             f"context of the problem - including workflow definition you use.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    property_data = input_data[dimensionality_reference_property]
     if property_data.is_compound_input():
         lineage = None
         for nested_element in property_data.iterate_through_definitions():
             if nested_element.is_batch_oriented():
-                lineage = copy(nested_element.data_lineage)
+                lineage = nested_element.data_lineage[:]
                 return lineage
         if lineage is None:
             raise AssumptionError(
@@ -1832,7 +1832,7 @@ def get_reference_lineage(
             f"context of the problem - including workflow definition you use.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    return copy(property_data.data_lineage)
+    return property_data.data_lineage[:]
 
 
 def get_property_with_invalid_selector(
