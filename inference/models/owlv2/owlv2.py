@@ -359,14 +359,14 @@ class LazyImageRetrievalWrapper:
 
 def hash_wrapped_training_data(wrapped_training_data: List[Dict[str, Any]]) -> Hash:
     just_hash_relevant_data = [
-        [
+        (
             d["image"].image_hash,
             d["boxes"],
-        ]
+        )
         for d in wrapped_training_data
     ]
     # we dump to pickle to serialize the data as a single object
-    return hash_function(pickle.dumps(just_hash_relevant_data))
+    return hash_function(pickle.dumps(just_hash_relevant_data, protocol=4))
 
 
 class OwlV2(RoboflowInferenceModel):
