@@ -13,6 +13,9 @@ import pybase64
 import requests
 import tldextract
 from _io import _IOBase
+from line_profiler import profile as codeflash_line_profile
+
+codeflash_line_profile.enable(output_prefix="/tmp/codeflash_8p0z4d9w/baseline_lprof")
 from PIL import Image
 from requests import RequestException
 from tldextract.tldextract import ExtractResult
@@ -36,6 +39,10 @@ from inference.core.exceptions import (
 )
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
+
+_IMREAD_FLAGS_WITH_ORIENT = cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+
+_IMREAD_FLAGS_NO_ORIENT = cv2.IMREAD_COLOR
 
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
@@ -104,6 +111,7 @@ def load_image(
     return np_image, is_bgr
 
 
+@codeflash_line_profile
 def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     """Choose the appropriate OpenCV image decoding flags.
 
@@ -113,10 +121,10 @@ def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     Returns:
         int: OpenCV image decoding flags.
     """
-    cv_imread_flags = cv2.IMREAD_COLOR
+    # Use precomputed flags for faster selection
     if disable_preproc_auto_orient:
-        cv_imread_flags = cv_imread_flags | cv2.IMREAD_IGNORE_ORIENTATION
-    return cv_imread_flags
+        return _IMREAD_FLAGS_WITH_ORIENT
+    return _IMREAD_FLAGS_NO_ORIENT
 
 
 def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]]:
@@ -269,21 +277,24 @@ def load_image_base64(
     # New routes accept images via json body (str), legacy routes accept bytes which need to be decoded as strings
     if not isinstance(value, str):
         value = value.decode("utf-8")
-    value = BASE64_DATA_TYPE_PATTERN.sub("", value)
+    # Avoid re.sub if not needed by checking for a match first (faster for most strings that don't match), also BASE64_DATA_TYPE_PATTERN is fast
+    if BASE64_DATA_TYPE_PATTERN.match(value):
+        value = value[BASE64_DATA_TYPE_PATTERN.match(value).end() :]
     try:
+        # pybase64.b64decode is fast and memory-efficient; we keep its use
         value = pybase64.b64decode(value)
     except binascii.Error as error:
         raise InputImageLoadError(
             message="Could not load valid image from base64 string.",
             public_message="Malformed base64 input image.",
         ) from error
-    if len(value) == 0:
+    if not value:
         raise InputImageLoadError(
             message="Could not load valid image from base64 string.",
             public_message="Empty image payload.",
         )
-    image_np = np.frombuffer(value, np.uint8)
-    result = cv2.imdecode(image_np, cv_imread_flags)
+    # np.frombuffer is already optimal, but skip variable assignment to save a tiny bit of memory
+    result = cv2.imdecode(np.frombuffer(value, np.uint8), cv_imread_flags)
     if result is None:
         raise InputImageLoadError(
             message="Could not load valid image from base64 string.",
