@@ -632,7 +632,7 @@ def get_average_bounding_box(detections: sv.Detections) -> Tuple[int, int, int, 
     if len(detections) == 0:
         return (0.0, 0.0, 0.0, 0.0)
 
-    avg_xyxy = np.mean(detections.xyxy, axis=0)
+    avg_xyxy = np.add.reduce(detections.xyxy, axis=0) / len(detections)
     return tuple(avg_xyxy)
 
 
