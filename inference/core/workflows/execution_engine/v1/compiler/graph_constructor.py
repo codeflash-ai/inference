@@ -561,7 +561,8 @@ def denote_output_node_kind_based_on_step_outputs(
     kinds_for_outputs = {output.name: output.kind for output in step_outputs}
 
     if selected_output_name == "*":
-        output_node_manifest.kind = deepcopy(kinds_for_outputs)
+        # Use dict.copy() for shallow copy (values assumed non-mutable or not mutated here)
+        output_node_manifest.kind = kinds_for_outputs.copy()
         return None
     if selected_output_name not in kinds_for_outputs:
         output_name = output_node_manifest.output_manifest.name
