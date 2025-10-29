@@ -658,7 +658,7 @@ AGGREGATION_MODE2BOXES_AGGREGATOR = {
 
 
 def get_intersection_mask(detections: sv.Detections) -> np.ndarray:
-    return np.all(detections.mask, axis=0)
+    return np.logical_and.reduce(detections.mask, axis=0)
 
 
 def get_union_mask(detections: sv.Detections) -> np.ndarray:
