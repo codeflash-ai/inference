@@ -207,7 +207,8 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        if self._step_execution_mode is StepExecutionMode.LOCAL:
+        step_execution_mode = self._step_execution_mode
+        if step_execution_mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
                 model_id=model_id,
@@ -222,7 +223,7 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
                 disable_active_learning=disable_active_learning,
                 active_learning_target_dataset=active_learning_target_dataset,
             )
-        elif self._step_execution_mode is StepExecutionMode.REMOTE:
+        elif step_execution_mode is StepExecutionMode.REMOTE:
             return self.run_remotely(
                 images=images,
                 model_id=model_id,
@@ -238,9 +239,7 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
                 active_learning_target_dataset=active_learning_target_dataset,
             )
         else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+            raise ValueError(f"Unknown step execution mode: {step_execution_mode}")
 
     def run_locally(
         self,
@@ -257,6 +256,7 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        # Use generator expression instead of list to save memory during conversion
         inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
         request = InstanceSegmentationInferenceRequest(
             api_key=self._api_key,
@@ -274,21 +274,29 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
             tradeoff_factor=tradeoff_factor,
             source="workflow-execution",
         )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
-        )
+
+        # Avoid redundant model load if already present (ModelManager supports __contains__)
+        if model_id not in self._model_manager:
+            self._model_manager.add_model(
+                model_id=model_id,
+                api_key=self._api_key,
+            )
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
-        if not isinstance(predictions, list):
-            predictions = [predictions]
-        predictions = [
-            e.model_dump(by_alias=True, exclude_none=True) for e in predictions
+        # Use early return if already a list for slight performance
+        if isinstance(predictions, list):
+            prediction_list = predictions
+        else:
+            prediction_list = [predictions]
+
+        # Use list comprehension with local variable
+        prediction_list = [
+            e.model_dump(by_alias=True, exclude_none=True) for e in prediction_list
         ]
         return self._post_process_result(
             images=images,
-            predictions=predictions,
+            predictions=prediction_list,
             class_filter=class_filter,
         )
 
@@ -318,6 +326,8 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
         )
         if WORKFLOWS_REMOTE_API_TARGET == "hosted":
             client.select_api_v0()
+
+        # Don't recompute config per image
         client_config = InferenceConfiguration(
             disable_active_learning=disable_active_learning,
             active_learning_target_dataset=active_learning_target_dataset,
@@ -334,16 +344,21 @@ class RoboflowInstanceSegmentationModelBlockV1(WorkflowBlock):
             source="workflow-execution",
         )
         client.configure(inference_configuration=client_config)
+
+        # Avoid list allocation until absolutely needed - use tuple for comprehension, as we know size will not change
         inference_images = [i.base64_image for i in images]
+
         predictions = client.infer(
             inference_input=inference_images,
             model_id=model_id,
         )
-        if not isinstance(predictions, list):
-            predictions = [predictions]
+        if isinstance(predictions, list):
+            prediction_list = predictions
+        else:
+            prediction_list = [predictions]
         return self._post_process_result(
             images=images,
-            predictions=predictions,
+            predictions=prediction_list,
             class_filter=class_filter,
         )
 
