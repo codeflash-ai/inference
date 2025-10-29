@@ -355,17 +355,16 @@ def collect_actual_kinds_for_output(
     output: DynamicOutputDefinition,
     kinds_lookup: Dict[str, Kind],
 ) -> List[Kind]:
-    actual_kinds = []
-    for kind_name in output.kind:
-        if kind_name not in kinds_lookup:
-            raise DynamicBlockError(
-                public_message=f"Could not find kind with name `{kind_name}` declared for output `{output_name}` "
-                f"of dynamic block `{block_type}` within kinds that would be recognised by Execution "
-                f"Engine knowing the following kinds: {list(kinds_lookup.keys())}.",
-                context="workflow_compilation | dynamic_block_compilation | manifest_compilation",
-            )
-        actual_kinds.append(kinds_lookup[kind_name])
-    return actual_kinds
+    try:
+        return [kinds_lookup[kind_name] for kind_name in output.kind]
+    except KeyError as e:
+        kind_name = e.args[0]
+        raise DynamicBlockError(
+            public_message=f"Could not find kind with name `{kind_name}` declared for output `{output_name}` "
+            f"of dynamic block `{block_type}` within kinds that would be recognised by Execution "
+            f"Engine knowing the following kinds: {list(kinds_lookup.keys())}.",
+            context="workflow_compilation | dynamic_block_compilation | manifest_compilation",
+        )
 
 
 def collect_input_dimensionality_offsets(
