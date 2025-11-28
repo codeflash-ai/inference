@@ -233,6 +233,7 @@ class RoboflowMultiLabelClassificationModelBlockV2(WorkflowBlock):
             inference_input=non_empty_inference_images,
             model_id=model_id,
         )
+        # Only coerce if necessary
         if not isinstance(predictions, list):
             predictions = [predictions]
         return self._post_process_result(
@@ -245,20 +246,23 @@ class RoboflowMultiLabelClassificationModelBlockV2(WorkflowBlock):
         predictions: List[dict],
         model_id: str,
     ) -> List[dict]:
-        predictions = attach_prediction_type_info(
+        # Attach prediction type info efficiently
+        attach_prediction_type_info(
             predictions=predictions,
             prediction_type="classification",
         )
+        # Fast in-place update and collect result dicts in one loop
+        result = []
         for prediction, image in zip(predictions, images):
             prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
             prediction[ROOT_PARENT_ID_KEY] = (
                 image.workflow_root_ancestor_metadata.parent_id
             )
-        return [
-            {
-                "inference_id": prediction.get(INFERENCE_ID_KEY),
-                "predictions": prediction,
-                "model_id": model_id,
-            }
-            for prediction in predictions
-        ]
+            result.append(
+                {
+                    "inference_id": prediction.get(INFERENCE_ID_KEY),
+                    "predictions": prediction,
+                    "model_id": model_id,
+                }
+            )
+        return result
