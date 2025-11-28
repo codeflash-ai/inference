@@ -104,15 +104,39 @@ class LatencyMonitor:
         self._generate_report()
 
     def summarise_reports(self) -> LatencyMonitorReport:
-        avg_frame_decoding_latency = average_property_values(
-            examined_objects=self._reports, property_name="frame_decoding_latency"
+        # Optimize by aggregating all relevant properties in one pass over _reports
+        count = 0
+        sum_frame_decoding_latency = 0.0
+        cnt_frame_decoding = 0
+        sum_inference_latency = 0.0
+        cnt_inference = 0
+        sum_e2e_latency = 0.0
+        cnt_e2e = 0
+
+        for report in self._reports:
+            val = getattr(report, "frame_decoding_latency", None)
+            if val is not None:
+                sum_frame_decoding_latency += val
+                cnt_frame_decoding += 1
+            val = getattr(report, "inference_latency", None)
+            if val is not None:
+                sum_inference_latency += val
+                cnt_inference += 1
+            val = getattr(report, "e2e_latency", None)
+            if val is not None:
+                sum_e2e_latency += val
+                cnt_e2e += 1
+
+        avg_frame_decoding_latency = (
+            sum_frame_decoding_latency / cnt_frame_decoding
+            if cnt_frame_decoding
+            else None
         )
-        avg_inference_latency = average_property_values(
-            examined_objects=self._reports, property_name="inference_latency"
+        avg_inference_latency = (
+            sum_inference_latency / cnt_inference if cnt_inference else None
         )
-        avg_e2e_latency = average_property_values(
-            examined_objects=self._reports, property_name="e2e_latency"
-        )
+        avg_e2e_latency = sum_e2e_latency / cnt_e2e if cnt_e2e else None
+
         return LatencyMonitorReport(
             source_id=self._source_id,
             frame_decoding_latency=avg_frame_decoding_latency,
