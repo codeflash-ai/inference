@@ -161,28 +161,44 @@ class ByteTrackerBlockV3(WorkflowBlock):
             logger.warning(
                 f"Malformed fps in VideoMetadata, {self.__class__.__name__} requires fps in order to initialize ByteTrack"
             )
-        if metadata.video_identifier not in self._trackers:
-            self._trackers[metadata.video_identifier] = sv.ByteTrack(
+        # Use setdefault to avoid repeat lookups
+        tracker = self._trackers.get(metadata.video_identifier)
+        if tracker is None:
+            tracker = sv.ByteTrack(
                 track_activation_threshold=track_activation_threshold,
                 lost_track_buffer=lost_track_buffer,
                 minimum_matching_threshold=minimum_matching_threshold,
                 minimum_consecutive_frames=minimum_consecutive_frames,
                 frame_rate=fps,
             )
-        tracker = self._trackers[metadata.video_identifier]
-        tracked_detections = tracker.update_with_detections(
-            sv.Detections.merge(detections[i] for i in range(len(detections)))
-        )
-        if metadata.video_identifier not in self._per_video_cache:
-            self._per_video_cache[metadata.video_identifier] = InstanceCache(
-                size=instances_cache_size
+            self._trackers[metadata.video_identifier] = tracker
+
+        # Optimize: skip merge for single detection, else pass as list
+        if len(detections) == 1:
+            det_to_merge = detections[0]
+        else:
+            det_to_merge = sv.Detections.merge(
+                [detections[i] for i in range(len(detections))]
             )
-        cache = self._per_video_cache[metadata.video_identifier]
-        not_seen_instances_mask, seen_instances_mask = [], []
-        for tracker_id in tracked_detections.tracker_id.tolist():
-            already_seen = cache.record_instance(tracker_id=tracker_id)
-            not_seen_instances_mask.append(not already_seen)
-            seen_instances_mask.append(already_seen)
+        tracked_detections = tracker.update_with_detections(det_to_merge)
+
+        cache = self._per_video_cache.get(metadata.video_identifier)
+        if cache is None:
+            cache = InstanceCache(size=instances_cache_size)
+            self._per_video_cache[metadata.video_identifier] = cache
+
+        # Preallocate mask lists for memory efficiency
+        tracker_ids = tracked_detections.tracker_id.tolist()
+        not_seen_instances_mask: List[bool] = [False] * len(tracker_ids)
+        seen_instances_mask: List[bool] = [False] * len(tracker_ids)
+
+        # Loop unrolling for mask assignment, minimize attribute lookups
+        record_instance = cache.record_instance
+        for idx, tracker_id in enumerate(tracker_ids):
+            already_seen = record_instance(tracker_id=tracker_id)
+            not_seen_instances_mask[idx] = not already_seen
+            seen_instances_mask[idx] = already_seen
+
         not_seen_instances_detections = tracked_detections[not_seen_instances_mask]
         already_seen_instances_detections = tracked_detections[seen_instances_mask]
         return {
@@ -193,17 +209,17 @@ class ByteTrackerBlockV3(WorkflowBlock):
 
 
 class InstanceCache:
-
     def __init__(self, size: int):
         size = max(1, size)
         self._cache_inserts_track = deque(maxlen=size)
         self._cache = set()
 
     def record_instance(self, tracker_id: int) -> bool:
-        in_cache = tracker_id in self._cache
-        if not in_cache:
-            self._cache_new_tracker_id(tracker_id=tracker_id)
-        return in_cache
+        # Inline set lookup and only call cache method if not found
+        if tracker_id in self._cache:
+            return True
+        self._cache_new_tracker_id(tracker_id=tracker_id)
+        return False
 
     def _cache_new_tracker_id(self, tracker_id: int) -> None:
         while len(self._cache) >= self._cache_inserts_track.maxlen:
