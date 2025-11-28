@@ -21,6 +21,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_CROPS_OUTPUT = [OutputDefinition(name="crops", kind=[IMAGE_KIND])]
+
 LONG_DESCRIPTION = """
 Crop a Region of Interest (RoI) from an image, using relative coordinates.
 
@@ -72,9 +74,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="crops", kind=[IMAGE_KIND]),
-        ]
+        return _CROPS_OUTPUT
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
