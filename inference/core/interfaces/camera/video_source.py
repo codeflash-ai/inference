@@ -802,7 +802,7 @@ class VideoConsumer:
 
     def __init__(
         self,
-        buffer_filling_strategy: Optional[BufferFillingStrategy],
+        buffer_filling_strategy: Optional["BufferFillingStrategy"],
         adaptive_mode_stream_pace_tolerance: float,
         adaptive_mode_reader_pace_tolerance: float,
         minimum_adaptive_mode_samples: int,
@@ -920,27 +920,42 @@ class VideoConsumer:
             self._buffer_filling_strategy = BufferFillingStrategy.ADAPTIVE_DROP_OLDEST
 
     def _video_fps_should_be_sub_sampled(self) -> bool:
-        if self._desired_fps is None:
+        desired_fps = self._desired_fps
+        if desired_fps is None:
             return False
+
+        declared_source_fps = self._declared_source_fps
+        stream_consumption_pace_monitor = self._stream_consumption_pace_monitor
+        frame_counter = self._frame_counter
+        next_frame_from_video_to_accept = self._next_frame_from_video_to_accept
+
         if self._is_source_video_file:
-            actual_fps = self._declared_source_fps
+            actual_fps = declared_source_fps
         else:
-            fraction_of_pace_monitor_samples = (
-                len(self._stream_consumption_pace_monitor.all_timestamps)
-                / self._stream_consumption_pace_monitor.all_timestamps.maxlen
-            )
+            timestamps = stream_consumption_pace_monitor.all_timestamps
+            maxlen = timestamps.maxlen
+            # Use local variable to avoid repeated attribute lookup
+            n_samples = len(timestamps)
+            fraction_of_pace_monitor_samples = n_samples / maxlen if maxlen else 0
             if fraction_of_pace_monitor_samples < 0.9:
-                actual_fps = self._declared_source_fps
-            elif hasattr(self._stream_consumption_pace_monitor, "fps"):
-                actual_fps = self._stream_consumption_pace_monitor.fps
+                actual_fps = declared_source_fps
             else:
-                actual_fps = self._stream_consumption_pace_monitor()
-        if self._frame_counter == self._next_frame_from_video_to_accept:
+                # 'fps' attribute access is faster than hasattr.
+                fps = getattr(stream_consumption_pace_monitor, "fps", None)
+                if fps is not None:
+                    actual_fps = fps
+                else:
+                    actual_fps = stream_consumption_pace_monitor()
+
+        if frame_counter == next_frame_from_video_to_accept:
             stride = calculate_video_file_stride(
                 actual_fps=actual_fps,
-                desired_fps=self._desired_fps,
+                desired_fps=desired_fps,
             )
-            self._next_frame_from_video_to_accept += stride
+            # Direct assignment avoids repeated attribute lookup
+            self._next_frame_from_video_to_accept = (
+                next_frame_from_video_to_accept + stride
+            )
             return False
         # skipping frame
         return True
@@ -1226,13 +1241,17 @@ def get_fps_if_tick_happens_now(fps_monitor: sv.FPSMonitor) -> float:
 def calculate_video_file_stride(
     actual_fps: Optional[Union[float, int]], desired_fps: Optional[Union[float, int]]
 ) -> int:
-    if actual_fps is None or desired_fps is None:
-        return 1
-    if actual_fps < 0 or desired_fps < 0:
+    # Fast exit for common/invalid cases
+    if actual_fps is None or desired_fps is None or actual_fps < 0 or desired_fps < 0:
         return 1
     true_stride = actual_fps / desired_fps
-    integer_stride = max(int(true_stride), 1)
-    probability_of_missing_frame = max(true_stride - integer_stride, 0)
-    if random.random() < probability_of_missing_frame:
+    integer_stride = int(true_stride)
+    if integer_stride < 1:
+        integer_stride = 1
+    probability_of_missing_frame = true_stride - integer_stride
+    if (
+        probability_of_missing_frame > 0
+        and random.random() < probability_of_missing_frame
+    ):
         integer_stride += 1
     return integer_stride
