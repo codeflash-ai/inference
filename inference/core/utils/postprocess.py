@@ -530,20 +530,18 @@ def get_static_crop_dimensions(
             preprocessing_config=preproc,
             disable_preproc_static_crop=disable_preproc_static_crop,
         ):
-            x_min, y_min, x_max, y_max = standardise_static_crop(
-                static_crop_config=preproc[STATIC_CROP_KEY]
-            )
+            static_crop_config = preproc[STATIC_CROP_KEY]
+            x_min, y_min, x_max, y_max = standardise_static_crop(static_crop_config)
         else:
             x_min, y_min, x_max, y_max = 0, 0, 1, 1
-        crop_shift_x, crop_shift_y = (
-            round(x_min * orig_shape[1]),
-            round(y_min * orig_shape[0]),
-        )
+        width, height = orig_shape[1], orig_shape[0]
+        crop_shift_x = round(x_min * width)
+        crop_shift_y = round(y_min * height)
         cropped_percent_x = x_max - x_min
         cropped_percent_y = y_max - y_min
         orig_shape = (
-            round(orig_shape[0] * cropped_percent_y),
-            round(orig_shape[1] * cropped_percent_x),
+            round(height * cropped_percent_y),
+            round(width * cropped_percent_x),
         )
         return (crop_shift_x, crop_shift_y), orig_shape
     except KeyError as error:
@@ -555,7 +553,19 @@ def get_static_crop_dimensions(
 def standardise_static_crop(
     static_crop_config: Dict[str, int],
 ) -> Tuple[float, float, float, float]:
-    return tuple(static_crop_config[key] / 100 for key in ["x_min", "y_min", "x_max", "y_max"])  # type: ignore
+    # Avoid repeated dict lookups by pulling all required keys in a tuple comprehension
+    vals = (
+        static_crop_config["x_min"],
+        static_crop_config["y_min"],
+        static_crop_config["x_max"],
+        static_crop_config["y_max"],
+    )
+    return (
+        vals[0] / 100,
+        vals[1] / 100,
+        vals[2] / 100,
+        vals[3] / 100,
+    )
 
 
 def post_process_keypoints(
