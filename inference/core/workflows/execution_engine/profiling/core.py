@@ -122,7 +122,7 @@ class BaseWorkflowsProfiler(WorkflowsProfiler):
         max_runs_in_buffer: int = 32,
         **kwargs,
     ) -> "BaseWorkflowsProfiler":
-        runs_buffer = deque(maxlen=max_runs_in_buffer)
+        runs_buffer = deque((), max_runs_in_buffer)
         return cls(runs_buffer=runs_buffer)
 
     def __init__(self, runs_buffer: Deque[List[dict]]):
