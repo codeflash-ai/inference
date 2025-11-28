@@ -109,7 +109,7 @@ def static_crop_should_be_applied(
     disable_preproc_static_crop: bool,
 ) -> bool:
     return (
-        STATIC_CROP_KEY in preprocessing_config.keys()
+        STATIC_CROP_KEY in preprocessing_config
         and not DISABLE_PREPROC_STATIC_CROP
         and not disable_preproc_static_crop
         and preprocessing_config[STATIC_CROP_KEY][ENABLED_KEY]
