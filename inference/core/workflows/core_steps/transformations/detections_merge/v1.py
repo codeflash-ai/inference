@@ -81,18 +81,23 @@ class DetectionsMergeManifest(WorkflowBlockManifest):
 def calculate_union_bbox(detections: sv.Detections) -> np.ndarray:
     """Calculate a single bounding box that contains all input detections."""
     if len(detections) == 0:
-        return np.array([], dtype=np.float32).reshape(0, 4)
+        return np.empty((0, 4), dtype=np.float32)
+
+    # Get all bounding boxes
 
     # Get all bounding boxes
     xyxy = detections.xyxy
 
-    # Calculate the union by taking min/max coordinates
-    x1 = np.min(xyxy[:, 0])
-    y1 = np.min(xyxy[:, 1])
-    x2 = np.max(xyxy[:, 2])
-    y2 = np.max(xyxy[:, 3])
-
-    return np.array([[x1, y1, x2, y2]])
+    # Use np.stack and np.ndarray.min/max for direct coordinate extraction
+    # This avoids multiple passes and leverages potential stride/ufunc optimizations
+    coords = np.array([xyxy[:, 0], xyxy[:, 1], xyxy[:, 2], xyxy[:, 3]])
+    min_coords = coords[:2].min(axis=1)
+    max_coords = coords[2:].max(axis=1)
+    # Concatenate once for final result
+    union_bbox = np.empty((1, 4), dtype=xyxy.dtype)
+    union_bbox[0, :2] = min_coords
+    union_bbox[0, 2:] = max_coords
+    return union_bbox
 
 
 def get_lowest_confidence_index(detections: sv.Detections) -> int:
