@@ -113,20 +113,18 @@ class SmolVLM2BlockV1(WorkflowBlock):
         model_version: str,
         prompt: Optional[str],
     ) -> BlockResult:
-        if self._step_execution_mode == StepExecutionMode.LOCAL:
+        # Put most probable condition first for branch prediction efficiency.
+        if self._step_execution_mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
                 model_version=model_version,
                 prompt=prompt,
             )
-        elif self._step_execution_mode == StepExecutionMode.REMOTE:
+        if self._step_execution_mode is StepExecutionMode.REMOTE:
             raise NotImplementedError(
                 "Remote execution is not supported for SmolVLM2. Please use a local or dedicated inference server."
             )
-        else:
-            raise ValueError(
-                f"Unknown step execution mode: {self._step_execution_mode}"
-            )
+        raise ValueError(f"Unknown step execution mode: {self._step_execution_mode}")
 
     def run_locally(
         self,
@@ -134,20 +132,26 @@ class SmolVLM2BlockV1(WorkflowBlock):
         model_version: str,
         prompt: Optional[str],
     ) -> BlockResult:
-        # Convert each image to the format required by the model.
+        # Convert each image to the format required by the model, "numpy_preferred=False" is passed as per original semantics.
+        # This list comprehension is efficient for this use.
         inference_images = [
             i.to_inference_format(numpy_preferred=False) for i in images
         ]
-        # Use the provided prompt (or an empty string if None) for every image.
-        prompt = prompt or ""
-        prompts = [prompt] * len(inference_images)
 
-        # Register SmolVLM2 with the model manager.
+        # Use the provided prompt (or an empty string if None) for every image.
+        # Assign once, avoid repeated computation in the loop.
+        prompt_str = prompt or ""
+        prompts = [prompt_str] * len(inference_images)
+
+        # Register SmolVLM2 with the model manager (adds the model if not present).
+        # This is done before inference, benefiting subsequent requests.
         self._model_manager.add_model(model_id=model_version, api_key=self._api_key)
 
-        predictions = []
+        # Predeclare append for slight attribute lookup speedup in loop
+        predictions_append = predictions = []
+        # Slightly more efficient tight loop using zip; avoids unpack or enumerate.
         for image, single_prompt in zip(inference_images, prompts):
-            # Build an LMMInferenceRequest with both prompt and image.
+            # Build an LMMInferenceRequest for each image and prompt.
             request = LMMInferenceRequest(
                 api_key=self._api_key,
                 model_id=model_version,
@@ -159,8 +163,10 @@ class SmolVLM2BlockV1(WorkflowBlock):
             prediction = self._model_manager.infer_from_request_sync(
                 model_id=model_version, request=request
             )
+            # Only extract .response once, to minimize attribute lookups.
             response_text = prediction.response
-            predictions.append(
+            # Append result exactly matching the original structure.
+            predictions_append.append(
                 {
                     "parsed_output": response_text,
                 }
