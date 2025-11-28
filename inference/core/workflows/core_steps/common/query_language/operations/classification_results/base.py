@@ -21,9 +21,10 @@ def extract_top_class_confidence(prediction: dict) -> Union[float, List[float]]:
     if "confidence" in prediction:
         return prediction["confidence"]
     predicted_classes = prediction.get("predicted_classes", [])
+    predictions_dict = prediction["predictions"]
+    # Avoid repeated dict lookups for "predictions"
     return [
-        prediction["predictions"][class_name]["confidence"]
-        for class_name in predicted_classes
+        predictions_dict[class_name]["confidence"] for class_name in predicted_classes
     ]
 
 
