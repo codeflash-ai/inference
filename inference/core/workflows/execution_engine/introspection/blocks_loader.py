@@ -161,7 +161,7 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
     for block in core_blocks:
         manifest_class = block.get_manifest()
         identifier = get_full_type_name(selected_type=block)
-        if block in already_spotted_blocks:
+        if identifier in already_spotted_blocks:
             continue
         result.append(
             BlockSpecification(
@@ -171,7 +171,7 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
                 manifest_class=manifest_class,
             )
         )
-        already_spotted_blocks.add(block)
+        already_spotted_blocks.add(identifier)
     return result
 
 
