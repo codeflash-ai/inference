@@ -35,6 +35,12 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_CACHED_OUTPUTS = [
+    OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="message", kind=[STRING_KIND]),
+]
+
 LONG_DESCRIPTION = """
 The **Webhook Sink** block enables sending a data from Workflow into external APIs 
 by sending HTTP requests containing workflow results. It supports multiple HTTP methods 
@@ -330,11 +336,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="message", kind=[STRING_KIND]),
-        ]
+        return _CACHED_OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
