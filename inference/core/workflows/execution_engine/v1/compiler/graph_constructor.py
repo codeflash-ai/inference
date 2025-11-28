@@ -1,6 +1,6 @@
 import itertools
 from collections import defaultdict
-from copy import copy, deepcopy
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from uuid import uuid4
 
@@ -561,7 +561,7 @@ def denote_output_node_kind_based_on_step_outputs(
     kinds_for_outputs = {output.name: output.kind for output in step_outputs}
 
     if selected_output_name == "*":
-        output_node_manifest.kind = deepcopy(kinds_for_outputs)
+        output_node_manifest.kind = kinds_for_outputs.copy()
         return None
     if selected_output_name not in kinds_for_outputs:
         output_name = output_node_manifest.output_manifest.name
@@ -577,7 +577,7 @@ def denote_output_node_kind_based_on_step_outputs(
                 ),
             ],
         )
-    output_node_manifest.kind = copy(kinds_for_outputs[selected_output_name])
+    output_node_manifest.kind = kinds_for_outputs[selected_output_name]
     return None
 
 
