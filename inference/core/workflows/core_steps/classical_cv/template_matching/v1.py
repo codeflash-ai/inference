@@ -160,33 +160,38 @@ def apply_template_matching(
     w, h = template_gray.shape[::-1]
     res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
     loc = np.where(res >= matching_threshold)
-    xyxy, confidence, class_id, class_name, detections_id = [], [], [], [], []
-    for pt in zip(*loc[::-1]):
-        top_left = pt
-        bottom_right = (pt[0] + w, pt[1] + h)
-        xyxy.append(top_left + bottom_right)
-        confidence.append(1.0)
-        class_id.append(0)
-        class_name.append("template_match")
-        detections_id.append(str(uuid4()))
-    if len(xyxy) == 0:
+    pts = (
+        np.stack(loc[::-1], axis=1) if len(loc[0]) > 0 else np.empty((0, 2), dtype=int)
+    )
+    num_detections = pts.shape[0]
+
+    if num_detections == 0:
         return sv.Detections.empty()
+
+    xyxy = np.hstack((pts, pts + np.array([[w, h]])))
+    confidence = np.ones(num_detections, dtype=np.float32)
+    class_id = np.zeros(num_detections, dtype=np.uint32)
+    class_name = np.full(num_detections, "template_match", dtype=object)
+    detections_id = np.array(
+        [str(uuid4()) for _ in range(num_detections)], dtype=object
+    )
+
     detections = sv.Detections(
-        xyxy=np.array(xyxy).astype(np.int32),
-        confidence=np.array(confidence),
-        class_id=np.array(class_id).astype(np.uint32),
-        data={CLASS_NAME_DATA_FIELD: np.array(class_name)},
+        xyxy=xyxy.astype(np.int32),
+        confidence=confidence,
+        class_id=class_id,
+        data={CLASS_NAME_DATA_FIELD: class_name},
     )
     if apply_nms:
         detections = detections.with_nms(threshold=nms_threshold)
-    detections[PARENT_ID_KEY] = np.array(
-        [image.parent_metadata.parent_id] * len(detections)
-    )
-    detections[PREDICTION_TYPE_KEY] = np.array(["object-detection"] * len(detections))
-    detections[DETECTION_ID_KEY] = np.array(detections_id)
+
+    n = len(detections)
+    detections[PARENT_ID_KEY] = np.full(n, image.parent_metadata.parent_id)
+    detections[PREDICTION_TYPE_KEY] = np.full(n, "object-detection")
+    detections[DETECTION_ID_KEY] = detections_id[:n]
     image_height, image_width = image.numpy_image.shape[:2]
-    detections[IMAGE_DIMENSIONS_KEY] = np.array(
-        [[image_height, image_width]] * len(detections)
+    detections[IMAGE_DIMENSIONS_KEY] = np.tile(
+        np.array([image_height, image_width]), (n, 1)
     )
     return attach_parents_coordinates_to_sv_detections(
         detections=detections,
