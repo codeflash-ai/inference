@@ -245,8 +245,9 @@ def calculate_line_coeffs(
 ) -> Tuple[Optional[float], float]:
     if x1 == x2:
         return None, x1
-    # Solved a and b for ax + b = y
-    return (y2 - y1) / (x2 - x1), (y1 * x2 - y2 * x1) / (x2 - x1)
+    dx = x2 - x1
+    dy = y2 - y1
+    return dy / dx, (y1 * x2 - y2 * x1) / dx
 
 
 def calculate_line_intercept_to_contain_point(
@@ -274,7 +275,9 @@ def solve_line_intersection(
         x = b2
         y = a1 * x + b1
     else:
-        x = (b2 - b1) / (a1 - a2)
+        denom = a1 - a2
+        num = b2 - b1
+        x = num / denom
         y = a1 * x + b1
     return x, y
 
@@ -287,11 +290,17 @@ def calculate_vertices_to_contain_point(
     x: int,
     y: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # Reduce redundant attribute lookups by extracting integer values once
+    v1x, v1y = int(vertex_1[0]), int(vertex_1[1])
+    v2x, v2y = int(vertex_2[0]), int(vertex_2[1])
+    v3x, v3y = int(vertex_3_from_1[0]), int(vertex_3_from_1[1])
+    v4x, v4y = int(vertex_4_from_2[0]), int(vertex_4_from_2[1])
+
     a, _ = calculate_line_coeffs(
-        x1=vertex_1[0],
-        y1=vertex_1[1],
-        x2=vertex_2[0],
-        y2=vertex_2[1],
+        x1=v1x,
+        y1=v1y,
+        x2=v2x,
+        y2=v2y,
     )
     b = calculate_line_intercept_to_contain_point(
         a=a,
@@ -299,41 +308,37 @@ def calculate_vertices_to_contain_point(
         y=y,
     )
     a_3_1, b_3_1 = calculate_line_coeffs(
-        x1=vertex_1[0],
-        y1=vertex_1[1],
-        x2=vertex_3_from_1[0],
-        y2=vertex_3_from_1[1],
+        x1=v1x,
+        y1=v1y,
+        x2=v3x,
+        y2=v3y,
     )
-    vertex_1 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_3_1,
-                b1=b_3_1,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
+    vertex_1_result = solve_line_intersection(
+        a1=a_3_1,
+        b1=b_3_1,
+        a2=a,
+        b2=b,
     )
+    vertex_1 = np.empty(2, dtype=int)
+    # Direct rounding using built-ins is faster than .round().astype(int)
+    vertex_1[0] = int(round(vertex_1_result[0]))
+    vertex_1[1] = int(round(vertex_1_result[1]))
+
     a_4_2, b_4_2 = calculate_line_coeffs(
-        x1=vertex_2[0],
-        y1=vertex_2[1],
-        x2=vertex_4_from_2[0],
-        y2=vertex_4_from_2[1],
+        x1=v2x,
+        y1=v2y,
+        x2=v4x,
+        y2=v4y,
     )
-    vertex_2 = (
-        np.array(
-            solve_line_intersection(
-                a1=a_4_2,
-                b1=b_4_2,
-                a2=a,
-                b2=b,
-            )
-        )
-        .round()
-        .astype(int)
+    vertex_2_result = solve_line_intersection(
+        a1=a_4_2,
+        b1=b_4_2,
+        a2=a,
+        b2=b,
     )
+    vertex_2 = np.empty(2, dtype=int)
+    vertex_2[0] = int(round(vertex_2_result[0]))
+    vertex_2[1] = int(round(vertex_2_result[1]))
     return vertex_1, vertex_2
 
 
