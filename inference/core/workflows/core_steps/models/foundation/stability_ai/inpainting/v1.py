@@ -31,6 +31,10 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+
+# Cache manifest lookup at module level for faster subsequent access.
+BlockManifest: Type[WorkflowBlockManifest] = WorkflowBlockManifest
+
 LONG_DESCRIPTION = """
 The block wraps 
 [Stability AI inpainting API](https://platform.stability.ai/docs/legacy/grpc-api/features/inpainting#Python) and 
