@@ -537,7 +537,10 @@ class ModelManager:
             return self._models_state_locks[model_id]
 
     def _dispose_model_lock(self, model_id: str) -> None:
-        with acquire_with_timeout(lock=self._state_lock) as acquired:
+        # Inline the acquire_with_timeout contextmanager for better performance
+        lock = self._state_lock
+        acquired = lock.acquire(timeout=MODEL_LOCK_ACQUIRE_TIMEOUT)
+        try:
             if not acquired:
                 raise ModelManagerLockAcquisitionError(
                     "Could not acquire lock on Model Manager state to dispose model lock."
@@ -545,6 +548,10 @@ class ModelManager:
             if model_id not in self._models_state_locks:
                 return None
             del self._models_state_locks[model_id]
+
+        finally:
+            if acquired:
+                lock.release()
 
 
 @contextmanager
