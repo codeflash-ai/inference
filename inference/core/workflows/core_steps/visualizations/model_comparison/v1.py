@@ -128,17 +128,7 @@ class ModelComparisonVisualizationBlockV1(PredictionsVisualizationBlock):
         background_color: str,
         opacity: float,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(
-                str,
-                [
-                    color_a,
-                    color_b,
-                    background_color,
-                    opacity,
-                ],
-            )
-        )
+        key = (color_a, color_b, background_color, opacity)
 
         if key not in self.annotatorCache:
             color_a = str_to_color(color_a)
