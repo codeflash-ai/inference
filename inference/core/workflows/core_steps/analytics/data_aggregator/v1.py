@@ -522,8 +522,9 @@ class ValuesCountState(AggregationState):
 
     def on_data(self, value: Any) -> None:
         if isinstance(value, list):
+            counts = self._counts
             for v in value:
-                self._counts[v] += 1
+                counts[v] += 1
             return None
         self._counts[value] += 1
 
