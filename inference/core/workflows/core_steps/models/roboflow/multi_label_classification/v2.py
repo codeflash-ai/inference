@@ -14,6 +14,7 @@ from inference.core.managers.base import ModelManager
 from inference.core.workflows.core_steps.common.entities import StepExecutionMode
 from inference.core.workflows.core_steps.common.utils import attach_prediction_type_info
 from inference.core.workflows.execution_engine.constants import (
+    PREDICTION_TYPE_KEY,
     INFERENCE_ID_KEY,
     PARENT_ID_KEY,
     ROOT_PARENT_ID_KEY,
@@ -245,11 +246,9 @@ class RoboflowMultiLabelClassificationModelBlockV2(WorkflowBlock):
         predictions: List[dict],
         model_id: str,
     ) -> List[dict]:
-        predictions = attach_prediction_type_info(
-            predictions=predictions,
-            prediction_type="classification",
-        )
+        # Fused attach_prediction_type_info and image key assignment in a single loop
         for prediction, image in zip(predictions, images):
+            prediction[PREDICTION_TYPE_KEY] = "classification"
             prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
             prediction[ROOT_PARENT_ID_KEY] = (
                 image.workflow_root_ancestor_metadata.parent_id
