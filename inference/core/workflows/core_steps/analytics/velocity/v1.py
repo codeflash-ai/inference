@@ -139,74 +139,72 @@ class VelocityBlockV1(WorkflowBlock):
 
         num_detections = len(detections)
 
-        # Compute current positions (center of bounding boxes)
+        # Compute current positions (center of bounding boxes) in a single step
         bbox_xyxy = detections.xyxy  # Shape (num_detections, 4)
-        x_centers = (bbox_xyxy[:, 0] + bbox_xyxy[:, 2]) / 2
-        y_centers = (bbox_xyxy[:, 1] + bbox_xyxy[:, 3]) / 2
-        current_positions = np.stack(
-            [x_centers, y_centers], axis=1
-        )  # Shape (num_detections, 2)
+        x_centers = (bbox_xyxy[:, 0] + bbox_xyxy[:, 2]) * 0.5
+        y_centers = (bbox_xyxy[:, 1] + bbox_xyxy[:, 3]) * 0.5
+        current_positions = np.stack([x_centers, y_centers], axis=1)
 
-        velocities = np.zeros_like(current_positions)  # Shape (num_detections, 2)
-        speeds = np.zeros(num_detections)  # Shape (num_detections,)
-        smoothed_velocities_arr = np.zeros_like(current_positions)
-        smoothed_speeds = np.zeros(num_detections)
+        # Preallocate output arrays
+        velocities = np.empty_like(current_positions)
+        speeds = np.empty(num_detections)
+        smoothed_velocities_arr = np.empty_like(current_positions)
+        smoothed_speeds = np.empty(num_detections)
+        velocity_zeros = np.zeros(2, dtype=current_positions.dtype)
 
-        for i, tracker_id in enumerate(detections.tracker_id):
+        tracker_ids = detections.tracker_id
+        # Convert tracker_ids using numpy for performance if possible
+        try:
+            tracker_ids_int = tracker_ids.astype(int, copy=False)
+        except Exception:
+            # fallback if tracker_ids is not a numpy array
+            tracker_ids_int = [int(tracker_id) for tracker_id in tracker_ids]
+
+        for i in range(num_detections):
+            tracker_id = tracker_ids_int[i]
             current_position = current_positions[i]
 
-            # Ensure tracker_id is of type int or str
-            tracker_id = int(tracker_id)
-
-            if tracker_id in previous_positions:
-                prev_position, prev_timestamp = previous_positions[tracker_id]
+            prev = previous_positions.get(tracker_id)
+            if prev is not None:
+                prev_position, prev_timestamp = prev
                 delta_time = ts_current - prev_timestamp
-
                 if delta_time > 0:
                     displacement = current_position - prev_position
-                    velocity = displacement / delta_time  # Pixels per second
-                    speed = np.linalg.norm(
-                        velocity
-                    )  # Speed is the magnitude of velocity vector
+                    velocity = displacement / delta_time
+                    speed = np.sqrt(np.dot(velocity, velocity))
                 else:
-                    velocity = np.array([0, 0])
+                    velocity = velocity_zeros
                     speed = 0.0
             else:
-                velocity = np.array([0, 0])  # No previous position
+                velocity = velocity_zeros
                 speed = 0.0
 
-            # Apply exponential moving average for smoothing
-            if tracker_id in smoothed_velocities:
-                prev_smoothed_velocity = smoothed_velocities[tracker_id]
+            prev_smoothed_velocity = smoothed_velocities.get(tracker_id)
+            if prev_smoothed_velocity is not None:
                 smoothed_velocity = (
                     smoothing_alpha * velocity
                     + (1 - smoothing_alpha) * prev_smoothed_velocity
                 )
             else:
-                smoothed_velocity = velocity  # Initialize with current velocity
+                smoothed_velocity = velocity
 
-            smoothed_speed = np.linalg.norm(smoothed_velocity)
+            smoothed_speed = np.sqrt(np.dot(smoothed_velocity, smoothed_velocity))
 
-            # Store current position and timestamp for the next frame
+            # Store for next frame
             previous_positions[tracker_id] = (current_position, ts_current)
             smoothed_velocities[tracker_id] = smoothed_velocity
 
-            # Convert velocities and speeds to meters per second if required
-            velocity_m_s = velocity / pixels_per_meter
-            smoothed_velocity_m_s = smoothed_velocity / pixels_per_meter
-            speed_m_s = speed / pixels_per_meter
-            smoothed_speed_m_s = smoothed_speed / pixels_per_meter
+            # Convert to meters per second
+            velocities[i] = velocity / pixels_per_meter
+            speeds[i] = speed / pixels_per_meter
+            smoothed_velocities_arr[i] = smoothed_velocity / pixels_per_meter
+            smoothed_speeds[i] = smoothed_speed / pixels_per_meter
 
-            velocities[i] = velocity_m_s
-            speeds[i] = speed_m_s
-            smoothed_velocities_arr[i] = smoothed_velocity_m_s
-            smoothed_speeds[i] = smoothed_speed_m_s
-
-        detections.data[VELOCITY_KEY_IN_SV_DETECTIONS] = np.array(velocities)
-        detections.data[SPEED_KEY_IN_SV_DETECTIONS] = np.array(speeds)
-        detections.data[SMOOTHED_VELOCITY_KEY_IN_SV_DETECTIONS] = np.array(
+        detections.data[VELOCITY_KEY_IN_SV_DETECTIONS] = velocities
+        detections.data[SPEED_KEY_IN_SV_DETECTIONS] = speeds
+        detections.data[SMOOTHED_VELOCITY_KEY_IN_SV_DETECTIONS] = (
             smoothed_velocities_arr
         )
-        detections.data[SMOOTHED_SPEED_KEY_IN_SV_DETECTIONS] = np.array(smoothed_speeds)
+        detections.data[SMOOTHED_SPEED_KEY_IN_SV_DETECTIONS] = smoothed_speeds
 
         return {OUTPUT_KEY: detections}
