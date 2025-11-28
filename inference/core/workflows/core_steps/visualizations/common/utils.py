@@ -1,6 +1,10 @@
 import supervision as sv
+from functools import lru_cache
+
+_COLOR_NAMES = frozenset(attr for attr in dir(sv.Color) if attr.isupper())
 
 
+@lru_cache(maxsize=256)
 def str_to_color(color: str) -> sv.Color:
     if color.startswith("#"):
         return sv.Color.from_hex(color)
@@ -10,9 +14,11 @@ def str_to_color(color: str) -> sv.Color:
     elif color.startswith("bgr"):
         b, g, r = map(int, color[4:-1].split(","))
         return sv.Color.from_bgr_tuple((b, g, r))
-    elif hasattr(sv.Color, color.upper()):
-        return getattr(sv.Color, color.upper())
     else:
-        raise ValueError(
-            f"Invalid text color: {color}; valid formats are #RRGGBB, rgb(R, G, B), bgr(B, G, R), or a valid color name (like WHITE, BLACK, or BLUE)."
-        )
+        color_upper = color.upper()
+        if color_upper in _COLOR_NAMES:
+            return getattr(sv.Color, color_upper)
+        else:
+            raise ValueError(
+                f"Invalid text color: {color}; valid formats are #RRGGBB, rgb(R, G, B), bgr(B, G, R), or a valid color name (like WHITE, BLACK, or BLUE)."
+            )
