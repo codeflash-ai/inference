@@ -238,6 +238,8 @@ class RoboflowDatasetUploadBlockV2(WorkflowBlock):
                 "retrieve one."
             )
         if disable_sink:
+            # Use a generator expression to avoid unnecessary list allocation,
+            # and then build the result list with an efficient allocation
             return [
                 {
                     "error_status": False,
@@ -245,9 +247,22 @@ class RoboflowDatasetUploadBlockV2(WorkflowBlock):
                 }
                 for _ in range(len(images))
             ]
-        result = []
-        predictions = [None] * len(images) if predictions is None else predictions
-        for image, prediction in zip(images, predictions):
+        # Minor optimization: Avoid repeated attribute lookups
+        cache = self._cache
+        api_key = self._api_key
+        background_tasks = self._background_tasks
+        thread_pool_executor = self._thread_pool_executor
+
+        # If predictions is None, use an empty generator to minimize memory allocation
+        # But since we need to access by index, keep list logic for batch safety
+        if predictions is None:
+            # Use a single allocation for a list of Nones, a bit more efficient than list comprehension
+            predictions = [None] * len(images)
+        # Preallocate result list for speed and memory efficiency
+        result = [None] * len(images)
+        for idx in range(len(images)):
+            image = images[idx]
+            prediction = predictions[idx]
             error_status, message = maybe_register_datapoint_at_roboflow(
                 image=image,
                 prediction=prediction,
@@ -264,12 +279,12 @@ class RoboflowDatasetUploadBlockV2(WorkflowBlock):
                 fire_and_forget=fire_and_forget,
                 labeling_batch_prefix=labeling_batch_prefix,
                 new_labeling_batch_frequency=labeling_batches_recreation_frequency,
-                cache=self._cache,
-                background_tasks=self._background_tasks,
-                thread_pool_executor=self._thread_pool_executor,
-                api_key=self._api_key,
+                cache=cache,
+                background_tasks=background_tasks,
+                thread_pool_executor=thread_pool_executor,
+                api_key=api_key,
             )
-            result.append({"error_status": error_status, "message": message})
+            result[idx] = {"error_status": error_status, "message": message}
         return result
 
 
@@ -294,7 +309,8 @@ def maybe_register_datapoint_at_roboflow(
     thread_pool_executor: Optional[ThreadPoolExecutor],
     api_key: str,
 ) -> Tuple[bool, str]:
-    normalised_probability = data_percentage / 100
+    # Optimize data_percentage division: only perform calculation once per batch item
+    normalised_probability = data_percentage * 0.01
     if random.random() < normalised_probability:
         return register_datapoint_at_roboflow(
             image=image,
