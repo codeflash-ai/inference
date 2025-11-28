@@ -148,22 +148,31 @@ def preprocess_image(
     r = min(image_size[0] / current_size[0], image_size[1] / current_size[1])
     target_size = (int(r * current_size[0]), int(r * current_size[1]))
 
-    torch_image = (
-        torch.tensor(np_image)
-        .permute(2, 0, 1)
-        .unsqueeze(0)
-        .to(DEVICE)
-        .to(dtype=torch.float32)
-        / 255.0
-    )
-    torch_image = F.interpolate(
-        torch_image, size=target_size, mode="bilinear", align_corners=False
-    )
+    # Use from_numpy for zero-copy when possible; only converts if dtype doesn't match
+    # Convert to float32 and normalize in a single step
+    if np_image.dtype != np.float32:
+        torch_image = torch.from_numpy(np_image.astype(np.float32, copy=False))
+    else:
+        torch_image = torch.from_numpy(np_image)
 
-    padded_image_tensor = torch.ones((1, 3, *image_size), device=DEVICE) * 0.5
-    padded_image_tensor[:, :, : torch_image.shape[2], : torch_image.shape[3]] = (
-        torch_image
+    torch_image = torch_image.permute(2, 0, 1).unsqueeze(0)
+    torch_image = torch_image.to(device=DEVICE, dtype=torch.float32)
+    torch_image = torch_image / 255.0
+
+    # Only run interpolation if resize is actually needed
+    if torch_image.shape[2:4] != target_size:
+        torch_image = F.interpolate(
+            torch_image, size=target_size, mode="bilinear", align_corners=False
+        )
+
+    # Preallocate padded tensor and copy data directly (avoids multiplication and broadcasting)
+    padded_image_tensor = torch.empty(
+        (1, 3, image_size[0], image_size[1]), device=DEVICE, dtype=torch.float32
     )
+    padded_image_tensor.fill_(0.5)
+    h, w = torch_image.shape[2], torch_image.shape[3]
+    # Use slicing assignment for speed, do not recalc shape multiple times
+    padded_image_tensor[:, :, :h, :w].copy_(torch_image)
 
     padded_image_tensor = (padded_image_tensor - image_mean) / image_std
 
