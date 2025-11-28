@@ -93,8 +93,12 @@ def attach_prediction_type_info_to_sv_detections_batch(
     prediction_type: str,
     key: str = PREDICTION_TYPE_KEY,
 ) -> List[sv.Detections]:
+    type_arrays = {}
     for prediction in predictions:
-        prediction[key] = np.array([prediction_type] * len(prediction))
+        length = len(prediction)
+        if length not in type_arrays:
+            type_arrays[length] = np.full(length, prediction_type)
+        prediction[key] = type_arrays[length]
     return predictions
 
 
