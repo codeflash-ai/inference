@@ -18,6 +18,9 @@ from inference.core.workflows.execution_engine.introspection.entities import (
 )
 from inference.core.workflows.prototypes.block import WorkflowBlockManifest
 
+# Module-level cache: maps manifest type to its schema
+_MANIFEST_SCHEMA_CACHE: Dict[Type[WorkflowBlockManifest], dict] = {}
+
 EXCLUDED_PROPERTIES = {"type"}
 
 TYPE_MAPPING = {
@@ -55,7 +58,12 @@ OBJECT_TYPE = "object"
 def parse_block_manifest(
     manifest_type: Type[WorkflowBlockManifest],
 ) -> BlockManifestMetadata:
-    schema = manifest_type.model_json_schema()
+    # Use cached schema if available
+    schema = _MANIFEST_SCHEMA_CACHE.get(manifest_type)
+    if schema is None:
+        schema = manifest_type.model_json_schema()
+        _MANIFEST_SCHEMA_CACHE[manifest_type] = schema
+
     inputs_dimensionality_offsets = manifest_type.get_input_dimensionality_offsets()
     dimensionality_reference_property = (
         manifest_type.get_dimensionality_reference_property()
