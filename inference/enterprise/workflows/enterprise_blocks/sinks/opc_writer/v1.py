@@ -41,6 +41,13 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUTS = [
+    OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="disabled", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="message", kind=[STRING_KIND]),
+]
+
 BLOCK_TYPE = "roboflow_enterprise/opc_writer_sink@v1"
 LONG_DESCRIPTION = """
 The **OPC UA Writer** block enables you to write data to a variable on an OPC UA server, leveraging the 
@@ -241,12 +248,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="disabled", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="message", kind=[STRING_KIND]),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
