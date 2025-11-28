@@ -106,9 +106,12 @@ class IdentifyOutliersBlockV1(WorkflowBlock):
             # Not enough data to fit
             return None, None
 
-        # Sum all embeddings:
-        sum_vec = np.sum(embeddings, axis=0)
-        R = np.linalg.norm(sum_vec)
+        # Sum all embeddings (faster on C-contiguous arrays and avoids unneeded dimensional checks):
+        # np.add.reduce is a slightly faster alias for np.sum with axis argument
+        sum_vec = np.add.reduce(embeddings, axis=0)
+        # For 1D arrays, math.hypot is not faster than np.linalg.norm, so use norm:
+        # But, we can use np.dot for simple norm calculation due to 1D sum_vec:
+        R = np.sqrt(np.dot(sum_vec, sum_vec))
         if R == 0:
             # All embeddings canceled out, no direction
             return None, None
@@ -116,12 +119,11 @@ class IdentifyOutliersBlockV1(WorkflowBlock):
         mu = sum_vec / R
         r_bar = R / n
 
-        # Approximate kappa:
-        # For d>2, a known approximation:
-        # kappa ≈ r_bar*(d - r_bar^2)/(1 - r_bar^2)
-        d = float(d)
+        # Cast d to float only if needed, and only once
+        d_float = float(d)
         if r_bar < 1.0:
-            kappa = (r_bar * (d - r_bar**2)) / (1 - r_bar**2)
+            r_bar2 = r_bar * r_bar
+            kappa = (r_bar * (d_float - r_bar2)) / (1.0 - r_bar2)
         else:
             # Degenerate case: all points are identical
             kappa = np.inf
