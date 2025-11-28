@@ -14,6 +14,8 @@ class BranchingManager:
 
     def __init__(self, masks: Dict[str, Union[Set[DynamicBatchIndex], bool]]):
         self._masks = masks
+        # Use dictionary comprehension to build batch compatibility in a single pass
+        # The dict access in is_execution_branch_batch_oriented will be O(1) as before
         self._batch_compatibility = {
             branch_name: not isinstance(mask, bool)
             for branch_name, mask in masks.items()
@@ -59,7 +61,10 @@ class BranchingManager:
         return self._masks[execution_branch]
 
     def is_execution_branch_batch_oriented(self, execution_branch: str) -> bool:
-        if execution_branch not in self._batch_compatibility:
+        # Use dict lookup with try-except for faster key error path
+        try:
+            return self._batch_compatibility[execution_branch]
+        except KeyError:
             raise ExecutionEngineRuntimeError(
                 public_message=f"Attempted to get info about not registered execution branch: {execution_branch}. "
                 f"This is most likely a bug. Contact Roboflow team through github issues "
@@ -67,7 +72,6 @@ class BranchingManager:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_input_assembling",
             )
-        return self._batch_compatibility[execution_branch]
 
     def is_execution_branch_registered(self, execution_branch: str) -> bool:
         return execution_branch in self._masks
