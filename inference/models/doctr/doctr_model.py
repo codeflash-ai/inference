@@ -39,10 +39,16 @@ def _geometry_to_bbox(page_dimensions: Tuple[int, int], geometry: dict) -> list[
     Returns:
         list[int]: A list representing the bounding box in the format [x_min, y_min, x_max, y_max].
     """
-    x_min = int(page_dimensions[1] * geometry[0][0])
-    y_min = int(page_dimensions[0] * geometry[0][1])
-    x_max = int(page_dimensions[1] * geometry[1][0])
-    y_max = int(page_dimensions[0] * geometry[1][1])
+    # Localize page_dimensions lookups, avoiding repeated indexing
+    height, width = page_dimensions
+    # Cache geometry lookups
+    geometry_0 = geometry[0]
+    geometry_1 = geometry[1]
+    # Use local variable bindings for values used more than once
+    x_min = int(width * geometry_0[0])
+    y_min = int(height * geometry_0[1])
+    x_max = int(width * geometry_1[0])
+    y_max = int(height * geometry_1[1])
     return [x_min, y_min, x_max, y_max]
 
 
