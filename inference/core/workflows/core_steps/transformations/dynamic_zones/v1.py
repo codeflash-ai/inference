@@ -139,7 +139,10 @@ def calculate_simplified_polygon(
             lower_epsilon = epsilon
         else:
             upper_epsilon = epsilon
-        epsilon = lower_epsilon + (upper_epsilon - lower_epsilon) / 2
+        next_epsilon = lower_epsilon + (upper_epsilon - lower_epsilon) / 2
+        if np.isclose(epsilon, next_epsilon, atol=1e-12):
+            break
+        epsilon = next_epsilon
         simplified_polygon = cv.approxPolyDP(
             curve=convex_contour, epsilon=epsilon, closed=True
         )
