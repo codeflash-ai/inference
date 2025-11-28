@@ -478,10 +478,17 @@ def load_plugin_serializers(
 def _load_plugin_serializers(
     plugin_name: str, module_property: str
 ) -> Dict[str, Callable[[Any], Any]]:
-    module = importlib.import_module(plugin_name)
-    if not hasattr(module, module_property):
+    # Use sys.modules as a fast path to avoid redundant imports if the module is already loaded.
+    import sys
+
+    module = sys.modules.get(plugin_name)
+    if module is None:
+        module = importlib.import_module(plugin_name)
+
+    try:
+        kinds_serializers = getattr(module, module_property)
+    except AttributeError:
         return {}
-    kinds_serializers = getattr(module, module_property)
     if not isinstance(kinds_serializers, dict):
         raise PluginInterfaceError(
             public_message=f"Provided workflow plugin `{plugin_name}` do not implement blocks loading "
