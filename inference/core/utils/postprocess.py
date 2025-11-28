@@ -649,11 +649,19 @@ def undo_image_padding_for_predicted_keypoints(
 
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    for coord_id in range(keypoints.shape[1] // 3):
-        keypoints[:, coord_id * 3] -= pad_x
-        keypoints[:, coord_id * 3] /= scale
-        keypoints[:, coord_id * 3 + 1] -= pad_y
-        keypoints[:, coord_id * 3 + 1] /= scale
+
+    num_coords = keypoints.shape[1] // 3
+
+    # Vectorized adjustment for all coordinates
+    keypoints_x = keypoints[:, 0::3]
+    keypoints_y = keypoints[:, 1::3]
+
+    keypoints_x -= pad_x
+    keypoints_x /= scale
+
+    keypoints_y -= pad_y
+    keypoints_y /= scale
+
     return keypoints
 
 
