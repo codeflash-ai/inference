@@ -1546,12 +1546,15 @@ def grab_parameters_defining_batch_inputs(
 def retrieve_batch_compatibility_of_input_selectors(
     input_selectors: List[ParsedSelector],
 ) -> Dict[str, Set[bool]]:
+    # Precompute definitions to avoid repeated attribute lookups
     batch_compatibility_of_properties = defaultdict(set)
     for parsed_selector in input_selectors:
-        for reference in parsed_selector.definition.allowed_references:
-            batch_compatibility_of_properties[
-                parsed_selector.definition.property_name
-            ].update(reference.points_to_batch)
+        defn = parsed_selector.definition
+        prop_name = defn.property_name
+        allowed_refs = defn.allowed_references
+        # Use generator and set.update(*args) with unpacking
+        for ref in allowed_refs:
+            batch_compatibility_of_properties[prop_name].update(ref.points_to_batch)
     return batch_compatibility_of_properties
 
 
