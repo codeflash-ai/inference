@@ -95,14 +95,20 @@ class ExternalOperatorDescription(BaseModel):
     def from_internal_entity(
         cls, operator_description: OperatorDescription
     ) -> "ExternalOperatorDescription":
-        operands_kinds = [
-            [k.name for k in kind] for kind in operator_description.operands_kinds
-        ]
+        # Use a faster local variable lookup and inline the comprehension to avoid repeated attribute lookups
+        operator_type = operator_description.operator_type
+        operands_number = operator_description.operands_number
+        description = operator_description.description
+        operands_kinds_seq = operator_description.operands_kinds
+
+        # Optimize list comprehension by minimizing attribute lookups
+        operands_kinds = [[k.name for k in kind] for kind in operands_kinds_seq]
+
         return cls(
-            operator_type=operator_description.operator_type,
-            operands_number=operator_description.operands_number,
+            operator_type=operator_type,
+            operands_number=operands_number,
             operands_kinds=operands_kinds,
-            description=operator_description.description,
+            description=description,
         )
 
 
