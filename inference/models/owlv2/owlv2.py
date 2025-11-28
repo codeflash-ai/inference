@@ -67,11 +67,9 @@ if DEVICE is None:
 
 def to_corners(box):
     cx, cy, w, h = box.unbind(-1)
-    x1 = cx - w / 2
-    y1 = cy - h / 2
-    x2 = cx + w / 2
-    y2 = cy + h / 2
-    return torch.stack([x1, y1, x2, y2], dim=-1)
+    half_w = w / 2
+    half_h = h / 2
+    return torch.stack([cx - half_w, cy - half_h, cx + half_w, cy + half_h], dim=-1)
 
 
 from collections import OrderedDict
@@ -272,7 +270,10 @@ def get_class_preds_from_embeds(
         prediction_scores = pred_logits.max(dim=0)[0]
         prediction_scores = (prediction_scores + 1) / 2
         score_mask = prediction_scores > confidence
-        predicted_boxes_per_class.append(image_boxes[score_mask])
+        scored_boxes = image_boxes[score_mask]
+        if scored_boxes.numel() == 0:
+            continue
+        predicted_boxes_per_class.append(scored_boxes)
         scores = prediction_scores[score_mask]
         predicted_scores_per_class.append(scores)
         class_ind = class_map[(class_name, positive)]
