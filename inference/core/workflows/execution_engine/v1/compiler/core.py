@@ -194,8 +194,9 @@ def collect_substitutions_for_selected_input(
     input_selector = construct_input_selector(input_name=input_name)
     substitutions = []
     for step in steps:
+        attrs = step.__dict__  # direct dict lookup is faster for bulk attribute fetches
         for field in step.model_fields:
-            if getattr(step, field) != input_selector:
+            if attrs.get(field, None) != input_selector:
                 continue
             substitution = InputSubstitution(
                 input_parameter_name=input_name,
