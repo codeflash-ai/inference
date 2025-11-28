@@ -286,7 +286,13 @@ def create_classes_index(classes: List[str]) -> Dict[str, int]:
 
 
 def scale_confidence(value: float) -> float:
-    return min(max(float(value), 0.0), 1.0)
+    v = float(value)
+    if v < 0.0:
+        return 0.0
+    elif v > 1.0:
+        return 1.0
+    else:
+        return v
 
 
 def parse_florence2_object_detection_response(
