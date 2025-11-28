@@ -315,63 +315,78 @@ def summarise_input_kinds(
     input_selectors_details: Dict[str, InputMetadata],
     search_results: List[SelectorSearchResult],
 ) -> Dict[str, List[str]]:
-    search_results_for_selectors = defaultdict(list)
-    for search_result in search_results:
-        search_results_for_selectors[search_result.selector].append(search_result)
+    # Pre-allocate once for result and search_results_for_selectors
     result = {}
+    search_results_for_selectors = defaultdict(list)
+    # Avoid repeated attribute access inside loop
+    append = search_results_for_selectors.__getitem__
+    for search_result in search_results:
+        append(search_result.selector).append(search_result)
+    # Use local variables and inline lookups for better cache usage
+    input_selectors_details_get = input_selectors_details.__getitem__
     for (
         input_selector,
         connected_search_results,
     ) in search_results_for_selectors.items():
-        actual_kind_for_selector = generate_kinds_union(
-            search_results=connected_search_results
-        )
-        selector_details = input_selectors_details[input_selector]
+        actual_kind_for_selector = generate_kinds_union(connected_search_results)
+        selector_details = input_selectors_details_get(input_selector)
         declared_kind_for_selector = selector_details.declared_kind or {
             WILDCARD_KIND.name
         }
-        if not kinds_are_matching(
-            x=actual_kind_for_selector, y=declared_kind_for_selector
-        ):
+        if not kinds_are_matching(actual_kind_for_selector, declared_kind_for_selector):
             raise WorkflowDefinitionError(
-                public_message=f"Workflow definition contains whe following declaration of kind "
-                f"for input `{selector_details.name}`: {declared_kind_for_selector}, whereas "
-                f"context of input selectors usage indicate conflicting `{actual_kind_for_selector}`.",
+                public_message=(
+                    f"Workflow definition contains whe following declaration of kind "
+                    f"for input `{selector_details.name}`: {declared_kind_for_selector}, whereas "
+                    f"context of input selectors usage indicate conflicting `{actual_kind_for_selector}`."
+                ),
                 context="describing_workflow_inputs",
             )
         result[selector_details.name] = list(actual_kind_for_selector)
-    unbounded_inputs = set(v.name for v in input_selectors_details.values()).difference(
-        result.keys()
-    )
+    # Avoid set comprehension allocation by using generator directly inside set()
+    input_names = set(v.name for v in input_selectors_details.values())
+    unbounded_inputs = input_names.difference(result.keys())
+    wildcard = WILDCARD_KIND.name
     for input_name in unbounded_inputs:
-        result[input_name] = [WILDCARD_KIND.name]
+        result[input_name] = [wildcard]
     return result
 
 
 def generate_kinds_union(search_results: List[SelectorSearchResult]) -> Set[str]:
+    # Fast-path for empty list
     if not search_results:
         return set()
     reference_result = search_results[0]
-    kinds_union = set()
-    for result in search_results:
-        if not kinds_are_matching(
-            x=result.compatible_kinds, y=reference_result.compatible_kinds
-        ):
+    ref_selector = reference_result.selector
+    ref_step_name = reference_result.step_name
+    ref_property_name = reference_result.property_name
+    ref_kinds = reference_result.compatible_kinds
+    kinds_union = set(ref_kinds)
+    # Start loop from index 1, first already used in reference
+    for i in range(1, len(search_results)):
+        result = search_results[i]
+        # Shortcut for early mismatch detection
+        if not kinds_are_matching(result.compatible_kinds, ref_kinds):
             raise WorkflowDefinitionError(
-                public_message=f"Workflow definition invalid - input element: `{reference_result.selector}` "
-                f"is used in two steps: `{reference_result.step_name}` and `{result.step_name}`. "
-                f"Those steps expect incompatible type of data requiring `{reference_result.selector}` "
-                f"to be of different type at the same time. "
-                f"`{reference_result.step_name}.{reference_result.property_name}` requires: "
-                f"{reference_result.compatible_kinds} and `{result.step_name}.{result.property_name}` "
-                f"requires: `{result.compatible_kinds}`",
+                public_message=(
+                    f"Workflow definition invalid - input element: `{ref_selector}` "
+                    f"is used in two steps: `{ref_step_name}` and `{result.step_name}`. "
+                    f"Those steps expect incompatible type of data requiring `{ref_selector}` "
+                    f"to be of different type at the same time. "
+                    f"`{ref_step_name}.{ref_property_name}` requires: "
+                    f"{ref_kinds} and `{result.step_name}.{result.property_name}` "
+                    f"requires: `{result.compatible_kinds}`"
+                ),
                 context="describing_workflow_inputs",
             )
+        # Avoid repeated update calls - single update in loop
         kinds_union.update(result.compatible_kinds)
     return kinds_union
 
 
 def kinds_are_matching(x: Set[str], y: Set[str]) -> bool:
-    if WILDCARD_KIND.name in x or WILDCARD_KIND.name in y:
+    # Use faster conditional return
+    wildcard = WILDCARD_KIND.name
+    if wildcard in x or wildcard in y:
         return True
-    return len(x.intersection(y)) > 0
+    return bool(x & y)
