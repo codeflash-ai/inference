@@ -16,6 +16,11 @@ import numpy as np
 import regex as re
 import torch
 
+# Precompute value once and inline into lru_cache for better performance on repeated calls
+_bpe_path: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "bpe_simple_vocab_16e6.txt.gz"
+)
+
 # https://stackoverflow.com/q/62691279
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -24,9 +29,7 @@ DEFAULT_CONTEXT_LENGTH = 77  # default context length for OpenAI CLIP
 
 @lru_cache()
 def default_bpe():
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "bpe_simple_vocab_16e6.txt.gz"
-    )
+    return _bpe_path
 
 
 @lru_cache()
