@@ -108,13 +108,15 @@ class RotaryEmbedding(Module):
         if exists(custom_freqs):
             freqs = custom_freqs
         elif freqs_for == "lang":
-            freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
-            )
+            arange = torch.arange(0, dim, 2, dtype=torch.float32)
+            half_dim = dim // 2
+            # Avoid slicing inside the exponent, just slice once
+            freqs = 1.0 / (theta ** (arange[:half_dim] / dim))
         elif freqs_for == "pixel":
+            # torch.linspace is relatively efficient already. Do not change.
             freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
         elif freqs_for == "constant":
-            freqs = torch.ones(num_freqs).float()
+            freqs = torch.ones(num_freqs, dtype=torch.float32)
 
         self.cache_if_possible = cache_if_possible
 
@@ -146,7 +148,10 @@ class RotaryEmbedding(Module):
             self.tmp_store("scale", None)
             return
 
-        scale = (torch.arange(0, dim, 2) + 0.4 * dim) / (1.4 * dim)
+        # avoid division by constant repeatedly, precompute 1/(1.4*dim)
+        dim_float = float(dim)
+        scale_arange = torch.arange(0, dim, 2, dtype=torch.float32)
+        scale = (scale_arange + 0.4 * dim_float) / (1.4 * dim_float)
 
         self.scale_base = xpos_scale_base
         self.tmp_store("scale", scale)
@@ -231,17 +236,22 @@ class RotaryEmbedding(Module):
 
         should_cache = self.cache_if_possible and exists(seq_len)
 
+        # Use attributes directly for buffer access, avoids Python attr lookup per call
+        cached_scales = self.cached_scales
+
         if (
             should_cache
-            and exists(self.cached_scales)
-            and (seq_len + offset) <= self.cached_scales.shape[0]
+            and exists(cached_scales)
+            and (seq_len + offset) <= cached_scales.shape[0]
         ):
-            return self.cached_scales[offset : (offset + seq_len)]
+            return cached_scales[offset : (offset + seq_len)]
 
         scale = 1.0
         if self.use_xpos:
             power = (t - len(t) // 2) / self.scale_base
-            scale = self.scale ** rearrange(power, "n -> n 1")
+            # Fast path: avoid string parsing in einops, use unsqueeze for simple broadcasting
+            # power is (n,) -> (n,1);
+            scale = self.scale ** power.unsqueeze(-1)
             scale = torch.cat((scale, scale), dim=-1)
 
         if should_cache:
