@@ -263,7 +263,8 @@ class ExecutionCache:
         )
 
     def is_step_output_data_registered(self, step_name: str) -> bool:
-        if not self.contains_step(step_name=step_name):
+        # Inline the contains_step logic for speed (saves a function call)
+        if step_name not in self._cache_content:
             raise ExecutionEngineRuntimeError(
                 public_message=f"Error in execution engine. Attempted to check if step {step_name} "
                 f"registered outputs actual, but provided unknown step name. Behavior should "
