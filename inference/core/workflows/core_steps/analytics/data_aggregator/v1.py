@@ -528,7 +528,7 @@ class ValuesCountState(AggregationState):
         self._counts[value] += 1
 
     def get_result(self) -> Any:
-        return dict(self._counts)
+        return {**self._counts}
 
 
 class ValuesDifferenceState(AggregationState):
