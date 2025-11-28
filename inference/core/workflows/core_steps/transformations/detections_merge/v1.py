@@ -99,6 +99,8 @@ def get_lowest_confidence_index(detections: sv.Detections) -> int:
     """Get the index of the detection with the lowest confidence."""
     if detections.confidence is None:
         return 0
+    if isinstance(detections.confidence, (list, tuple)):
+        return detections.confidence.index(min(detections.confidence))
     return int(np.argmin(detections.confidence))
 
 
