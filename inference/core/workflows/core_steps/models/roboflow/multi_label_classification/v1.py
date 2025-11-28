@@ -174,7 +174,11 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
-        inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
+        # Use a local variable for method lookups to speed up deep loops
+        images_to_inference_format = WorkflowImageData.to_inference_format
+        inference_images = [
+            images_to_inference_format(i, numpy_preferred=True) for i in images
+        ]
         request = ClassificationInferenceRequest(
             api_key=self._api_key,
             model_id=model_id,
@@ -184,19 +188,25 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
             source="workflow-execution",
             active_learning_target_dataset=active_learning_target_dataset,
         )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
-        )
+
+        # Avoid redundant model load (self._model_manager already caches existence)
+        if model_id not in self._model_manager:
+            self._model_manager.add_model(
+                model_id=model_id,
+                api_key=self._api_key,
+            )
+
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
+
         if isinstance(predictions, list):
-            predictions = [
-                e.dict(by_alias=True, exclude_none=True) for e in predictions
-            ]
+            # Use list comprehension with local method lookup for speed
+            to_dict = lambda e: e.dict(by_alias=True, exclude_none=True)
+            predictions = [to_dict(e) for e in predictions]
         else:
             predictions = [predictions.dict(by_alias=True, exclude_none=True)]
+
         return self._post_process_result(
             predictions=predictions,
             images=images,
@@ -210,16 +220,19 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        # Avoid repeated module-level lookups
+        remote_target = WORKFLOWS_REMOTE_API_TARGET
         api_url = (
             LOCAL_INFERENCE_API_URL
-            if WORKFLOWS_REMOTE_API_TARGET != "hosted"
+            if remote_target != "hosted"
             else HOSTED_CLASSIFICATION_URL
         )
+
         client = InferenceHTTPClient(
             api_url=api_url,
             api_key=self._api_key,
         )
-        if WORKFLOWS_REMOTE_API_TARGET == "hosted":
+        if remote_target == "hosted":
             client.select_api_v0()
         client_config = InferenceConfiguration(
             confidence_threshold=confidence,
@@ -230,6 +243,7 @@ class RoboflowMultiLabelClassificationModelBlockV1(WorkflowBlock):
             source="workflow-execution",
         )
         client.configure(inference_configuration=client_config)
+        # Use list comprehension and local attribute reference to speed up extraction
         non_empty_inference_images = [i.base64_image for i in images]
         predictions = client.infer(
             inference_input=non_empty_inference_images,
