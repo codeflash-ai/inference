@@ -17,6 +17,13 @@ from inference.core.workflows.execution_engine.entities.types import (
     Selector,
 )
 from inference.core.workflows.prototypes.block import BlockResult
+from functools import lru_cache
+
+_MPL_CAPITALIZED_PALETTES = {
+    "Greys_R", "Purples_R", "Blues_R", "Greens_R",
+    "Oranges_R", "Reds_R", "Wistia", "Pastel1", "Pastel2",
+    "Paired", "Accent", "Dark2", "Set1", "Set2", "Set3"
+}
 
 
 class ColorableVisualizationManifest(PredictionsVisualizationManifest, ABC):
@@ -116,36 +123,20 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
     @classmethod
     def getPalette(self, color_palette, palette_size, custom_colors):
         if color_palette == "CUSTOM":
-            return sv.ColorPalette(
-                colors=[str_to_color(color) for color in custom_colors]
-            )
+            # Convert list to tuple to allow caching by content
+            colors_tuple = _custom_palette_tuple(custom_colors)
+            return _cached_palette_custom(colors_tuple)
         elif hasattr(sv.ColorPalette, color_palette):
-            return getattr(sv.ColorPalette, color_palette)
+            return _cached_palette_class_attr(color_palette)
         else:
             palette_name = color_palette.replace("Matplotlib ", "")
 
-            if palette_name in [
-                "Greys_R",
-                "Purples_R",
-                "Blues_R",
-                "Greens_R",
-                "Oranges_R",
-                "Reds_R",
-                "Wistia",
-                "Pastel1",
-                "Pastel2",
-                "Paired",
-                "Accent",
-                "Dark2",
-                "Set1",
-                "Set2",
-                "Set3",
-            ]:
-                palette_name = palette_name.capitalize()
+            if palette_name in _MPL_CAPITALIZED_PALETTES:
+                resolved_palette_name = palette_name.capitalize()
             else:
-                palette_name = palette_name.lower()
+                resolved_palette_name = palette_name.lower()
 
-            return sv.ColorPalette.from_matplotlib(palette_name, int(palette_size))
+            return _cached_palette_from_matplotlib(resolved_palette_name, int(palette_size))
 
     @abstractmethod
     def run(
@@ -160,3 +151,20 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
         **kwargs
     ) -> BlockResult:
         pass
+
+def _custom_palette_tuple(colors):
+    """Helper: Turns a list of color strings into a cacheable tuple."""
+    return tuple(colors) if not isinstance(colors, tuple) else colors
+
+@lru_cache(maxsize=32)
+def _cached_palette_from_matplotlib(palette_name, palette_size):
+    return sv.ColorPalette.from_matplotlib(palette_name, int(palette_size))
+
+@lru_cache(maxsize=32)
+def _cached_palette_class_attr(attr):
+    return getattr(sv.ColorPalette, attr)
+
+@lru_cache(maxsize=48)
+def _cached_palette_custom(colors_tuple):
+    # colors_tuple: tuple of color strings
+    return sv.ColorPalette(colors=[str_to_color(color) for color in colors_tuple])
