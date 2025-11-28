@@ -166,11 +166,13 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(name="message", kind=[STRING_KIND]),
-        ]
+        if not hasattr(cls, "_output_definitions_cache"):
+            cls._output_definitions_cache = [
+                OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
+                OutputDefinition(name="throttling_status", kind=[BOOLEAN_KIND]),
+                OutputDefinition(name="message", kind=[STRING_KIND]),
+            ]
+        return cls._output_definitions_cache
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
