@@ -18,8 +18,15 @@ def discover_kinds_typing_hints(kinds_names: Set[str]) -> Dict[str, str]:
 
 
 def discover_kinds_schemas(kinds_names: Set[str]) -> Dict[str, Union[dict, List[dict]]]:
-    return {
-        name: schema
-        for name, schema in KIND_TO_SCHEMA_REGISTER.items()
-        if name in kinds_names
-    }
+    if len(kinds_names) < len(KIND_TO_SCHEMA_REGISTER):
+        return {
+            name: KIND_TO_SCHEMA_REGISTER[name]
+            for name in kinds_names
+            if name in KIND_TO_SCHEMA_REGISTER
+        }
+    else:
+        return {
+            name: schema
+            for name, schema in KIND_TO_SCHEMA_REGISTER.items()
+            if name in kinds_names
+        }
