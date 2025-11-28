@@ -152,7 +152,7 @@ def calculate_least_squares_polygon(
     contour: np.ndarray, polygon: np.ndarray, midpoint_fraction: float = 1
 ) -> np.ndarray:
     def find_closest_index(point: np.ndarray, contour: np.ndarray) -> int:
-        dists = np.linalg.norm(contour - point, axis=1)
+        dists = np.einsum("ij,ij->i", contour - point, contour - point)
         return np.argmin(dists)
 
     def pick_contour_points_between_vertices(
