@@ -539,12 +539,17 @@ def _extract_bbox_coordinates_as_location_prompt(
 
 
 def _coordinate_to_loc(value: float) -> int:
-    loc_bin = round(_scale_value(value=value, min_value=0.0, max_value=1.0) * LOC_BINS)
-    return _scale_value(  # to make sure 0-999 cutting out 1000 on 1.0
-        value=loc_bin,
-        min_value=0,
-        max_value=LOC_BINS - 1,
-    )
+    # Clamp value to [0.0, 1.0]
+    if value < 0.0:
+        return 0
+    elif value > 1.0:
+        return LOC_BINS - 1
+
+    # Direct math instead of function call, then round
+    loc_bin = int(value * LOC_BINS + 0.5)
+    if loc_bin >= LOC_BINS:
+        return LOC_BINS - 1
+    return loc_bin
 
 
 def _scale_value(
