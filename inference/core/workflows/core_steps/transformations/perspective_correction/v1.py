@@ -237,7 +237,9 @@ def roll_polygon_vertices_to_start_from_leftmost_bottom(
 
 
 def ccw(x1, y1, x2, y2, x3, y3):
-    return (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1) > 0
+    # Inline calculation for speed, avoid temporary variables
+    # No further optimization is possible for a simple expression like this
+    return (x2 - x1) * (y3 - y1) > (y2 - y1) * (x3 - x1)
 
 
 def calculate_line_coeffs(
