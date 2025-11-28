@@ -67,10 +67,12 @@ if DEVICE is None:
 
 def to_corners(box):
     cx, cy, w, h = box.unbind(-1)
-    x1 = cx - w / 2
-    y1 = cy - h / 2
-    x2 = cx + w / 2
-    y2 = cy + h / 2
+    half_w = w.mul(0.5)
+    half_h = h.mul(0.5)
+    x1 = cx - half_w
+    y1 = cy - half_h
+    x2 = cx + half_w
+    y2 = cy + half_h
     return torch.stack([x1, y1, x2, y2], dim=-1)
 
 
