@@ -152,7 +152,7 @@ def calculate_least_squares_polygon(
     contour: np.ndarray, polygon: np.ndarray, midpoint_fraction: float = 1
 ) -> np.ndarray:
     def find_closest_index(point: np.ndarray, contour: np.ndarray) -> int:
-        dists = np.linalg.norm(contour - point, axis=1)
+        dists = np.sqrt(np.einsum("ij,ij->i", contour - point, contour - point))
         return np.argmin(dists)
 
     def pick_contour_points_between_vertices(
@@ -171,7 +171,9 @@ def calculate_least_squares_polygon(
             return None
         x = points[:, 0]
         y = points[:, 1]
-        A = np.vstack([x, np.ones_like(x)]).T
+        A = np.empty((len(x), 2), dtype=x.dtype)
+        A[:, 0] = x
+        A[:, 1] = 1
         a, b = np.linalg.lstsq(A, y, rcond=None)[0]
         return (a, b)
 
@@ -188,11 +190,30 @@ def calculate_least_squares_polygon(
         y = a_1 * x + b_1
         return np.array([x, y])
 
-    pairs = [[polygon[-1], polygon[0]]] + list(zip(polygon[:-1], polygon[1:]))
+    # Precompute all indices at once for better locality and reuse
+    polygon_len = len(polygon)
+    contour_len = len(contour)
+    # Store closest indices for all polygon vertices at once
+    closest_indices = np.empty(polygon_len, dtype=int)
+    for idx, point in enumerate(polygon):
+        closest_indices[idx] = find_closest_index(point, contour)
 
+    # Construct pairs more efficiently
+    pairs = [(polygon[-1], polygon[0])]
+    pairs.extend(zip(polygon[:-1], polygon[1:]))
+
+    # Precompute all segment indices faster:
     lines = []
-    for point_1, point_2 in pairs:
-        segment_points = pick_contour_points_between_vertices(point_1, point_2, contour)
+    for k, (point_1, point_2) in enumerate(pairs):
+        i1 = (
+            closest_indices[(k - 1) % polygon_len] if k == 0 else closest_indices[k - 1]
+        )
+        i2 = closest_indices[k % polygon_len]
+        if i1 <= i2:
+            segment_points = contour[i1 : i2 + 1]
+        else:
+            segment_points = np.concatenate((contour[i1:], contour[: i2 + 1]), axis=0)
+
         if midpoint_fraction < 1:
             number_of_points = int(round(len(segment_points) * midpoint_fraction))
             if number_of_points > 2:
@@ -207,11 +228,11 @@ def calculate_least_squares_polygon(
         lines.append(line_params)
 
     intersections = []
-    for i in range(len(lines)):
-        line_1 = lines[i]
-        line_2 = lines[(i + 1) % len(lines)]
-        pt = intersect_lines(line_1, line_2)
-        intersections.append(pt)
+    # Use list comprehension instead of loop for speed (CPython list ops)
+    intersections = [
+        intersect_lines(lines[i], lines[(i + 1) % polygon_len])
+        for i in range(polygon_len)
+    ]
 
     return np.array(intersections, dtype=float).round().astype(int)
 
