@@ -451,9 +451,7 @@ class WorkflowImageData:
         if numpy_preferred:
             return {"type": "numpy_object", "value": self.numpy_image}
         if self._image_reference:
-            if self._image_reference.startswith(
-                "http://"
-            ) or self._image_reference.startswith("https://"):
+            if self._image_reference.startswith(("http://", "https://")):
                 return {"type": "url", "value": self._image_reference}
             return {"type": "file", "value": self._image_reference}
         if self._base64_image:
