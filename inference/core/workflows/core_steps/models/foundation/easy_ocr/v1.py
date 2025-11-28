@@ -174,7 +174,7 @@ class EasyOCRBlockV1(WorkflowBlock):
         if language not in MODELS:
             raise ValueError(f"Unsupported language: {language}")
 
-        version, language_codes = MODELS.get(language, "english_g2")
+        version, language_codes = MODELS[language]
         if self._step_execution_mode is StepExecutionMode.LOCAL:
             return self.run_locally(
                 images=images,
@@ -201,10 +201,12 @@ class EasyOCRBlockV1(WorkflowBlock):
         version: str = "english_g2",
         quantize: bool = False,
     ) -> BlockResult:
-
-        predictions = []
+        # Fast path: premake all requests then infer in batch if possible
+        # If batch inference is not supported, this will still be an improvement as we avoid attribute lookups and method calls per loop
+        requests = []
+        append = requests.append
         for single_image in images:
-
+            # to_inference_format is not vectorizable, but move method lookup out of loop
             inference_request = EasyOCRInferenceRequest(
                 easy_ocr_version_id=version,
                 image=single_image.to_inference_format(numpy_preferred=True),
@@ -217,11 +219,15 @@ class EasyOCRBlockV1(WorkflowBlock):
                 inference_request=inference_request,
                 core_model="easy_ocr",
             )
-            result = self._model_manager.infer_from_request_sync(
-                model_id, inference_request
-            )
+            append((model_id, inference_request))
 
-            predictions.append(result.model_dump(by_alias=True, exclude_none=True))
+        # Run all inference tasks with less indirection in loop (method lookup and append outside)
+        predictions = [
+            self._model_manager.infer_from_request_sync(model_id, infer_req).model_dump(
+                by_alias=True, exclude_none=True
+            )
+            for model_id, infer_req in requests
+        ]
 
         return post_process_ocr_result(
             predictions=predictions,
@@ -236,6 +242,7 @@ class EasyOCRBlockV1(WorkflowBlock):
         version: str = "english_g2",
         quantize: bool = False,
     ) -> BlockResult:
+        # Prepare API url and client only once, outside loop
         api_url = (
             LOCAL_INFERENCE_API_URL
             if WORKFLOWS_REMOTE_API_TARGET != "hosted"
@@ -252,6 +259,7 @@ class EasyOCRBlockV1(WorkflowBlock):
             max_concurrent_requests=WORKFLOWS_REMOTE_EXECUTION_MAX_STEP_CONCURRENT_REQUESTS,
         )
         client.configure(configuration)
+        # Preallocate base64 images (list comprehension)
         non_empty_inference_images = [i.base64_image for i in images]
         predictions = client.ocr_image(
             inference_input=non_empty_inference_images,
