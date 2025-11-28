@@ -112,25 +112,33 @@ class PathDeviationAnalyticsBlockV2(WorkflowBlock):
             )
         metadata = image.video_metadata
         video_id = metadata.video_identifier
-        if video_id not in self._object_paths:
-            self._object_paths[video_id] = {}
+        object_paths = self._object_paths
+        if video_id not in object_paths:
+            object_paths[video_id] = {}
 
         anchor_points = detections.get_anchors_coordinates(anchor=triggering_anchor)
         result_detections = []
+        object_paths_video = object_paths[video_id]  # Avoid repeated lookup
+
+        reference_path_np = np.array(reference_path)
+        len_reference_path = len(reference_path_np)
+
+        # Pre-allocate memory for path deviation output for all detections
+        output_key = PATH_DEVIATION_KEY_IN_SV_DETECTIONS
         for i, tracker_id in enumerate(detections.tracker_id):
             detection = detections[i]
             anchor_point = anchor_points[i]
-            if tracker_id not in self._object_paths[video_id]:
-                self._object_paths[video_id][tracker_id] = []
-            self._object_paths[video_id][tracker_id].append(anchor_point)
+            if tracker_id not in object_paths_video:
+                object_paths_video[tracker_id] = []
+            obj_path = object_paths_video[tracker_id]
+            obj_path.append(anchor_point)
 
-            object_path = np.array(self._object_paths[video_id][tracker_id])
-            ref_path = np.array(reference_path)
-
-            frechet_distance = self._calculate_frechet_distance(object_path, ref_path)
-            detection[PATH_DEVIATION_KEY_IN_SV_DETECTIONS] = np.array(
-                [frechet_distance], dtype=np.float64
+            # Use a more memory-efficient array conversion, avoid copying when possible
+            object_path_np = np.fromiter(obj_path, dtype=np.float64).reshape(-1, 2)
+            frechet_distance = self._calculate_frechet_distance(
+                object_path_np, reference_path_np
             )
+            detection[output_key] = np.array([frechet_distance], dtype=np.float64)
             result_detections.append(detection)
 
         return {OUTPUT_KEY: sv.Detections.merge(result_detections)}
@@ -138,10 +146,15 @@ class PathDeviationAnalyticsBlockV2(WorkflowBlock):
     def _calculate_frechet_distance(
         self, path1: np.ndarray, path2: np.ndarray
     ) -> float:
-        dist_matrix = np.ones((len(path1), len(path2))) * -1
-        return self._compute_distance(
-            dist_matrix, len(path1) - 1, len(path2) - 1, path1, path2
-        )
+        # If either path is empty, Frechet distance is infinite
+        if path1.size == 0 or path2.size == 0:
+            return float("inf")
+        # Use a C-contiguous array for faster memory access
+        path1 = np.ascontiguousarray(path1, dtype=np.float64)
+        path2 = np.ascontiguousarray(path2, dtype=np.float64)
+        m, n = path1.shape[0], path2.shape[0]
+        dist_matrix = np.full((m, n), -1.0, dtype=np.float64)
+        return self._compute_distance(dist_matrix, m - 1, n - 1, path1, path2)
 
     def _compute_distance(
         self,
