@@ -942,35 +942,47 @@ def get_batch_parameters(parameters: Dict[str, Any]) -> Dict[str, Any]:
     for name, value in parameters.items():
         if isinstance(value, Batch):
             result[name] = value
-        elif isinstance(value, list) and any(isinstance(v, Batch) for v in value):
-            result[name] = value
-        elif isinstance(value, dict) and any(
-            isinstance(v, Batch) for v in value.values()
-        ):
-            result[name] = value
+        elif isinstance(value, list):
+            for v in value:
+                if isinstance(v, Batch):
+                    result[name] = value
+                    break
+        elif isinstance(value, dict):
+            for v in value.values():
+                if isinstance(v, Batch):
+                    result[name] = value
+                    break
     return result
 
 
 def iterate_over_batches(
     batch_parameters: Dict[str, Any],
 ) -> Generator[Dict[str, Any], None, None]:
-    index = 0
-    end = False
-    while not end:
+    batch_lengths = []
+    for value in batch_parameters.values():
+        if isinstance(value, Batch):
+            batch_lengths.append(len(value))
+        elif isinstance(value, list):
+            for element in value:
+                if isinstance(element, Batch):
+                    batch_lengths.append(len(element))
+        elif isinstance(value, dict):
+            for key_value in value.values():
+                if isinstance(key_value, Batch):
+                    batch_lengths.append(len(key_value))
+    if not batch_lengths:
+        return
+    min_length = min(batch_lengths)
+
+    for index in range(min_length):
         result = {}
         for name, value in batch_parameters.items():
             if isinstance(value, Batch):
-                if len(value) <= index:
-                    end = True
-                    break
                 result[name] = value[index]
             elif isinstance(value, list):
                 to_yield = []
                 for element in value:
                     if isinstance(element, Batch):
-                        if len(element) <= index:
-                            end = True
-                            break
                         to_yield.append(element[index])
                     else:
                         to_yield.append(element)
@@ -981,12 +993,6 @@ def iterate_over_batches(
                     if not isinstance(key_value, Batch):
                         to_yield[key] = key_value
                     else:
-                        if len(key_value) <= index:
-                            end = True
-                            break
-                        else:
-                            to_yield[key] = key_value[index]
+                        to_yield[key] = key_value[index]
                 result[name] = to_yield
-        index += 1
-        if not end:
-            yield result
+        yield result
