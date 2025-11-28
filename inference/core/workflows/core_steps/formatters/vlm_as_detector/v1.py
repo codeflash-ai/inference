@@ -40,6 +40,13 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Using tuple of OutputDefinition() directly avoids repeated construction on every call
+_OUTPUT_DEFINITIONS: tuple = (
+    OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
+    OutputDefinition(name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]),
+    OutputDefinition(name="inference_id", kind=[STRING_KIND]),
+)
+
 JSON_MARKDOWN_BLOCK_PATTERN = re.compile(r"```json([\s\S]*?)```", flags=re.IGNORECASE)
 
 LONG_DESCRIPTION = """
@@ -146,13 +153,8 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="error_status", kind=[BOOLEAN_KIND]),
-            OutputDefinition(
-                name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]
-            ),
-            OutputDefinition(name="inference_id", kind=[STRING_KIND]),
-        ]
+        # Convert the cached tuple to a list at call time (so it stays non-mutable on the class level)
+        return list(_OUTPUT_DEFINITIONS)
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
