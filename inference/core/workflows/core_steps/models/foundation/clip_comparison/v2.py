@@ -235,10 +235,10 @@ class ClipComparisonBlockV2(WorkflowBlock):
         results = []
         for prediction, image in zip(predictions, images):
             similarities = prediction["similarity"]
-            max_similarity = np.max(similarities)
             max_similarity_id = np.argmax(similarities)
-            min_similarity = np.min(similarities)
             min_similarity_id = np.argmin(similarities)
+            max_similarity = similarities[max_similarity_id]
+            min_similarity = similarities[min_similarity_id]
             most_similar_class_name = classes[max_similarity_id]
             least_similar_class_name = classes[min_similarity_id]
             prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
