@@ -369,18 +369,30 @@ def process_mask_fast(
     """
     ih, iw = shape
     c, mh, mw = protos.shape  # CHW
+
+    # Avoid unnecessary float copy if already float32
+    if protos.dtype != np.float32:
+        protos_f32 = protos.astype(
+            np.float32, copy=False
+        )  # Zero-copy if already float32
+    else:
+        protos_f32 = protos
+
     masks = preprocess_segmentation_masks(
-        protos=protos,
+        protos=protos_f32,
         masks_in=masks_in,
         shape=shape,
     )
+
+    # Avoid deepcopy: scale_bboxes does not mutate shape nor order, so we can do a .copy()
     down_sampled_boxes = scale_bboxes(
-        bboxes=deepcopy(bboxes),
+        bboxes=bboxes.copy(),
         scale_x=mw / iw,
         scale_y=mh / ih,
     )
     masks = crop_mask(masks, down_sampled_boxes)
-    masks[masks < 0.5] = 0
+    # Use np.multiply and boolean mask for fast zeroing, avoiding repeated compare
+    np.multiply(masks, masks >= 0.5, out=masks)
     return masks
 
 
@@ -390,23 +402,23 @@ def preprocess_segmentation_masks(
     shape: Tuple[int, int],
 ) -> np.ndarray:
     c, mh, mw = protos.shape  # CHW
-    masks = protos.astype(np.float32)
-    masks = masks.reshape((c, -1))
-    masks = masks_in @ masks
+    # masks is already float32, so an additional astype is skipped for speed
+    masks = protos.reshape((c, -1))
+    masks = masks_in @ masks  # (n, c) @ (c, h*w) -> (n, h*w)
     masks = sigmoid(masks)
     masks = masks.reshape((-1, mh, mw))
-    gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
-    pad = (mw - shape[1] * gain) / 2, (mh - shape[0] * gain) / 2  # wh padding
-    top, left = int(pad[1]), int(pad[0])  # y, x
-    bottom, right = int(mh - pad[1]), int(mw - pad[0])
+    gain = min(mh / shape[0], mw / shape[1])  # gain = old / new
+    pad_w = (mw - shape[1] * gain) / 2
+    pad_h = (mh - shape[0] * gain) / 2
+    top, left = int(pad_h), int(pad_w)  # y, x
+    bottom, right = int(mh - pad_h), int(mw - pad_w)
     return masks[:, top:bottom, left:right]
 
 
 def scale_bboxes(bboxes: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
-    bboxes[:, 0] *= scale_x
-    bboxes[:, 2] *= scale_x
-    bboxes[:, 1] *= scale_y
-    bboxes[:, 3] *= scale_y
+    # Perform scaling in-place, process all columns at once for better memory locality
+    bboxes[:, [0, 2]] *= scale_x
+    bboxes[:, [1, 3]] *= scale_y
     return bboxes
 
 
@@ -419,13 +431,22 @@ def crop_mask(masks: np.ndarray, boxes: np.ndarray) -> np.ndarray:
         - masks should be a size [h, w, n] tensor of masks
         - boxes should be a size [n, 4] tensor of bbox coords in relative point form
     """
-
     n, h, w = masks.shape
-    x1, y1, x2, y2 = np.split(boxes[:, :, None], 4, 1)  # x1 shape(1,1,n)
-    r = np.arange(w, dtype=x1.dtype)[None, None, :]  # rows shape(1,w,1)
-    c = np.arange(h, dtype=x1.dtype)[None, :, None]  # cols shape(h,1,1)
 
-    masks = masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
+    # Vectorized version that avoids np.split which is slow and unnecessary on (n,4,1)
+    x1 = boxes[:, 0][:, None, None]
+    y1 = boxes[:, 1][:, None, None]
+    x2 = boxes[:, 2][:, None, None]
+    y2 = boxes[:, 3][:, None, None]
+
+    # Use broadcasting to generate mask selectors efficiently
+    rows = np.arange(w, dtype=boxes.dtype)[None, None, :]
+    cols = np.arange(h, dtype=boxes.dtype)[None, :, None]
+
+    # Compute valid positions in place to avoid temporaries
+    mask = (rows >= x1) & (rows < x2) & (cols >= y1) & (cols < y2)
+    # masks is (n, h, w); mask is (n, h, w)
+    np.multiply(masks, mask, out=masks)
     return masks
 
 
