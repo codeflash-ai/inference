@@ -354,7 +354,6 @@ def load_all_defined_kinds() -> List[Kind]:
     core_blocks_kinds = load_kinds()
     plugins_kinds = load_plugins_kinds()
     declared_kinds = core_blocks_kinds + plugins_kinds
-    declared_kinds = list(set(declared_kinds))
     _validate_used_kinds_uniqueness(declared_kinds=declared_kinds)
     return declared_kinds
 
