@@ -109,4 +109,5 @@ REGISTERED_ALIASES = {
 
 
 def resolve_roboflow_model_alias(model_id: str) -> str:
-    return REGISTERED_ALIASES.get(model_id, model_id)
+    aliases = REGISTERED_ALIASES
+    return aliases[model_id] if model_id in aliases else model_id
