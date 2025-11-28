@@ -111,29 +111,40 @@ class LineCounterBlockV1(WorkflowBlock):
             raise ValueError(
                 f"tracker_id not initialized, {self.__class__.__name__} requires detections to be tracked"
             )
-        if metadata.video_identifier not in self._batch_of_line_zones:
+
+        vid_id = metadata.video_identifier
+        line_zones = self._batch_of_line_zones
+
+        # Use a local branch to reduce attribute lookups and dict accesses
+        if vid_id not in line_zones:
+            # Check type and structure of line_segment only once for performance
             if not isinstance(line_segment, list) or len(line_segment) != 2:
                 raise ValueError(
                     f"{self.__class__.__name__} requires line zone to be a list containing exactly 2 points"
                 )
-            if any(not isinstance(e, list) or len(e) != 2 for e in line_segment):
-                raise ValueError(
-                    f"{self.__class__.__name__} requires each point of line zone to be a list containing exactly 2 coordinates"
-                )
-            if any(
-                not isinstance(e[0], (int, float)) or not isinstance(e[1], (int, float))
-                for e in line_segment
-            ):
-                raise ValueError(
-                    f"{self.__class__.__name__} requires each coordinate of line zone to be a number"
-                )
-            self._batch_of_line_zones[metadata.video_identifier] = sv.LineZone(
-                start=sv.Point(*line_segment[0]),
-                end=sv.Point(*line_segment[1]),
+
+            seg0, seg1 = line_segment
+
+            # Merge coordinate validation into a single loop to avoid 'any' x2
+            for seg in (seg0, seg1):
+                if not isinstance(seg, list) or len(seg) != 2:
+                    raise ValueError(
+                        f"{self.__class__.__name__} requires each point of line zone to be a list containing exactly 2 coordinates"
+                    )
+                x, y = seg
+                if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                    raise ValueError(
+                        f"{self.__class__.__name__} requires each coordinate of line zone to be a number"
+                    )
+
+            # Construct the LineZone only after all checks pass
+            line_zones[vid_id] = sv.LineZone(
+                start=sv.Point(*seg0),
+                end=sv.Point(*seg1),
                 triggering_anchors=[sv.Position(triggering_anchor)],
             )
-        line_zone = self._batch_of_line_zones[metadata.video_identifier]
 
+        line_zone = line_zones[vid_id]
         line_zone.trigger(detections=detections)
 
         return {
