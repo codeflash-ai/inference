@@ -92,21 +92,11 @@ class MaskVisualizationBlockV1(ColorableVisualizationBlock):
         color_axis: str,
         opacity: float,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(
-                str,
-                [
-                    color_palette,
-                    palette_size,
-                    color_axis,
-                    opacity,
-                ],
-            )
-        )
+        # Use f-string for a fast, deterministic cache key
+        key = f"{color_palette}_{palette_size}_{color_axis}_{opacity}"
 
         if key not in self.annotatorCache:
             palette = self.getPalette(color_palette, palette_size, custom_colors)
-
             self.annotatorCache[key] = sv.MaskAnnotator(
                 color=palette,
                 color_lookup=getattr(sv.ColorLookup, color_axis),
