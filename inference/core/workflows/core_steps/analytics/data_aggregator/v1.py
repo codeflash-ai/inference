@@ -573,11 +573,11 @@ def ensure_states_initialised(
 ) -> Dict[str, AggregationState]:
     for data_name in data_names:
         for mode in aggregation_mode.get(data_name, []):
-            state_key = generate_state_key(field_name=data_name, aggregation_mode=mode)
+            state_key = f"{data_name}_{mode}"
             if state_key in aggregation_cache:
                 continue
             state = STATE_INITIALIZERS[mode]()
-            aggregation_cache[f"{data_name}_{mode}"] = state
+            aggregation_cache[state_key] = state
     return aggregation_cache
 
 
