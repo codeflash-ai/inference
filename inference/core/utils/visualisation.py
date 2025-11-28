@@ -34,9 +34,8 @@ def draw_detection_predictions(
 ) -> bytes:
     image = load_image_rgb(inference_request.image)
     for box in inference_response.predictions:
-        color = tuple(
-            int(colors.get(box.class_name, "#4892EA")[i : i + 2], 16) for i in (1, 3, 5)
-        )
+        color_hex = colors.get(box.class_name, "#4892EA")
+        color = tuple(int(color_hex[i : i + 2], 16) for i in (1, 3, 5))
         image = draw_bbox(
             image=image,
             box=box,
@@ -63,7 +62,8 @@ def draw_detection_predictions(
                 box=box,
                 color=color,
             )
-    image_bgr = image[:, :, ::-1]
+    # Use cv2.cvtColor which is faster than slicing
+    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     return encode_image_to_jpeg_bytes(image=image_bgr)
 
 
@@ -109,7 +109,8 @@ def draw_keypoints(
 ) -> None:
     for keypoint in keypoints:
         center_coordinates = (round(keypoint.x), round(keypoint.y))
-        image = cv2.circle(
+        # cv2.circle creates and returns a modified image, but original code does not use the result
+        cv2.circle(
             image,
             center_coordinates,
             thickness,
@@ -150,8 +151,10 @@ def draw_labels(
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    x2 = int(box.x + hw)
+    y1 = int(box.y - hh)
+    y2 = int(box.y + hh)
     return (x1, y1), (x2, y2)
