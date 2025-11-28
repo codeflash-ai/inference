@@ -209,9 +209,7 @@ def predictions_incompatible_with_dataset(
     predictions are partially compatible (for instance - for key-points detection we may register bboxes
     from object detection and manually provide key-points annotations)
     """
-    model_is_classifier = CLASSIFICATION_TASK in model_type
-    dataset_is_of_type_classification = CLASSIFICATION_TASK in dataset_type
-    return model_is_classifier != dataset_is_of_type_classification
+    return (CLASSIFICATION_TASK in model_type) != (CLASSIFICATION_TASK in dataset_type)
 
 
 def safe_get_roboflow_active_learning_configuration(
