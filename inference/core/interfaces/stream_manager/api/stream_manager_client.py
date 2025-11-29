@@ -232,9 +232,12 @@ async def send_command(
         data = await receive_message(
             reader, header_size=header_size, buffer_size=buffer_size, timeout=timeout
         )
+        # Close connection concurrently with JSON decoding
+        close_task = asyncio.create_task(writer.wait_closed())
         writer.close()
-        await writer.wait_closed()
-        return json.loads(data)
+        result = json.loads(data)
+        await close_task
+        return result
     except JSONDecodeError as error:
         raise MalformedPayloadError(
             private_message=f"Could not decode response. Cause: {error}",
