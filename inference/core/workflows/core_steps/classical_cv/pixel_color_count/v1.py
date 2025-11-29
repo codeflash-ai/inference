@@ -116,12 +116,20 @@ def count_specific_color_pixels(
         int: Number of pixels that match the target color.
     """
     target_color_bgr = convert_color_to_bgr_tuple(color=target_color)
-    lower_bound = np.array(target_color_bgr) - tolerance
-    upper_bound = np.array(target_color_bgr) + tolerance
 
-    # Use vectorized comparison to directly create a mask and count non-zero elements
+    # Use a preallocated uint8 array for bounds to avoid dtype upcasting and extra copies
+    dtype = image.dtype
+    lower_bound = np.empty(3, dtype=dtype)
+    upper_bound = np.empty(3, dtype=dtype)
+    for i, c in enumerate(target_color_bgr):
+        v_low = c - tolerance
+        v_up = c + tolerance
+        # Clamp to 0..255 to avoid underflow/overflow for uint8 images
+        lower_bound[i] = 0 if v_low < 0 else (255 if v_low > 255 else v_low)
+        upper_bound[i] = 0 if v_up < 0 else (255 if v_up > 255 else v_up)
+
+    # Avoid unnecessary np.array creations; use the preallocated bounds
     mask = cv2.inRange(image, lower_bound, upper_bound)
-
     return int(cv2.countNonZero(mask))
 
 
