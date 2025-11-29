@@ -143,7 +143,7 @@ def calculate_brenner_measure(
     )
 
     # Calculate final focus measure
-    focus_measure = np.max((horizontal_diff, vertical_diff), axis=0) ** 2
+    focus_measure = np.maximum(horizontal_diff, vertical_diff) ** 2
 
     # Convert focus measure matrix to 8-bit for visualization
     focus_measure_image = ((focus_measure / focus_measure.max()) * 255).astype(np.uint8)
