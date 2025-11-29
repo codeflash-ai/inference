@@ -125,8 +125,12 @@ class DominantColorBlockV1(WorkflowBlock):
         ]
 
         for _ in range(max_iterations):
-            # Assign pixels to nearest centroid
-            distances = np.sqrt(((pixels[:, np.newaxis] - centroids) ** 2).sum(axis=2))
+            # Compute squared distances for assignment
+            pixels_sq = np.einsum("ij,ij->i", pixels, pixels)[:, np.newaxis]
+            centroids_sq = np.einsum("ij,ij->i", centroids, centroids)[np.newaxis, :]
+            cross = np.dot(pixels, centroids.T)
+
+            distances = pixels_sq - 2 * cross + centroids_sq
             labels = np.argmin(distances, axis=1)
 
             # Update centroids
@@ -147,7 +151,7 @@ class DominantColorBlockV1(WorkflowBlock):
 
         # Get the colors and their counts
         colors = centroids
-        _, counts = np.unique(labels, return_counts=True)
+        counts = np.bincount(labels, minlength=color_clusters)
 
         # Find the most dominant color
         dominant_color = colors[np.argmax(counts)]
