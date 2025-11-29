@@ -358,38 +358,37 @@ def get_roboflow_model_data(
     if api_data is not None:
         logger.debug(f"Loaded model data from cache with key: {api_data_cache_key}.")
         return api_data
-    else:
-        params = [
-            ("nocache", "true"),
-            ("device", device_id),
-            ("dynamic", "true"),
-        ]
-        if api_key is not None:
-            params.append(("api_key", api_key))
+    params = [
+        ("nocache", "true"),
+        ("device", device_id),
+        ("dynamic", "true"),
+    ]
+    if api_key is not None:
+        params.append(("api_key", api_key))
 
-        if (
-            INTERNAL_WEIGHTS_URL_SUFFIX == "serverless"
-            and countinference is False
-            and service_secret == ROBOFLOW_SERVICE_SECRET
-        ):
-            params.append(("countinference", str(countinference).lower()))
-            params.append(("service_secret", service_secret))
+    if (
+        INTERNAL_WEIGHTS_URL_SUFFIX == "serverless"
+        and countinference is False
+        and service_secret == ROBOFLOW_SERVICE_SECRET
+    ):
+        params.append(("countinference", str(countinference).lower()))
+        params.append(("service_secret", service_secret))
 
-        api_base_url = urllib.parse.urljoin(API_BASE_URL, INTERNAL_WEIGHTS_URL_SUFFIX)
-        api_url = _add_params_to_url(
-            url=f"{api_base_url}/{endpoint_type.value}/{model_id}",
-            params=params,
-        )
-        api_data = _get_from_url(url=api_url, verify_content_length=True)
-        cache.set(
-            api_data_cache_key,
-            api_data,
-            expire=10,
-        )
-        logger.debug(
-            f"Loaded model data from Roboflow API and saved to cache with key: {api_data_cache_key}."
-        )
-        return api_data
+    api_base_url = urllib.parse.urljoin(API_BASE_URL, INTERNAL_WEIGHTS_URL_SUFFIX)
+    api_url = _add_params_to_url(
+        url=f"{api_base_url}/{endpoint_type.value}/{model_id}",
+        params=params,
+    )
+    api_data = _get_from_url(url=api_url, verify_content_length=True)
+    cache.set(
+        api_data_cache_key,
+        api_data,
+        expire=10,
+    )
+    logger.debug(
+        f"Loaded model data from Roboflow API and saved to cache with key: {api_data_cache_key}."
+    )
+    return api_data
 
 
 @wrap_roboflow_api_errors()
@@ -845,7 +844,6 @@ def _get_from_url(
             timeout=ROBOFLOW_API_REQUEST_TIMEOUT,
             verify=ROBOFLOW_API_VERIFY_SSL,
         )
-
     except (ConnectionError, Timeout, requests.exceptions.ConnectionError) as error:
         if RETRY_CONNECTION_ERRORS_TO_ROBOFLOW_API:
             raise RetryRequestError(
@@ -861,11 +859,14 @@ def _get_from_url(
 
     if MD5_VERIFICATION_ENABLED and "x-goog-hash" in response.headers:
         x_goog_hash = response.headers["x-goog-hash"]
-        md5_part = None
-        for part in x_goog_hash.split(","):
-            if part.strip().startswith("md5="):
-                md5_part = part.strip()[4:]
-                break
+        md5_part = next(
+            (
+                part.strip()[4:]
+                for part in x_goog_hash.split(",")
+                if part.strip().startswith("md5=")
+            ),
+            None,
+        )
         if md5_part is not None:
             md5_from_header = base64.b64decode(md5_part)
             if md5_from_header != hashlib.md5(response.content).digest():
@@ -874,8 +875,8 @@ def _get_from_url(
                 )
 
     if verify_content_length:
-        content_length = str(response.headers.get("Content-Length"))
-        if not content_length.isnumeric():
+        content_length = response.headers.get("Content-Length")
+        if not (content_length and str(content_length).isnumeric()):
             raise RoboflowAPIUnsuccessfulRequestError(
                 "Content-Length header is not numeric"
             )
@@ -894,12 +895,11 @@ def _get_from_url(
 
 
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
-    if len(params) == 0:
+    if not params:
         return url
-    params_chunks = [
+    parameters_string = "&".join(
         f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
-    parameters_string = "&".join(params_chunks)
+    )
     return f"{url}?{parameters_string}"
 
 

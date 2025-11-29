@@ -65,11 +65,12 @@ class MemoryCache(BaseCache):
         Returns:
             str: The value associated with the key, or None if the key does not exist or is expired.
         """
-        if key in self.expires:
-            if self.expires[key] < time.time():
-                del self.cache[key]
-                del self.expires[key]
-                return None
+        expiry = self.expires.get(key)
+        now = time.time()
+        if expiry is not None and expiry < now:
+            self.cache.pop(key, None)
+            self.expires.pop(key, None)
+            return None
         return self.cache.get(key)
 
     def set(self, key: str, value: str, expire: float = None):
@@ -82,7 +83,7 @@ class MemoryCache(BaseCache):
             expire (float, optional): The time, in seconds, after which the key will expire. Defaults to None.
         """
         self.cache[key] = value
-        if expire:
+        if expire is not None:
             self.expires[key] = expire + time.time()
 
     def zadd(self, key: str, value: Any, score: float, expire: float = None):
