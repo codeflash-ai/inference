@@ -13,4 +13,5 @@ def generate_start_timestamp_for_this_week() -> str:
 
 
 def generate_start_timestamp_for_this_month() -> str:
-    return datetime.today().replace(day=1).strftime(TIMESTAMP_FORMAT)
+    today = datetime.today()
+    return f"{today.year}_{today.month:02d}_01"
