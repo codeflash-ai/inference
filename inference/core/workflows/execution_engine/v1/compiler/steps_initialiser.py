@@ -88,16 +88,43 @@ def retrieve_init_parameters_values(
     explicit_init_parameters: Dict[str, Union[Any, Callable[[None], Any]]],
     initializers: Dict[str, Union[Any, Callable[[None], Any]]],
 ) -> Dict[str, Any]:
-    return {
-        block_init_parameter: retrieve_init_parameter_values(
-            block_name=block_name,
-            block_init_parameter=block_init_parameter,
-            block_source=block_source,
-            explicit_init_parameters=explicit_init_parameters,
-            initializers=initializers,
+    # Inline loop for higher-performance batch construction with precomputed identifiers
+    full_prefix = f"{block_source}."
+    explicit = explicit_init_parameters
+    initial = initializers
+    get = explicit.get
+    iget = initial.get
+
+    result = {}
+    for param in block_init_parameters:
+        # Fast-path: full parameter name in explicit
+        full_param = f"{full_prefix}{param}"
+        val = get(full_param, None)
+        if val is not None or full_param in explicit:
+            result[param] = val
+            continue
+
+        val = iget(full_param, None)
+        if val is not None or full_param in initial:
+            result[param] = _call_if_callable(val)
+            continue
+
+        val = get(param, None)
+        if val is not None or param in explicit:
+            result[param] = val
+            continue
+
+        val = iget(param, None)
+        if val is not None or param in initial:
+            result[param] = _call_if_callable(val)
+            continue
+
+        raise BlockInitParameterNotProvidedError(
+            public_message=f"Could not resolve init parameter {param} to initialise "
+            f"step `{block_name}` from plugin: {block_source}.",
+            context="workflow_compilation | steps_initialisation",
         )
-        for block_init_parameter in block_init_parameters
-    }
+    return result
 
 
 def retrieve_init_parameter_values(
@@ -124,6 +151,13 @@ def retrieve_init_parameter_values(
 
 
 def call_if_callable(value: Union[Any, Callable[[None], Any]]) -> Any:
+    if callable(value):
+        return value()
+    return value
+
+
+# Inline call_if_callable for performance (avoid extra function dispatch)
+def _call_if_callable(value: Union[Any, Callable[[None], Any]]) -> Any:
     if callable(value):
         return value()
     return value
