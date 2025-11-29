@@ -36,6 +36,16 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_SHORT_PROMPT = (
+    "You act as image caption model. Your task is to provide description of the image. "
+    "Caption should be short."
+)
+
+_EXTENSIVE_PROMPT = (
+    "You act as image caption model. Your task is to provide description of the image. "
+    "Caption should be extensive."
+)
+
 SUPPORTED_TASK_TYPES_LIST = [
     "unconstrained",
     "ocr",
@@ -570,13 +580,7 @@ def prepare_caption_prompt(
     short_description: bool,
     **kwargs,
 ) -> Tuple[Optional[str], List[dict]]:
-    caption_detail_level = "Caption should be short."
-    if not short_description:
-        caption_detail_level = "Caption should be extensive."
-    system_prompt = (
-        f"You act as image caption model. Your task is to provide description of the image. "
-        f"{caption_detail_level}"
-    )
+    system_prompt = _SHORT_PROMPT if short_description else _EXTENSIVE_PROMPT
     messages = [
         {
             "role": "user",
