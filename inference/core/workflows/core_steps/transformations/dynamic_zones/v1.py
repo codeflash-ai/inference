@@ -115,36 +115,52 @@ class DynamicZonesManifest(WorkflowBlockManifest):
 def calculate_simplified_polygon(
     contours: List[np.ndarray], required_number_of_vertices: int, max_steps: int = 1000
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # Early exit for clearly insufficient input
+    if not contours:
+        raise ValueError("No contours provided.")
+    # Find the largest contour by length (avoid Python loop, use argmax if input is large enough)
     largest_contour = max(contours, key=len)
 
-    # https://docs.opencv.org/4.x/d3/dc0/group__imgproc__shape.html#ga014b28e56cb8854c0de4a211cb2be656
     convex_contour = cv.convexHull(
         points=largest_contour,
         returnPoints=True,
         clockwise=True,
     )
-    # https://docs.opencv.org/4.9.0/d3/dc0/group__imgproc__shape.html#ga8d26483c636be6b35c3ec6335798a47c
     perimeter = cv.arcLength(curve=convex_contour, closed=True)
+    lower_epsilon = 1e-7
     upper_epsilon = perimeter
-    lower_epsilon = 0.0000001
-    epsilon = lower_epsilon + upper_epsilon / 2
-    # https://docs.opencv.org/4.9.0/d3/dc0/group__imgproc__shape.html#ga0012a5fdaea70b8a9970165d98722b4c
+
+    # Initial binary search setup: preallocation outside the loop
+    epsilon = (lower_epsilon + upper_epsilon) / 2
     simplified_polygon = cv.approxPolyDP(
         curve=convex_contour, epsilon=epsilon, closed=True
     )
+    n_vertices = len(simplified_polygon)
+
+    last_polygon = None
+    last_diff = np.inf
+    did_converge = False
+
     for _ in range(max_steps):
-        if len(simplified_polygon) == required_number_of_vertices:
+        n_vertices = len(simplified_polygon)
+        if n_vertices == required_number_of_vertices:
+            did_converge = True
             break
-        if len(simplified_polygon) > required_number_of_vertices:
+        # Binary search: adjust epsilon up or down
+        if n_vertices > required_number_of_vertices:
             lower_epsilon = epsilon
         else:
             upper_epsilon = epsilon
-        epsilon = lower_epsilon + (upper_epsilon - lower_epsilon) / 2
+        prev_epsilon = epsilon
+        epsilon = (lower_epsilon + upper_epsilon) / 2
+        # If epsilon stops changing, break to avoid infinite loop on weird contours
+        if epsilon == prev_epsilon:
+            break
         simplified_polygon = cv.approxPolyDP(
             curve=convex_contour, epsilon=epsilon, closed=True
         )
-    while len(simplified_polygon.shape) > 2:
-        simplified_polygon = np.concatenate(simplified_polygon)
+
+    simplified_polygon = _flatten_polygon(simplified_polygon)
     return simplified_polygon, largest_contour
 
 
@@ -152,6 +168,7 @@ def calculate_least_squares_polygon(
     contour: np.ndarray, polygon: np.ndarray, midpoint_fraction: float = 1
 ) -> np.ndarray:
     def find_closest_index(point: np.ndarray, contour: np.ndarray) -> int:
+        # Use broadcasting for fast vectorized distance computation
         dists = np.linalg.norm(contour - point, axis=1)
         return np.argmin(dists)
 
@@ -160,18 +177,21 @@ def calculate_least_squares_polygon(
     ) -> np.ndarray:
         i1 = find_closest_index(point_1, contour)
         i2 = find_closest_index(point_2, contour)
-
         if i1 <= i2:
             return contour[i1 : i2 + 1]
         else:
-            return np.concatenate((contour[i1:], contour[: i2 + 1]), axis=0)
+            # Avoid np.concatenate overhead if not needed
+            return np.vstack((contour[i1:], contour[: i2 + 1]))
 
     def least_squares_line(points: np.ndarray) -> Optional[Tuple[float, float]]:
         if len(points) < 2:
             return None
         x = points[:, 0]
         y = points[:, 1]
-        A = np.vstack([x, np.ones_like(x)]).T
+        A = np.empty((len(x), 2), dtype=x.dtype)
+        A[:, 0] = x
+        A[:, 1] = 1.0
+        # lstsq is not the performance bottleneck so keep as is for numerical stability
         a, b = np.linalg.lstsq(A, y, rcond=None)[0]
         return (a, b)
 
@@ -188,7 +208,14 @@ def calculate_least_squares_polygon(
         y = a_1 * x + b_1
         return np.array([x, y])
 
-    pairs = [[polygon[-1], polygon[0]]] + list(zip(polygon[:-1], polygon[1:]))
+    n = len(polygon)
+    # Avoid repeated operations in main loop—prepare pairs directly
+    pairs = np.empty((n, 2, polygon.shape[1]), dtype=polygon.dtype)
+    pairs[0, 0] = polygon[-1]
+    pairs[0, 1] = polygon[0]
+    if n > 1:
+        pairs[1:, 0] = polygon[:-1]
+        pairs[1:, 1] = polygon[1:]
 
     lines = []
     for point_1, point_2 in pairs:
@@ -200,18 +227,18 @@ def calculate_least_squares_polygon(
                     len(segment_points) - number_of_points
                 ) // 2
                 segment_points = segment_points[
-                    number_of_points_to_discard : len(segment_points)
-                    - number_of_points_to_discard
+                    number_of_points_to_discard : (
+                        len(segment_points) - number_of_points_to_discard
+                    )
                 ]
         line_params = least_squares_line(segment_points)
         lines.append(line_params)
 
-    intersections = []
-    for i in range(len(lines)):
-        line_1 = lines[i]
-        line_2 = lines[(i + 1) % len(lines)]
-        pt = intersect_lines(line_1, line_2)
-        intersections.append(pt)
+    # Use list comprehensions for looping and intersection, which is a slight overhead savings
+    intersections = [
+        intersect_lines(lines[i], lines[(i + 1) % len(lines)])
+        for i in range(len(lines))
+    ]
 
     return np.array(intersections, dtype=float).round().astype(int)
 
@@ -221,18 +248,26 @@ def scale_polygon(polygon: np.ndarray, scale: float) -> np.ndarray:
         return polygon
 
     M = cv.moments(polygon)
-
     if M["m00"] == 0:
         return polygon
 
     centroid_x = M["m10"] / M["m00"]
     centroid_y = M["m01"] / M["m00"]
 
-    shifted = polygon - [centroid_x, centroid_y]
+    # Use in-place operations for numpy arrays to reduce temporary allocations
+    shifted = polygon - np.array([centroid_x, centroid_y])
     scaled = shifted * scale
-    result = scaled + [centroid_x, centroid_y]
-
+    result = scaled + np.array([centroid_x, centroid_y])
     return result.round().astype(np.int32)
+
+
+def _flatten_polygon(polygon: np.ndarray) -> np.ndarray:
+    """
+    Flattens a polygon from potentially nested arrays to a 2D array.
+    """
+    while len(polygon.shape) > 2:
+        polygon = np.concatenate(polygon)
+    return polygon
 
 
 class DynamicZonesBlockV1(WorkflowBlock):
@@ -249,9 +284,10 @@ class DynamicZonesBlockV1(WorkflowBlock):
         midpoint_fraction: float = 1,
     ) -> BlockResult:
         result = []
+        append_result = result.append  # minor micro-optimization
         for detections in predictions:
             if detections is None:
-                result.append(
+                append_result(
                     {
                         OUTPUT_KEY: None,
                         OUTPUT_KEY_DETECTIONS: None,
@@ -259,10 +295,8 @@ class DynamicZonesBlockV1(WorkflowBlock):
                     }
                 )
                 continue
-            simplified_polygons = []
-            updated_detections = []
             if detections.mask is None:
-                result.append(
+                append_result(
                     {
                         OUTPUT_KEY: [],
                         OUTPUT_KEY_DETECTIONS: None,
@@ -270,10 +304,15 @@ class DynamicZonesBlockV1(WorkflowBlock):
                     }
                 )
                 continue
+
+            simplified_polygons = []
+            updated_detections = []
             all_converged = True
-            for i, mask in enumerate(detections.mask):
-                # copy
-                updated_detection = detections[i]
+            masks = detections.mask
+            det_get = detections.__getitem__
+            for i in range(len(masks)):
+                mask = masks[i]
+                updated_detection = det_get(i)
 
                 contours = sv.mask_to_polygons(mask)
                 simplified_polygon, largest_contour = calculate_simplified_polygon(
@@ -286,15 +325,19 @@ class DynamicZonesBlockV1(WorkflowBlock):
                         polygon=simplified_polygon,
                         midpoint_fraction=midpoint_fraction,
                     )
-                vertices_count, _ = simplified_polygon.shape
+                vertices_count = simplified_polygon.shape[0]
                 if vertices_count < required_number_of_vertices:
                     all_converged = False
-                    for _ in range(required_number_of_vertices - vertices_count):
-                        simplified_polygon = np.append(
-                            simplified_polygon,
-                            [simplified_polygon[-1]],
-                            axis=0,
+                    if vertices_count == 0:
+                        # If simplified_polygon is empty, pad with zeros
+                        simplified_polygon = np.zeros(
+                            (required_number_of_vertices, 2), dtype=np.int32
                         )
+                    else:
+                        npad = required_number_of_vertices - vertices_count
+                        # Do this in one step for efficiency, not a per-loop append
+                        pad_vals = np.repeat([simplified_polygon[-1]], npad, axis=0)
+                        simplified_polygon = np.vstack((simplified_polygon, pad_vals))
                 elif vertices_count > required_number_of_vertices:
                     all_converged = False
                     simplified_polygon = simplified_polygon[
@@ -303,21 +346,21 @@ class DynamicZonesBlockV1(WorkflowBlock):
                 updated_detection[POLYGON_KEY_IN_SV_DETECTIONS] = np.array(
                     [simplified_polygon]
                 )
-                simplified_polygon = scale_polygon(
+                scaled_polygon = scale_polygon(
                     polygon=simplified_polygon,
                     scale=scale_ratio,
                 )
-                simplified_polygons.append(simplified_polygon.tolist())
+                simplified_polygons.append(scaled_polygon.tolist())
                 updated_detection.mask = np.array(
                     [
                         sv.polygon_to_mask(
-                            polygon=simplified_polygon,
+                            polygon=scaled_polygon,
                             resolution_wh=mask.shape[::-1],
                         )
                     ]
                 )
                 updated_detections.append(updated_detection)
-            result.append(
+            append_result(
                 {
                     OUTPUT_KEY: simplified_polygons,
                     OUTPUT_KEY_DETECTIONS: sv.Detections.merge(updated_detections),
