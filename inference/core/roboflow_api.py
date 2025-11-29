@@ -71,6 +71,8 @@ from inference.core.utils.requests import (
 )
 from inference.core.utils.url_utils import wrap_url
 
+_WORKFLOW_PREFIX_ABSPATH = os.path.abspath(os.path.join(MODEL_CACHE_DIR, "workflow"))
+
 MODEL_TYPE_DEFAULTS = {
     "object-detection": "yolov5v2s",
     "instance-segmentation": "yolact",
@@ -610,15 +612,12 @@ def get_workflow_cache_file(
         if api_key is not None
         else "None"
     )
-    prefix = os.path.abspath(os.path.join(MODEL_CACHE_DIR, "workflow"))
-    result = os.path.abspath(
-        os.path.join(
-            prefix,
-            sanitized_workspace_id,
-            f"{sanitized_workflow_id}_{api_key_hash}.json",
-        )
+    result = os.path.join(
+        _WORKFLOW_PREFIX_ABSPATH,
+        sanitized_workspace_id,
+        f"{sanitized_workflow_id}_{api_key_hash}.json",
     )
-    if not result.startswith(prefix):
+    if not result.startswith(_WORKFLOW_PREFIX_ABSPATH):
         raise ValueError(
             "Detected attempt to save workflow definition in insecure location"
         )
