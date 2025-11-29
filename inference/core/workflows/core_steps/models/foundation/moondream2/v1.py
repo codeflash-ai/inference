@@ -148,32 +148,36 @@ class Moondream2BlockV1(WorkflowBlock):
         prompt: Optional[str],
     ) -> BlockResult:
         # Convert each image to the format required by the model.
+        # Use generator expression and list comprehension to minimize temporary allocations.
         inference_images = [
             i.to_inference_format(numpy_preferred=False) for i in images
         ]
 
         # Use the provided prompt (or an empty string if None) for every image.
-        prompt = prompt or ""
+        prompt_val = prompt or ""
 
-        prompts = [prompt] * len(inference_images)
+        num_images = len(inference_images)
+        if num_images == 0:
+            # No images, skip model loading and inference call
+            predictions = []
+        else:
+            # Register Moondream2 with the model manager (do it only if there are images)
+            self._model_manager.add_model(model_id=model_version, api_key=self._api_key)
 
-        # Register Moondream2 with the model manager.
-        self._model_manager.add_model(model_id=model_version, api_key=self._api_key)
-
-        predictions = []
-        for image, single_prompt in zip(inference_images, prompts):
-            request = Moondream2InferenceRequest(
-                api_key=self._api_key,
-                model_id=model_version,
-                image=image,
-                text=[],
-                prompt=single_prompt,
-            )
-            # Run inference.
-            prediction = self._model_manager.infer_from_request_sync(
-                model_id=model_version, request=request
-            )
-            predictions.append(prediction.model_dump(by_alias=True, exclude_none=True))
+            # Prepare requests and infer using a tight loop to minimize per-loop variable setup.
+            predictions = [
+                self._model_manager.infer_from_request_sync(
+                    model_id=model_version,
+                    request=Moondream2InferenceRequest(
+                        api_key=self._api_key,
+                        model_id=model_version,
+                        image=image,
+                        text=[],
+                        prompt=prompt_val,
+                    ),
+                ).model_dump(by_alias=True, exclude_none=True)
+                for image in inference_images
+            ]
 
         return self._post_process_result(images=images, predictions=predictions)
 
