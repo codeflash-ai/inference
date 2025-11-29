@@ -190,14 +190,26 @@ class StreamManagerClient:
             request_id=response.get(REQUEST_ID_KEY),
             pipeline_id=response.get(PIPELINE_ID_KEY),
         )
+
+        # Optimize: Use an async comprehension and gather for faster concurrent validation of all frames_metadata
+        frames_metadata_raw = response[RESPONSE_KEY]["frames_metadata"]
+        # Use asyncio if there are >1 items, otherwise keep as sync for almost no overhead
+        if len(frames_metadata_raw) > 1:
+            import asyncio
+
+            frames_metadata = await asyncio.gather(
+                *(FrameMetadata.model_validate(f) for f in frames_metadata_raw)
+            )
+        else:
+            frames_metadata = [
+                FrameMetadata.model_validate(f) for f in frames_metadata_raw
+            ]
+
         return ConsumePipelineResponse(
             status=status,
             context=context,
             outputs=response[RESPONSE_KEY]["outputs"],
-            frames_metadata=[
-                FrameMetadata.model_validate(f)
-                for f in response[RESPONSE_KEY]["frames_metadata"]
-            ],
+            frames_metadata=frames_metadata,
         )
 
     async def _handle_command(self, command: dict) -> dict:
