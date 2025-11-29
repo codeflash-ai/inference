@@ -140,13 +140,16 @@ class ExecutionDataManager:
         )
         if step_node.output_dimensionality == 1:
             # we only allow +1 dim increase for now, so it is fine to only handle this case
-            indices = [(i,) for i in range(len(output))]
+            output_len = len(output)
+            indices = [(i,) for i in range(output_len)]
             self._dynamic_batches_manager.register_element_indices_for_lineage(
                 lineage=step_node.data_lineage,
                 indices=indices,
             )
             if step_node.child_execution_branches:
-                if not all(isinstance(element, FlowControl) for element in output):
+                if not output_len or not all(
+                    isinstance(element, FlowControl) for element in output
+                ):
                     raise ExecutionEngineRuntimeError(
                         public_message=f"Error in execution engine. Flow control step {step_name} "
                         f"expected to only produce FlowControl objects. This is most likely bug. "

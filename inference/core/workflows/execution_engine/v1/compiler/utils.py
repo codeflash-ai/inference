@@ -82,7 +82,7 @@ def get_nodes_of_specific_category(
 
 
 def get_last_chunk_of_selector(selector: str) -> str:
-    return selector.split(".")[-1]
+    return selector.rsplit(".", 1)[-1]
 
 
 def is_flow_control_step(execution_graph: DiGraph, node: str) -> bool:
