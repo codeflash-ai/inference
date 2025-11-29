@@ -661,13 +661,17 @@ def clip_keypoints_coordinates(
     keypoints: np.ndarray,
     origin_shape: Tuple[int, int],
 ) -> np.ndarray:
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] = np.round(
-            np.clip(keypoints[:, keypoint_id * 3], a_min=0, a_max=origin_shape[1])
-        )
-        keypoints[:, keypoint_id * 3 + 1] = np.round(
-            np.clip(keypoints[:, keypoint_id * 3 + 1], a_min=0, a_max=origin_shape[0])
-        )
+    # keypoints shape: (N, 3*K), where K is the number of keypoints
+    n_keypoint = keypoints.shape[1] // 3
+
+    # Select all x coordinates (at indices 0, 3, 6, ...) and y coordinates (at 1, 4, 7, ...)
+    xs = keypoints[:, 0::3]
+    ys = keypoints[:, 1::3]
+
+    # Vectorized clip and round
+    np.round(np.clip(xs, a_min=0, a_max=origin_shape[1]), out=xs)
+    np.round(np.clip(ys, a_min=0, a_max=origin_shape[0]), out=ys)
+
     return keypoints
 
 
