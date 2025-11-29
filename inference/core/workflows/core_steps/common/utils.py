@@ -214,22 +214,18 @@ def attach_parent_coordinates_to_detections(
     dimensions_key: str,
 ) -> sv.Detections:
     parent_coordinates_system = parent_metadata.origin_coordinates
-    detections[parent_id_key] = np.array([parent_metadata.parent_id] * len(detections))
-    coordinates = np.array(
-        [[parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y]]
-        * len(detections)
+    detections[parent_id_key] = np.full(len(detections), parent_metadata.parent_id)
+    detections[coordinates_key] = np.tile(
+        [parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y],
+        (len(detections), 1),
     )
-    detections[coordinates_key] = coordinates
-    dimensions = np.array(
+    detections[dimensions_key] = np.tile(
         [
-            [
-                parent_coordinates_system.origin_height,
-                parent_coordinates_system.origin_width,
-            ]
-        ]
-        * len(detections)
+            parent_coordinates_system.origin_height,
+            parent_coordinates_system.origin_width,
+        ],
+        (len(detections), 1),
     )
-    detections[dimensions_key] = dimensions
     return detections
 
 
@@ -262,16 +258,14 @@ def sv_detections_to_root_coordinates(
             detections=detections,
             scale=1 / scale,
         )
-    detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.array(
-        [1.0] * len(detections_copy)
-    )
-    detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array(
-        [1.0] * len(detections_copy)
+    detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.full(len(detections_copy), 1.0)
+    detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.full(
+        len(detections_copy), 1.0
     )
     origin_height = detections_copy[ROOT_PARENT_DIMENSIONS_KEY][0][0]
     origin_width = detections_copy[ROOT_PARENT_DIMENSIONS_KEY][0][1]
-    detections_copy[IMAGE_DIMENSIONS_KEY] = np.array(
-        [[origin_height, origin_width]] * len(detections_copy)
+    detections_copy[IMAGE_DIMENSIONS_KEY] = np.tile(
+        [origin_height, origin_width], (len(detections_copy), 1)
     )
     root_parent_id = detections_copy[ROOT_PARENT_ID_KEY][0]
     shift_x, shift_y = detections_copy[ROOT_PARENT_COORDINATES_KEY][0]
@@ -282,8 +276,8 @@ def sv_detections_to_root_coordinates(
                 keypoints += [shift_x, shift_y]
     if detections_copy.mask is not None:
         origin_mask_base = np.full((origin_height, origin_width), False)
-        new_anchored_masks = np.array(
-            [origin_mask_base.copy() for _ in detections_copy]
+        new_anchored_masks = np.empty(
+            (len(detections_copy), origin_height, origin_width), dtype=bool
         )
         for anchored_mask, original_mask in zip(
             new_anchored_masks, detections_copy.mask
@@ -291,6 +285,7 @@ def sv_detections_to_root_coordinates(
             mask_h, mask_w = original_mask.shape
             # TODO: instead of shifting mask we could store contours in data instead of storing mask (even if calculated)
             #       it would be faster to shift contours but at expense of having to remember to generate mask from contour when it's needed
+            anchored_mask[:] = origin_mask_base
             anchored_mask[shift_y : shift_y + mask_h, shift_x : shift_x + mask_w] = (
                 original_mask
             )
@@ -390,7 +385,12 @@ def scale_sv_detections(
                         polygon=scaled_polygon, resolution_wh=scaled_mask_size_wh
                     )
                 )
-            scaled_detection_mask = np.sum(polygon_masks, axis=0) > 0
+            if polygon_masks:
+                scaled_detection_mask = np.any(polygon_masks, axis=0)
+            else:
+                scaled_detection_mask = np.zeros(
+                    (scaled_mask_size_wh[1], scaled_mask_size_wh[0]), dtype=bool
+                )
             scaled_masks.append(scaled_detection_mask)
         detections_copy.mask = np.array(scaled_masks)
     if POLYGON_KEY_IN_SV_DETECTIONS in detections_copy.data:
@@ -404,16 +404,16 @@ def scale_sv_detections(
             detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] * scale
         )
     else:
-        detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.array(
-            [scale] * len(detections_copy)
+        detections_copy[SCALING_RELATIVE_TO_PARENT_KEY] = np.full(
+            len(detections_copy), scale
         )
     if SCALING_RELATIVE_TO_ROOT_PARENT_KEY in detections_copy.data:
         detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = (
             detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] * scale
         )
     else:
-        detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array(
-            [scale] * len(detections_copy)
+        detections_copy[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.full(
+            len(detections_copy), scale
         )
     return detections_copy
 
