@@ -131,31 +131,26 @@ def add_inference_keypoints_to_sv_detections(
             f"Detected missmatch in number of detections in sv.Detections instance ({len(detections)}) "
             f"and `inference` predictions ({len(inference_prediction)}) while attempting to add keypoints metadata."
         )
+    # Use lists of lists and vectorize in bulk at the end
     keypoints_class_names = []
     keypoints_class_ids = []
     keypoints_confidences = []
     keypoints_xy = []
+
     for inference_detection in inference_prediction:
         keypoints = inference_detection.get(KEYPOINTS_KEY_IN_INFERENCE_RESPONSE, [])
-        keypoints_class_names.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_class_ids.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_confidences.append(
-            np.array(
-                [k[KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE] for k in keypoints],
-                dtype=np.float32,
-            )
-        )
-        keypoints_xy.append(
-            np.array([[k[X_KEY], k[Y_KEY]] for k in keypoints], dtype=np.float32)
-        )
+        # Inner loops: build lists directly
+        k_names = [k[KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
+        k_ids = [k[KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
+        k_conf = [k[KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
+        k_xy = [[k[X_KEY], k[Y_KEY]] for k in keypoints]
+
+        keypoints_class_names.append(k_names)
+        keypoints_class_ids.append(k_ids)
+        keypoints_confidences.append(np.array(k_conf, dtype=np.float32))
+        keypoints_xy.append(np.array(k_xy, dtype=np.float32))
+
+    # Bulk object-dtype numpy arrays
     detections[KEYPOINTS_CLASS_NAME_KEY_IN_SV_DETECTIONS] = np.array(
         keypoints_class_names, dtype="object"
     )
