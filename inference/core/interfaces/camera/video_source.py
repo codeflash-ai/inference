@@ -1214,13 +1214,13 @@ def decode_video_frame_to_buffer(
 
 
 def get_fps_if_tick_happens_now(fps_monitor: sv.FPSMonitor) -> float:
-    if len(fps_monitor.all_timestamps) == 0:
+    timestamps = fps_monitor.all_timestamps
+    if not timestamps:
         return 0.0
-    min_reader_timestamp = fps_monitor.all_timestamps[0]
+    min_reader_timestamp = timestamps[0]
     now = time.monotonic()
-    epsilon = 1e-8
-    reader_taken_time = (now - min_reader_timestamp) + epsilon
-    return (len(fps_monitor.all_timestamps) + 1) / reader_taken_time
+    reader_taken_time = now - min_reader_timestamp + 1e-8
+    return (len(timestamps) + 1) / reader_taken_time
 
 
 def calculate_video_file_stride(
