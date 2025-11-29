@@ -143,27 +143,32 @@ class DepthEstimationBlockV1(WorkflowBlock):
         model_version: str = "depth-anything-v2/small",
     ) -> BlockResult:
         # Convert each image to the format required by the model.
-        inference_images = [
+        # Use generator expression for memory efficiency.
+        inference_images = (
             i.to_inference_format(numpy_preferred=False) for i in images
-        ]
+        )
 
-        # Register Depth Estimation with the model manager.
-        try:
-            self._model_manager.add_model(model_id=model_version, api_key=self._api_key)
-        except Exception as e:
-            raise
+        # Register Depth Estimation with the model manager if not already loaded.
+        # Avoid redundant add_model calls.
+        if model_version not in self._model_manager:
+            try:
+                self._model_manager.add_model(
+                    model_id=model_version, api_key=self._api_key
+                )
+            except Exception as e:
+                raise
 
         predictions = []
-        for idx, image in enumerate(inference_images):
+        # Pre-bind infer_from_request_sync for slight speedup.
+        infer = self._model_manager.infer_from_request_sync
+        for image in inference_images:
             # Run inference.
             request = DepthEstimationRequest(
                 image=image,
             )
 
             try:
-                prediction = self._model_manager.infer_from_request_sync(
-                    model_id=model_version, request=request
-                )
+                prediction = infer(model_id=model_version, request=request)
                 predictions.append(prediction.response)
             except Exception as e:
                 raise
