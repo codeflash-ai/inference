@@ -343,7 +343,7 @@ class VideoSource:
         stream_reference: VideoSourceIdentifier,
         frames_buffer: Queue,
         status_update_handlers: List[Callable[[StatusUpdate], None]],
-        buffer_consumption_strategy: Optional[BufferConsumptionStrategy],
+        buffer_consumption_strategy: Optional["BufferConsumptionStrategy"],
         video_consumer: "VideoConsumer",
         video_source_properties: Optional[Dict[str, float]],
         source_id: Optional[int],
@@ -352,7 +352,8 @@ class VideoSource:
         self._video: Optional[VideoFrameProducer] = None
         self._source_properties: Optional[SourceProperties] = None
         self._frames_buffer = frames_buffer
-        self._status_update_handlers = status_update_handlers
+        # Convert status_update_handlers to tuple to avoid list overhead for read-only iteration
+        self._status_update_handlers = tuple(status_update_handlers)
         self._buffer_consumption_strategy = buffer_consumption_strategy
         self._video_consumer = video_consumer
         self._state = StreamState.NOT_STARTED
@@ -360,7 +361,9 @@ class VideoSource:
         self._frames_buffering_allowed = True
         self._stream_consumption_thread: Optional[Thread] = None
         self._state_change_lock = Lock()
-        self._video_source_properties = video_source_properties or {}
+        self._video_source_properties = (
+            video_source_properties if video_source_properties is not None else {}
+        )
         self._source_id = source_id
         self._last_frame_timestamp: int = time.time_ns()
         self._fps: Optional[float] = None
