@@ -246,7 +246,7 @@ def calculate_nesting_depth(
 ) -> int:
     remaining_depth = max_depth - current_depth
     if isinstance(zone, np.ndarray):
-        array_depth = len(zone.shape)
+        array_depth = zone.ndim
         if array_depth > remaining_depth:
             raise ValueError(
                 "While processing polygon zone detected an instance of the zone which is invalid, as "
@@ -265,20 +265,25 @@ def calculate_nesting_depth(
                 "the input is constructed by another Workflow block - raise an issue: "
                 "https://github.com/roboflow/inference/issues"
             )
-        depths = {
-            calculate_nesting_depth(
-                zone=e, max_depth=max_depth, current_depth=current_depth + 1
-            )
-            for e in zone
-        }
-        if not depths:
+        if not zone:
             return current_depth + 1
-        if len(depths) != 1:
-            raise ValueError(
-                "While processing polygon zone detected an instance of the zone which is invalid, as "
-                "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
-                "If the input is constructed by another Workflow block - raise an issue: "
-                "https://github.com/roboflow/inference/issues"
-            )
-        return min(depths)
+
+        it = iter(zone)
+        first_depth = calculate_nesting_depth(
+            zone=next(it), max_depth=max_depth, current_depth=current_depth + 1
+        )
+        for e in it:
+            if (
+                calculate_nesting_depth(
+                    zone=e, max_depth=max_depth, current_depth=current_depth + 1
+                )
+                != first_depth
+            ):
+                raise ValueError(
+                    "While processing polygon zone detected an instance of the zone which is invalid, as "
+                    "the input is nested in irregular way. If you created the `zone` input manually, verify it's correctness. "
+                    "If the input is constructed by another Workflow block - raise an issue: "
+                    "https://github.com/roboflow/inference/issues"
+                )
+        return first_depth
     return current_depth
