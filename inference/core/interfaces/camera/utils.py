@@ -119,11 +119,7 @@ class VideoSourcesManager:
         should_stop: Callable[[], bool],
         on_reconnection_error: Callable[[Optional[int], SourceConnectionError], None],
     ) -> "VideoSourcesManager":
-        return cls(
-            video_sources=video_sources,
-            should_stop=should_stop,
-            on_reconnection_error=on_reconnection_error,
-        )
+        return cls(video_sources, should_stop, on_reconnection_error)
 
     def __init__(
         self,
