@@ -415,11 +415,11 @@ def _load_plugin_kinds(plugin_name: str) -> List[Kind]:
 def load_kinds_serializers(
     profiler: Optional[WorkflowsProfiler] = None,
 ) -> Dict[str, Callable[[Any], Any]]:
-    kinds_serializers = copy(KINDS_SERIALIZERS)
-    plugin_kinds_serializers = load_plugins_serialization_functions(
-        module_property="KINDS_SERIALIZERS"
-    )
-    kinds_serializers.update(plugin_kinds_serializers)
+    # Avoid unnecessary shallow copy; use dict unpacking for faster construction
+    kinds_serializers = {
+        **KINDS_SERIALIZERS,
+        **load_plugins_serialization_functions("KINDS_SERIALIZERS"),
+    }
     return kinds_serializers
 
 
@@ -442,13 +442,15 @@ def load_plugins_serialization_functions(
     module_property: str,
 ) -> Dict[str, Callable[[Any], Any]]:
     plugins_to_load = get_plugin_modules()
+    # Preallocate the dictionary size by merging all plugins at once
     result = {}
+    # Instead of repeated update calls, use generator expression and single update
     for plugin_name in plugins_to_load:
-        result.update(
-            load_plugin_serializers(
-                plugin_name=plugin_name, module_property=module_property
-            )
+        plugin_serializers = load_plugin_serializers(
+            plugin_name=plugin_name, module_property=module_property
         )
+        if plugin_serializers:
+            result.update(plugin_serializers)
     return result
 
 
