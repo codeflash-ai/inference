@@ -166,15 +166,16 @@ def average_property_values(
 def get_not_empty_properties(
     examined_objects: Iterable, property_name: str
 ) -> List[Any]:
-    results = [
-        getattr(examined_object, property_name, None)
-        for examined_object in examined_objects
+    # Use a single-pass approach with direct filtering to reduce memory usage and runtime
+    return [
+        value
+        for obj in examined_objects
+        if (value := getattr(obj, property_name, None)) is not None
     ]
-    return [e for e in results if e is not None]
 
 
 def safe_average(values: List[float]) -> Optional[float]:
-    if len(values) == 0:
+    if not values:
         return None
     return sum(values) / len(values)
 
