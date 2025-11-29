@@ -135,12 +135,12 @@ class SmolVLM2BlockV1(WorkflowBlock):
         prompt: Optional[str],
     ) -> BlockResult:
         # Convert each image to the format required by the model.
-        inference_images = [
+        inference_images = (
             i.to_inference_format(numpy_preferred=False) for i in images
-        ]
+        )
         # Use the provided prompt (or an empty string if None) for every image.
         prompt = prompt or ""
-        prompts = [prompt] * len(inference_images)
+        prompts = (prompt,) * len(images)
 
         # Register SmolVLM2 with the model manager.
         self._model_manager.add_model(model_id=model_version, api_key=self._api_key)
@@ -159,10 +159,9 @@ class SmolVLM2BlockV1(WorkflowBlock):
             prediction = self._model_manager.infer_from_request_sync(
                 model_id=model_version, request=request
             )
-            response_text = prediction.response
             predictions.append(
                 {
-                    "parsed_output": response_text,
+                    "parsed_output": prediction.response,
                 }
             )
         return predictions
