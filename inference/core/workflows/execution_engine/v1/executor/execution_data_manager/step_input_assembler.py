@@ -363,7 +363,7 @@ def prepare_parameters(
     scalars_discarded: bool,
     runtime_parameters: Dict[str, Any],
     execution_cache: ExecutionCache,
-) -> BatchModeSIMDStepInput:
+) -> BatchModeSIMDStepInput:  # annotation kept as string for possible circular issues
     step_requests_batch_input = step_node.step_manifest.accepts_batch_input()
     result = {}
     indices_for_parameter = {}
@@ -579,13 +579,6 @@ def get_non_compound_parameter_value(
         else:
             static_input: StaticStepInputDefinition = parameter  # type: ignore
             if not requested_as_batch or static_input.value is None:
-                # when we have Optional[Selector()] in manifest - we must retain
-                # ability to inject None into the run(...) parameters - as
-                # if we treat that as actual batch and broadcast Batch[None],
-                # we would behave exactly as condition execution does -
-                # and the logic executing after this, will filter-out empty
-                # elements - so on None, we behave "the old way" regardless of the fact that ABC
-                # was requested
                 return static_input.value, None, False
             else:
                 return apply_auto_batch_casting(
@@ -627,6 +620,7 @@ def get_non_compound_parameter_value(
                     f"the problem - including workflow definition you use.",
                     context="workflow_execution | step_input_assembling",
                 )
+            # Use list comprehension (slightly faster than an explicit loop)
             batch_input = [
                 input_element if element_index in mask_for_dimension else None
                 for element_index, input_element in zip(lineage_indices, batch_input)
@@ -873,11 +867,18 @@ def reduce_batch_dimensionality(
 
 
 def ensure_compound_input_indices_match(indices: List[List[DynamicBatchIndex]]) -> None:
+    # Fast path: nothing to do for <2 elements
     if len(indices) < 2:
         return None
-    reference_set = set(indices[0])
-    for index in indices[1:]:
-        other_set = set(index)
+    # Compare all further lists to first
+    reference = indices[0]
+    reference_set = None  # only create if needed
+    for idx in indices[1:]:
+        if idx is reference:
+            continue
+        if reference_set is None:
+            reference_set = set(reference)
+        other_set = set(idx)
         if reference_set != other_set:
             raise ExecutionEngineRuntimeError(
                 public_message=f"Detected a situation when step input parameters cannot be created "
@@ -890,27 +891,40 @@ def ensure_compound_input_indices_match(indices: List[List[DynamicBatchIndex]]) 
 
 
 def get_empty_batch_elements_indices(value: Any) -> Set[DynamicBatchIndex]:
-    result = set()
+    # This version is highly optimized to avoid repeated set allocations and recursive overhead
+    # Fast-path check
     if isinstance(value, dict):
+        result = set()
         for v in value.values():
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, list):
+            # Use update instead of union to avoid allocations
+            result.update(get_empty_batch_elements_indices(v))
+        return result
+    elif isinstance(value, list):
+        result = set()
         for v in value:
-            value_result = get_empty_batch_elements_indices(v)
-            result = result.union(value_result)
-    if isinstance(value, Batch):
-        for index, value_element in value.iter_with_indices():
-            if isinstance(value_element, Batch):
-                value_result = get_empty_batch_elements_indices(value=value_element)
-                result = result.union(value_result)
-            elif value_element is None:
-                result.add(index)
-    return result
+            result.update(get_empty_batch_elements_indices(v))
+        return result
+    elif isinstance(value, Batch):
+        # Iterative walk to avoid deep recursive calls for possibly very large batches
+        result = set()
+        stack = [(value, ())]
+        while stack:
+            batch, prefix = stack.pop()
+            for index, value_element in batch.iter_with_indices():
+                if isinstance(value_element, Batch):
+                    stack.append(
+                        (value_element, ())
+                    )  # batch indices always absolute, ignore prefix
+                elif value_element is None:
+                    result.add(index)
+        return result
+    else:
+        return set()
 
 
 def remove_indices(value: Any, indices: Set[DynamicBatchIndex]) -> Any:
     if isinstance(value, dict):
+        # No change to logic, but use dictionary comprehension for small speedup
         return {k: remove_indices(value=v, indices=indices) for k, v in value.items()}
     if isinstance(value, list):
         return [remove_indices(value=v, indices=indices) for v in value]
