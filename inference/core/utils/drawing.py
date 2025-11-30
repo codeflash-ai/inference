@@ -1,4 +1,3 @@
-import itertools
 import math
 from functools import partial
 from typing import Callable, List, Literal, Optional, Tuple
@@ -127,32 +126,48 @@ def _merge_tiles_elements(
     tile_margin: int,
     tile_margin_color: Tuple[int, int, int],
 ) -> np.ndarray:
-    vertical_padding = (
-        np.ones((single_tile_size[1], tile_margin, 3)) * tile_margin_color
+    # Precompute vertical padding for each row by broadcasting tile_margin_color efficiently
+    vertical_padding = np.full(
+        (single_tile_size[1], tile_margin, 3), tile_margin_color, dtype=np.uint8
     )
-    merged_rows = [
-        np.concatenate(
-            list(
-                itertools.chain.from_iterable(
-                    zip(row, [vertical_padding] * grid_size[1])
-                )
-            )[:-1],
-            axis=1,
-        )
-        for row in tiles_elements
-    ]
+
+    # Preallocate merged_rows and use local vars for speed
+    merged_rows = []
+    pad = vertical_padding
+    pad_list = [pad] * grid_size[1]
+    for row in tiles_elements:
+        # Interleave row tiles and paddings in a single pass for efficiency
+        chained = []
+        for tile, pad_item in zip(row, pad_list):
+            chained.append(tile)
+            chained.append(pad_item)
+        # Remove the final padding to avoid trailing margin
+        merged = np.concatenate(chained[:-1], axis=1)
+        merged_rows.append(merged)
+
     row_width = merged_rows[0].shape[1]
-    horizontal_padding = (
-        np.ones((tile_margin, row_width, 3), dtype=np.uint8) * tile_margin_color
+    # Precompute horizontal padding
+    horizontal_padding = np.full(
+        (tile_margin, row_width, 3), tile_margin_color, dtype=np.uint8
     )
-    rows_with_paddings = []
-    for row in merged_rows:
-        rows_with_paddings.append(row)
-        rows_with_paddings.append(horizontal_padding)
-    return np.concatenate(
-        rows_with_paddings[:-1],
-        axis=0,
-    ).astype(np.uint8)
+
+    row_count = len(merged_rows)
+    # Preallocate the shape of the final result for efficiency
+    out_height = row_count * single_tile_size[1] + (row_count - 1) * tile_margin
+    out_width = row_width
+    result = np.empty((out_height, out_width, 3), dtype=np.uint8)
+
+    # Fill the output in a single pass for spatial locality and minimize concat calls
+    offset = 0
+    for i, row in enumerate(merged_rows):
+        h = row.shape[0]
+        result[offset : offset + h] = row
+        offset += h
+        if i < row_count - 1:
+            result[offset : offset + tile_margin] = horizontal_padding
+            offset += tile_margin
+
+    return result
 
 
 def _generate_color_image(
