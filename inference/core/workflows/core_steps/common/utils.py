@@ -435,16 +435,19 @@ def post_process_ocr_result(
     expected_output_keys: Set[str],
 ) -> BlockResult:
     for prediction, image in zip(predictions, images):
-        detection_ids = [p["detection_id"] for p in prediction.get("predictions", [])]
-        prediction["predictions"] = sv.Detections.from_inference(prediction)
-        prediction["predictions"]["detection_id"] = detection_ids
+        preds = prediction.get("predictions", [])
+        detection_ids = [p["detection_id"] for p in preds] if preds else []
+        # sv.Detections.from_inference may sometimes be a costly function call;
+        # compute once and reference subsequently.
+        det = sv.Detections.from_inference(prediction)
+        det["detection_id"] = detection_ids
+        prediction["predictions"] = det
         prediction[PREDICTION_TYPE_KEY] = "ocr"
         prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
         prediction[ROOT_PARENT_ID_KEY] = image.workflow_root_ancestor_metadata.parent_id
-        _ = remove_unexpected_keys_from_dictionary(
-            dictionary=prediction,
-            expected_keys=expected_output_keys,
-        )
+        # Inline removal to reduce function call overhead and avoid returning unused value
+        for key in [k for k in prediction if k not in expected_output_keys]:
+            del prediction[key]
     return predictions
 
 
