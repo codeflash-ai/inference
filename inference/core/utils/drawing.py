@@ -72,23 +72,31 @@ def _aggregate_images_shape(
 def _establish_grid_size(
     images: List[np.ndarray], grid_size: Optional[Tuple[Optional[int], Optional[int]]]
 ) -> Tuple[int, int]:
-    if grid_size is None or all(e is None for e in grid_size):
+    # Optimize all(e is None for e in grid_size) with tuple direct check
+    if grid_size is None or grid_size == (None, None):
         return _negotiate_grid_size(images=images)
     if grid_size[0] is None:
-        return math.ceil(len(images) / grid_size[1]), grid_size[1]
+        # Avoid repeated len(images) computation
+        n_images = len(images)
+        return math.ceil(n_images / grid_size[1]), grid_size[1]
     if grid_size[1] is None:
-        return grid_size[0], math.ceil(len(images) / grid_size[0])
+        n_images = len(images)
+        return grid_size[0], math.ceil(n_images / grid_size[0])
     return grid_size
 
 
 def _negotiate_grid_size(images: List[np.ndarray]) -> Tuple[int, int]:
-    if len(images) <= MAX_COLUMNS_FOR_SINGLE_ROW_GRID:
-        return 1, len(images)
-    nearest_sqrt = math.ceil(np.sqrt(len(images)))
+    n_images = len(images)
+    if n_images <= MAX_COLUMNS_FOR_SINGLE_ROW_GRID:
+        return 1, n_images
+    # Fast-path: pure Python sqrt avoids expensive NumPy call
+    nearest_sqrt = math.ceil(math.sqrt(n_images))
     proposed_columns = nearest_sqrt
     proposed_rows = nearest_sqrt
-    while proposed_columns * (proposed_rows - 1) >= len(images):
+    max_cells = proposed_columns * (proposed_rows - 1)
+    while max_cells >= n_images:
         proposed_rows -= 1
+        max_cells -= proposed_columns
     return proposed_rows, proposed_columns
 
 
