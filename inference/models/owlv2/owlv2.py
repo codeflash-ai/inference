@@ -310,15 +310,16 @@ def get_class_preds_from_embeds(
 def make_class_map(
     query_embeddings: Dict[str, PosNegDictType],
 ) -> Tuple[Dict[Tuple[str, str], int], List[str]]:
-    class_names = sorted(list(query_embeddings.keys()))
-    class_map_positive = {
-        (class_name, "positive"): i for i, class_name in enumerate(class_names)
-    }
-    class_map_negative = {
-        (class_name, "negative"): i + len(class_names)
-        for i, class_name in enumerate(class_names)
-    }
-    class_map = {**class_map_positive, **class_map_negative}
+    # Avoid redundant list() -- sorted() on a dict yields sorted keys as a list already
+    class_names = sorted(query_embeddings.keys())
+
+    # Construct both positive and negative maps in one loop for better cache locality and to halve iteration cost
+    n = len(class_names)
+    class_map: Dict[Tuple[str, str], int] = {}
+    for i, class_name in enumerate(class_names):
+        class_map[(class_name, "positive")] = i
+        class_map[(class_name, "negative")] = i + n
+
     return class_map, class_names
 
 
