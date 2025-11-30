@@ -150,32 +150,35 @@ class PathDeviationAnalyticsBlockV1(WorkflowBlock):
         path1: np.ndarray,
         path2: np.ndarray,
     ) -> float:
-        if dist_matrix[i, j] > -1:
-            return dist_matrix[i, j]
+        # Convert index access to local variables for minor speed improvement
+        dmat = dist_matrix
+        if dmat[i, j] > -1:
+            return dmat[i, j]
         elif i == 0 and j == 0:
-            dist_matrix[i, j] = self._euclidean_distance(path1[0], path2[0])
+            # Inline np.linalg.norm for 2-point distance to skip extra function call overhead
+            diff = path1[0] - path2[0]
+            dmat[i, j] = np.sqrt(diff.dot(diff))
         elif i > 0 and j == 0:
-            dist_matrix[i, j] = max(
-                self._compute_distance(dist_matrix, i - 1, 0, path1, path2),
-                self._euclidean_distance(path1[i], path2[0]),
-            )
+            prev = self._compute_distance(dmat, i - 1, 0, path1, path2)
+            diff = path1[i] - path2[0]
+            curr_dist = np.sqrt(diff.dot(diff))
+            dmat[i, j] = max(prev, curr_dist)
         elif i == 0 and j > 0:
-            dist_matrix[i, j] = max(
-                self._compute_distance(dist_matrix, 0, j - 1, path1, path2),
-                self._euclidean_distance(path1[0], path2[j]),
-            )
+            prev = self._compute_distance(dmat, 0, j - 1, path1, path2)
+            diff = path1[0] - path2[j]
+            curr_dist = np.sqrt(diff.dot(diff))
+            dmat[i, j] = max(prev, curr_dist)
         elif i > 0 and j > 0:
-            dist_matrix[i, j] = max(
-                min(
-                    self._compute_distance(dist_matrix, i - 1, j, path1, path2),
-                    self._compute_distance(dist_matrix, i - 1, j - 1, path1, path2),
-                    self._compute_distance(dist_matrix, i, j - 1, path1, path2),
-                ),
-                self._euclidean_distance(path1[i], path2[j]),
-            )
+            prev1 = self._compute_distance(dmat, i - 1, j, path1, path2)
+            prev2 = self._compute_distance(dmat, i - 1, j - 1, path1, path2)
+            prev3 = self._compute_distance(dmat, i, j - 1, path1, path2)
+            prev_min = min(prev1, prev2, prev3)
+            diff = path1[i] - path2[j]
+            curr_dist = np.sqrt(diff.dot(diff))
+            dmat[i, j] = max(prev_min, curr_dist)
         else:
-            dist_matrix[i, j] = float("inf")
-        return dist_matrix[i, j]
+            dmat[i, j] = float("inf")
+        return dmat[i, j]
 
     def _euclidean_distance(self, point1: np.ndarray, point2: np.ndarray) -> float:
         return np.sqrt(np.sum((point1 - point2) ** 2))
