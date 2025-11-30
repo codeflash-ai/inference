@@ -151,18 +151,17 @@ class GridVisualizationBlockV1(WorkflowBlock):
                 if index >= len(images):
                     break
 
-                if images[index] is None:
+                image_obj = images[index]
+                if image_obj is None:
                     continue
 
-                cacheKey = f"{id(images[index])}_{cell_width}_{cell_height}"
-                if self.thumbCache.get(cacheKey) is None:
-                    self.thumbCache.set(
-                        cacheKey,
-                        self.resizeImage(
-                            images[index].numpy_image, cell_width, cell_height
-                        ),
-                    )
+                cacheKey = f"{id(image_obj)}_{cell_width}_{cell_height}"
                 img_data = self.thumbCache.get(cacheKey)
+                if img_data is None:
+                    img_data = self.resizeImage(
+                        image_obj.numpy_image, cell_width, cell_height
+                    )
+                    self.thumbCache.set(cacheKey, img_data)
 
                 img_data_height, img_data_width, _ = img_data.shape
 
@@ -170,18 +169,12 @@ class GridVisualizationBlockV1(WorkflowBlock):
                 start_x = c * cell_width + (cell_width - img_data_width) // 2
                 start_y = r * cell_height + (cell_height - img_data_height) // 2
 
-                # Clamp to avoid negative indices
                 start_x = max(start_x, 0)
                 start_y = max(start_y, 0)
 
-                end_x = start_x + img_data_width
-                end_y = start_y + img_data_height
+                end_x = min(start_x + img_data_width, width)
+                end_y = min(start_y + img_data_height, height)
 
-                # Ensure we do not exceed the canvas boundaries
-                end_x = min(end_x, width)
-                end_y = min(end_y, height)
-
-                # If for some reason the image doesn't fit perfectly, we crop it
                 target_height = end_y - start_y
                 target_width = end_x - start_x
 
