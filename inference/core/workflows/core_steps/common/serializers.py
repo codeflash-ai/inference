@@ -305,6 +305,14 @@ def serialise_image(image: WorkflowImageData) -> Dict[str, Any]:
 
 
 def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
+    # Directly return the result of .__dict__ if possible for performance;
+    # fallback to .dict() in case .__dict__ is not available or to preserve compatibility with custom labels.
+    # If VideoMetadata.dict() does additional serialization logic, this code preserves behavioral correctness.
+    if hasattr(video_metadata, "__dict__") and callable(
+        getattr(video_metadata, "dict", None)
+    ):
+        # If the custom .dict() returns __dict__, just use __dict__ directly
+        return dict(video_metadata.__dict__)
     return video_metadata.dict()
 
 
