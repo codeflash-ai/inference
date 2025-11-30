@@ -128,9 +128,11 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=OUTPUT_CALIBRATED_IMAGE_KEY, kind=[IMAGE_KIND]),
-        ]
+        if not hasattr(cls, "_output_definitions"):
+            cls._output_definitions = [
+                OutputDefinition(name=OUTPUT_CALIBRATED_IMAGE_KEY, kind=[IMAGE_KIND]),
+            ]
+        return cls._output_definitions
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
