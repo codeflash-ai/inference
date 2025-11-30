@@ -14,6 +14,7 @@ from inference.core.managers.base import ModelManager
 from inference.core.workflows.core_steps.common.entities import StepExecutionMode
 from inference.core.workflows.core_steps.common.utils import attach_prediction_type_info
 from inference.core.workflows.execution_engine.constants import (
+    PREDICTION_TYPE_KEY,
     INFERENCE_ID_KEY,
     PARENT_ID_KEY,
     ROOT_PARENT_ID_KEY,
@@ -248,15 +249,16 @@ class RoboflowClassificationModelBlockV2(WorkflowBlock):
         predictions: List[dict],
         model_id: str,
     ) -> BlockResult:
-        predictions = attach_prediction_type_info(
-            predictions=predictions,
-            prediction_type="classification",
-        )
+        # Combine all in-place mutations into a single loop for efficiency
+        # Local var assignments reduce repeated lookups
+        parent_key = PARENT_ID_KEY
+        root_key = ROOT_PARENT_ID_KEY
+        type_key = PREDICTION_TYPE_KEY
+        pred_type = "classification"
         for prediction, image in zip(predictions, images):
-            prediction[PARENT_ID_KEY] = image.parent_metadata.parent_id
-            prediction[ROOT_PARENT_ID_KEY] = (
-                image.workflow_root_ancestor_metadata.parent_id
-            )
+            prediction[type_key] = pred_type
+            prediction[parent_key] = image.parent_metadata.parent_id
+            prediction[root_key] = image.workflow_root_ancestor_metadata.parent_id
         return [
             {
                 "inference_id": prediction.get(INFERENCE_ID_KEY),
