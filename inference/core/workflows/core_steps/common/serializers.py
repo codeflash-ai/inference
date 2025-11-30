@@ -339,12 +339,10 @@ def serialize_dict(elements: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def serialize_secret(secret: str) -> str:
-    if len(secret) < MIN_SECRET_LENGTH_TO_REVEAL_PREFIX:
+    secret_len = len(secret)
+    if secret_len < MIN_SECRET_LENGTH_TO_REVEAL_PREFIX:
         return "*" * MIN_SECRET_LENGTH_TO_REVEAL_PREFIX
-    prefix = secret[:2]
-    infix = "*" * MIN_SECRET_LENGTH_TO_REVEAL_PREFIX
-    suffix = secret[-2:]
-    return f"{prefix}{infix}{suffix}"
+    return secret[:2] + "*" * MIN_SECRET_LENGTH_TO_REVEAL_PREFIX + secret[-2:]
 
 
 def serialize_timestamp(timestamp: datetime) -> str:
