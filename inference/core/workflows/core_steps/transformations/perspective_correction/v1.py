@@ -200,36 +200,46 @@ def pick_largest_perspective_polygons(
 
 
 def sort_polygon_vertices_clockwise(polygon: np.ndarray) -> np.ndarray:
-    x_center = min(polygon[:, 0]) / 2 + max(polygon[:, 0]) / 2
-    y_center = min(polygon[:, 1]) / 2 + max(polygon[:, 1]) / 2
-    angle = lambda p: math.atan2(x_center - p[0], y_center - p[1])
-    return np.array(sorted(polygon.tolist(), key=angle, reverse=True))
+    # Avoid repeated min/max and use numpy for efficiency
+    x_vals = polygon[:, 0]
+    y_vals = polygon[:, 1]
+    # Use numpy min/max for better performance
+    x_center = (x_vals.min() + x_vals.max()) / 2
+    y_center = (y_vals.min() + y_vals.max()) / 2
+    # Use np.arctan2 for vectorized angle calculation and avoid using .tolist() and Python's sort
+    # polygon shape is (N,2); we want to sort by angle in reverse order
+    angles = np.arctan2(x_center - x_vals, y_center - y_vals)
+    return polygon[np.argsort(-angles)]
 
 
 def roll_polygon_vertices_to_start_from_leftmost_bottom(
     polygon: np.ndarray,
 ) -> np.ndarray:
-    x_min = min(polygon[:, 0])
-    x_max = max(polygon[:, 0])
-    y_min = min(polygon[:, 1])
-    y_max = max(polygon[:, 1])
-    leftmost_bottom_rect = [
-        [x_min, y_max],
-        [x_min, y_min],
-        [x_max, y_min],
-        [x_max, y_max],
-    ]
-    min_dist = sum(
-        ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-        for (x1, y1), (x2, y2) in zip(leftmost_bottom_rect, polygon)
+    # Use numpy for all min/max calculations
+    x_vals = polygon[:, 0]
+    y_vals = polygon[:, 1]
+    x_min = x_vals.min()
+    x_max = x_vals.max()
+    y_min = y_vals.min()
+    y_max = y_vals.max()
+    # Build the leftmost-bottom rectangle directly as np.ndarray
+    leftmost_bottom_rect = np.array(
+        [
+            [x_min, y_max],
+            [x_min, y_min],
+            [x_max, y_min],
+            [x_max, y_max],
+        ]
     )
+    # Precompute squared distances for the initial polygon ordering
+    # Use np.linalg.norm for vectorized distance computations
+    min_dist = np.linalg.norm(leftmost_bottom_rect - polygon, axis=1).sum()
     closest = polygon
+    # The polygon is always size (4,2), so we roll over 4 possible starts
+    # For np.roll, rolling first axis only (rows), not columns.
     for shift in range(4):
-        rolled = np.roll(polygon, shift=(0, shift), axis=(0, 0))
-        dist = sum(
-            ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-            for (x1, y1), (x2, y2) in zip(leftmost_bottom_rect, rolled)
-        )
+        rolled = np.roll(polygon, shift, axis=0)
+        dist = np.linalg.norm(leftmost_bottom_rect - rolled, axis=1).sum()
         if dist < min_dist or (dist == min_dist and rolled[0][0] < closest[0][0]):
             min_dist = dist
             closest = rolled
@@ -347,40 +357,29 @@ def extend_perspective_polygon(
     bottom_left, top_left, top_right, bottom_right = polygon
     extended_width = 0
     extended_height = 0
+    # Use direct math.hypot for 2D distances
     original_width = max(
-        (
-            (bottom_left[0] - bottom_right[0]) ** 2
-            + (bottom_left[1] - bottom_right[1]) ** 2
-        )
-        ** 0.5,
-        ((top_left[0] - top_right[0]) ** 2 + (top_left[1] - top_right[1]) ** 2) ** 0.5,
+        math.hypot(bottom_left[0] - bottom_right[0], bottom_left[1] - bottom_right[1]),
+        math.hypot(top_left[0] - top_right[0], top_left[1] - top_right[1]),
     )
     original_height = max(
-        ((bottom_left[0] - top_left[0]) ** 2 + (bottom_left[1] - top_left[1]) ** 2)
-        ** 0.5,
-        ((bottom_right[0] - top_right[0]) ** 2 + (bottom_right[1] - top_right[1]) ** 2)
-        ** 0.5,
+        math.hypot(bottom_left[0] - top_left[0], bottom_left[1] - top_left[1]),
+        math.hypot(bottom_right[0] - top_right[0], bottom_right[1] - top_right[1]),
     )
+    # Pre-build the polygon array for cv.pointPolygonTest calls outside the loop for reuse.
+    polygon_arr = np.array([bottom_left, top_left, top_right, bottom_right])
     for i in range(len(detections)):
         det = detections[i]
-        # extend to the left
-        points = []
-        if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]
-            )
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0])
+
+        # -- Extend Left --
+        if bbox_position == 'ALL':
+            # Only call get_anchors_coordinates once per anchor type
+            points = [det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0],
+                      det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0]]
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
+            points = [det.get_anchors_coordinates(anchor=bbox_position)[0]]
         for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            if cv.pointPolygonTest(polygon_arr, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=bottom_left[0],
@@ -400,28 +399,18 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_width += (
-                    (bottom_left[0] - original_bottom_left[0]) ** 2
-                    + (bottom_left[1] - original_bottom_left[1]) ** 2
-                ) ** 0.5
-        # extend to the right
-        points = []
-        if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0]
-            )
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0])
+                # Only need to update polygon_arr when vertices change
+                polygon_arr[0], polygon_arr[1] = bottom_left, top_left
+                extended_width += math.hypot(bottom_left[0] - original_bottom_left[0], bottom_left[1] - original_bottom_left[1])
+
+        # -- Extend Right --
+        if bbox_position == 'ALL':
+            points = [det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0],
+                      det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0]]
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
+            points = [det.get_anchors_coordinates(anchor=bbox_position)[0]]
         for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            if cv.pointPolygonTest(polygon_arr, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=top_right[0],
@@ -441,30 +430,17 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_width += (
-                    (bottom_right[0] - original_bottom_right[0]) ** 2
-                    + (bottom_right[1] - original_bottom_right[1]) ** 2
-                ) ** 0.5
-        # extend to the bottom
-        points = []
-        if bbox_position == ALL_POSITIONS:
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0]
-            )
-            points.append(
-                det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]
-            )
+                polygon_arr[2], polygon_arr[3] = top_right, bottom_right
+                extended_width += math.hypot(bottom_right[0] - original_bottom_right[0], bottom_right[1] - original_bottom_right[1])
+
+        # -- Extend Bottom --
+        if bbox_position == 'ALL':
+            points = [det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_RIGHT)[0],
+                      det.get_anchors_coordinates(anchor=sv.Position.BOTTOM_LEFT)[0]]
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
+            points = [det.get_anchors_coordinates(anchor=bbox_position)[0]]
         for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            if cv.pointPolygonTest(polygon_arr, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=bottom_right[0],
@@ -484,26 +460,17 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_height += (
-                    (bottom_left[0] - original_bottom_left[0]) ** 2
-                    + (bottom_left[1] - original_bottom_left[1]) ** 2
-                ) ** 0.5
-        # extend to the top
-        points = []
-        if bbox_position == ALL_POSITIONS:
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0])
-            points.append(det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0])
+                polygon_arr[3], polygon_arr[0] = bottom_right, bottom_left
+                extended_height += math.hypot(bottom_left[0] - original_bottom_left[0], bottom_left[1] - original_bottom_left[1])
+
+        # -- Extend Top --
+        if bbox_position == 'ALL':
+            points = [det.get_anchors_coordinates(anchor=sv.Position.TOP_RIGHT)[0],
+                      det.get_anchors_coordinates(anchor=sv.Position.TOP_LEFT)[0]]
         else:
-            points.append(det.get_anchors_coordinates(anchor=bbox_position)[0])
+            points = [det.get_anchors_coordinates(anchor=bbox_position)[0]]
         for x, y in points:
-            if (
-                cv.pointPolygonTest(
-                    np.array([bottom_left, top_left, top_right, bottom_right]),
-                    (x, y),
-                    False,
-                )
-                >= 0
-            ):
+            if cv.pointPolygonTest(polygon_arr, (x, y), False) >= 0:
                 continue
             if not ccw(
                 x1=top_left[0],
@@ -523,19 +490,10 @@ def extend_perspective_polygon(
                     x=x,
                     y=y,
                 )
-                extended_height += (
-                    (top_left[0] - original_top_left[0]) ** 2
-                    + (top_left[1] - original_top_left[1]) ** 2
-                ) ** 0.5
+                polygon_arr[1], polygon_arr[2] = top_left, top_right
+                extended_height += math.hypot(top_left[0] - original_top_left[0], top_left[1] - original_top_left[1])
     return (
-        np.array(
-            [
-                bottom_left,
-                top_left,
-                top_right,
-                bottom_right,
-            ]
-        ),
+        np.array([bottom_left, top_left, top_right, bottom_right]),
         original_width,
         original_height,
         extended_width,
@@ -572,7 +530,7 @@ def generate_transformation_matrix(
             detections=detections,
             bbox_position=(
                 sv.Position(detections_anchor)
-                if detections_anchor != ALL_POSITIONS
+                if detections_anchor != 'ALL'
                 else detections_anchor
             ),
         )
