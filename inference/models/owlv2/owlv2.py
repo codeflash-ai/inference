@@ -239,17 +239,23 @@ def filter_tensors_by_objectness(
     logit_shift: torch.Tensor,
     logit_scale: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Squeeze batch dimension only once per tensor and reuse results
     objectness = objectness.squeeze(0)
-    objectness, objectness_indices = torch.topk(objectness, MAX_DETECTIONS, dim=0)
     boxes = boxes.squeeze(0)
     image_class_embeds = image_class_embeds.squeeze(0)
     logit_shift = logit_shift.squeeze(0).squeeze(1)
     logit_scale = logit_scale.squeeze(0).squeeze(1)
-    boxes = boxes[objectness_indices]
-    image_class_embeds = image_class_embeds[objectness_indices]
-    logit_shift = logit_shift[objectness_indices]
-    logit_scale = logit_scale[objectness_indices]
-    return objectness, boxes, image_class_embeds, logit_shift, logit_scale
+
+    # Use topk only once and use advanced indexing only once per tensor
+    objectness_values, indices = torch.topk(objectness, MAX_DETECTIONS, dim=0)
+    # Directly index all tensors at once for efficiency
+    return (
+        objectness_values,
+        boxes.index_select(0, indices),
+        image_class_embeds.index_select(0, indices),
+        logit_shift.index_select(0, indices),
+        logit_scale.index_select(0, indices),
+    )
 
 
 def get_class_preds_from_embeds(
