@@ -235,12 +235,12 @@ def measure_distance_with_reference_object(
 
     # get the reference object bounding box
     reference_bbox = None
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        reference_predictions.xyxy.round().astype(dtype=int),
-        reference_predictions.data["class_name"],
-    ):
-        if class_name == reference_object_class_name:
-            reference_bbox = (x_min, y_min, x_max, y_max)
+    ref_xyxy = reference_predictions.xyxy.round().astype(dtype=int)
+    ref_classes = reference_predictions.data["class_name"]
+
+    for idx in range(len(ref_classes)):
+        if ref_classes[idx] == reference_object_class_name:
+            reference_bbox = tuple(ref_xyxy[idx])
             break
 
     if not reference_bbox:
@@ -364,13 +364,15 @@ def find_reference_bboxes(
     reference_bbox_1 = None
     reference_bbox_2 = None
 
-    for (x_min, y_min, x_max, y_max), class_name in zip(
-        detections.xyxy.round().astype(dtype=int), detections.data["class_name"]
-    ):
+    det_xyxy = detections.xyxy.round().astype(dtype=int)
+    det_classes = detections.data["class_name"]
+
+    for idx in range(len(det_classes)):
+        class_name = det_classes[idx]
         if class_name == object_1_class_name:
-            reference_bbox_1 = (x_min, y_min, x_max, y_max)
+            reference_bbox_1 = tuple(det_xyxy[idx])
         elif class_name == object_2_class_name:
-            reference_bbox_2 = (x_min, y_min, x_max, y_max)
+            reference_bbox_2 = tuple(det_xyxy[idx])
 
         if reference_bbox_1 and reference_bbox_2:
             break
