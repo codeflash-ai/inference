@@ -1089,11 +1089,21 @@ def class_mapping_not_available_in_environment(environment: dict) -> bool:
 def get_color_mapping_from_environment(
     environment: Optional[dict], class_names: List[str]
 ) -> Dict[str, str]:
-    if color_mapping_available_in_environment(environment=environment):
-        return environment["COLORS"]
+    colors = (
+        environment["COLORS"]
+        if (
+            environment is not None
+            and "COLORS" in environment
+            and issubclass(type(environment["COLORS"]), dict)
+        )
+        else None
+    )
+    if colors is not None:
+        return colors
+    palette = DEFAULT_COLOR_PALETTE
+    palette_len = len(palette)
     return {
-        class_name: DEFAULT_COLOR_PALETTE[i % len(DEFAULT_COLOR_PALETTE)]
-        for i, class_name in enumerate(class_names)
+        class_name: palette[i % palette_len] for i, class_name in enumerate(class_names)
     }
 
 
