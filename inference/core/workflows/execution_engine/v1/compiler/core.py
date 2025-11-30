@@ -194,8 +194,12 @@ def collect_substitutions_for_selected_input(
     input_selector = construct_input_selector(input_name=input_name)
     substitutions = []
     for step in steps:
+        step_values = vars(step)
+        # Instead of calling getattr for every field, directly access
+        # the attribute dict to minimize attribute lookup overhead.
         for field in step.model_fields:
-            if getattr(step, field) != input_selector:
+            # This avoids repeated getattr overhead
+            if step_values.get(field) != input_selector:
                 continue
             substitution = InputSubstitution(
                 input_parameter_name=input_name,
