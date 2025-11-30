@@ -273,11 +273,14 @@ def _get_model_metadata_from_cache(
         model_metadata = read_json(path=model_type_cache_path)
         if model_metadata_content_is_invalid(content=model_metadata):
             return None
-        return model_metadata[PROJECT_TASK_TYPE_KEY], model_metadata[MODEL_TYPE_KEY]
+        # Cache key lookups for speed
+        task_type = model_metadata[PROJECT_TASK_TYPE_KEY]
+        model_type = model_metadata[MODEL_TYPE_KEY]
+        return task_type, model_type
     except ValueError as e:
-        logger.warning(
-            f"Could not load model description from cache under path: {model_type_cache_path} - decoding issue: {e}."
-        )
+        # Cache attribute to avoid repeated function call in message
+        msg = f"Could not load model description from cache under path: {model_type_cache_path} - decoding issue: {e}."
+        logger.warning(msg)
         return None
 
 
@@ -285,7 +288,7 @@ def model_metadata_content_is_invalid(content: Optional[Union[list, dict]]) -> b
     if content is None:
         logger.warning("Empty model metadata file encountered in cache.")
         return True
-    if not issubclass(type(content), dict):
+    if not isinstance(content, dict):
         logger.warning("Malformed file encountered in cache.")
         return True
     if PROJECT_TASK_TYPE_KEY not in content or MODEL_TYPE_KEY not in content:
@@ -343,7 +346,8 @@ def _save_model_metadata_in_cache(
 def construct_model_type_cache_path(
     dataset_id: Union[DatasetID, ModelID], version_id: Optional[VersionID]
 ) -> str:
-    cache_dir = os.path.join(
-        MODEL_CACHE_DIR, dataset_id, version_id if version_id else ""
-    )
-    return os.path.join(cache_dir, "model_type.json")
+    # Build the full path with a single join for better performance
+    if version_id:
+        return os.path.join(MODEL_CACHE_DIR, dataset_id, version_id, "model_type.json")
+    else:
+        return os.path.join(MODEL_CACHE_DIR, dataset_id, "model_type.json")
