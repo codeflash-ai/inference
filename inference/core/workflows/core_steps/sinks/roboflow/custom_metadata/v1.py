@@ -138,19 +138,33 @@ class RoboflowCustomMetadataBlockV1(WorkflowBlock):
                 "https://docs.roboflow.com/api-reference/authentication#retrieve-an-api-key to learn how to "
                 "retrieve one."
             )
-        inference_ids: List[str] = []
+
+        # Use set comprehension for unique inference_ids for memory and speed.
+        # Avoid repeated list/set casts.
+        inference_ids: List[str]
         if isinstance(predictions, sv.Detections):
-            inference_ids = predictions.data.get(INFERENCE_ID_KEY, [])
+            raw_ids = predictions.data.get(INFERENCE_ID_KEY, [])
+            if raw_ids and isinstance(raw_ids, list):
+                # Use set for uniqueness and list comprehension for conversion/defensive copy
+                inference_ids = list({str(_id) for _id in raw_ids if _id is not None})
+            else:
+                inference_ids = []
         elif INFERENCE_ID_KEY in predictions:
-            inference_ids: List[str] = [predictions[INFERENCE_ID_KEY]]
-        if len(inference_ids) == 0:
+            _id = predictions[INFERENCE_ID_KEY]
+            # Defensive: wrap in list and ensure string
+            inference_ids = [str(_id)] if _id is not None else []
+        else:
+            inference_ids = []
+
+        if not inference_ids:
             return {
                 "error_status": True,
                 "message": "Custom metadata upload failed because no inference_ids were received. "
                 "This is known bug (https://github.com/roboflow/inference/issues/567). "
                 "Please provide a report for the problem under mentioned issue.",
             }
-        inference_ids: List[str] = list(set(inference_ids))
+
+        # registration_task() does not take arguments if defined as partial with all args.
         registration_task = partial(
             add_custom_metadata_request,
             cache=self._cache,
@@ -159,14 +173,21 @@ class RoboflowCustomMetadataBlockV1(WorkflowBlock):
             field_name=field_name,
             field_value=field_value,
         )
-        error_status = False
-        message = "Registration happens in the background task"
-        if fire_and_forget and self._background_tasks:
-            self._background_tasks.add_task(registration_task)
-        elif fire_and_forget and self._thread_pool_executor:
-            self._thread_pool_executor.submit(registration_task)
+        error_status: bool = False
+        message: str = "Registration happens in the background task"
+
+        # Prioritize background_tasks, fallback to thread_pool_executor, else run synchronously
+        if fire_and_forget:
+            if self._background_tasks is not None:
+                self._background_tasks.add_task(registration_task)
+            elif self._thread_pool_executor is not None:
+                self._thread_pool_executor.submit(registration_task)
+            else:
+                # No background option available; run synchronously
+                error_status, message = registration_task()
         else:
             error_status, message = registration_task()
+
         return {
             "error_status": error_status,
             "message": message,
