@@ -21,6 +21,9 @@ from inference.core.workflows.execution_engine.v1.executor.execution_data_manage
     DynamicBatchIndex,
 )
 
+# Helper to optimize defaultdict creation, using attribute lookup instead of lambda
+_EMPTY_DEFAULTDICT: defaultdict = defaultdict()
+
 
 class ExecutionCache:
 
@@ -66,17 +69,22 @@ class ExecutionCache:
         compatible_with_batches: bool,
         outputs: List[OutputDefinition],
     ) -> None:
-        if self.contains_step(step_name=step_name):
+        # Inline contains_step for microoptimization (removes method call dispatch cost)
+        if step_name in self._cache_content:
             return None
+        # Batched and nonbatched caches are fast to construct; inlined code
         if compatible_with_batches:
-            step_cache = BatchStepCache.init(
+            # Avoid lambda for defaultdict (use class directly)
+            step_cache = BatchStepCache(
                 step_name=step_name,
                 outputs=outputs,
+                cache_content=defaultdict(dict),
             )
         else:
-            step_cache = NonBatchStepCache.init(
+            step_cache = NonBatchStepCache(
                 step_name=step_name,
                 outputs=outputs,
+                cache_content={},
             )
         self._cache_content[step_name] = step_cache
         self._batches_compatibility[step_name] = compatible_with_batches
@@ -412,3 +420,8 @@ class NonBatchStepCache:
 
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
+
+
+def _new_defaultdict_defaultdict():
+    # Directly use type construction, avoids lambda dispatch
+    return defaultdict(dict)
