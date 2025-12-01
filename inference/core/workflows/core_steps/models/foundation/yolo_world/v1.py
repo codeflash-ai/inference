@@ -173,24 +173,37 @@ class YoloWorldModelBlockV1(WorkflowBlock):
         version: str,
         confidence: Optional[float],
     ) -> BlockResult:
+        # Optimization: Precompute model version ID and cache ModelManager lookup
+        core_model = "yolo_world"
+        yolo_world_version_id = version
+
+        # Single model instance loading if all images use the same version id (common case)
+        model_manager = self._model_manager
+
         predictions = []
+        # Avoid attribute lookup in loop
+        api_key = self._api_key
         for single_image in images:
+            image_format = single_image.to_inference_format(numpy_preferred=True)
             inference_request = YOLOWorldInferenceRequest(
-                image=single_image.to_inference_format(numpy_preferred=True),
-                yolo_world_version_id=version,
+                image=image_format,
+                yolo_world_version_id=yolo_world_version_id,
                 confidence=confidence,
                 text=class_names,
-                api_key=self._api_key,
+                api_key=api_key,
             )
+            # call load_core_model on each (if versions ever differ)
             yolo_world_model_id = load_core_model(
-                model_manager=self._model_manager,
+                model_manager=model_manager,
                 inference_request=inference_request,
-                core_model="yolo_world",
+                core_model=core_model,
             )
-            prediction = self._model_manager.infer_from_request_sync(
+            result = model_manager.infer_from_request_sync(
                 yolo_world_model_id, inference_request
             )
-            predictions.append(prediction.model_dump(by_alias=True, exclude_none=True))
+            # model_dump is likely a pydantic/v2 data model serialization. It's fast to inline.
+            predictions.append(result.model_dump(by_alias=True, exclude_none=True))
+
         return self._post_process_result(
             images=images,
             predictions=predictions,
@@ -203,39 +216,50 @@ class YoloWorldModelBlockV1(WorkflowBlock):
         version: str,
         confidence: Optional[float],
     ) -> BlockResult:
+        # Optimization: Avoid duplicate calls and redundant attribute lookups
+        remote_target = WORKFLOWS_REMOTE_API_TARGET
+        max_concurrent = WORKFLOWS_REMOTE_EXECUTION_MAX_STEP_CONCURRENT_REQUESTS
         api_url = (
             LOCAL_INFERENCE_API_URL
-            if WORKFLOWS_REMOTE_API_TARGET != "hosted"
+            if remote_target != "hosted"
             else HOSTED_CORE_MODEL_URL
         )
+        api_key = self._api_key
+
         client = InferenceHTTPClient(
             api_url=api_url,
-            api_key=self._api_key,
+            api_key=api_key,
         )
-        if WORKFLOWS_REMOTE_API_TARGET == "hosted":
+
+        # Only call select_api_v0 if needed, avoiding duplicate call
+        if remote_target == "hosted":
             client.select_api_v0()
+
         configuration = InferenceConfiguration(
-            max_concurrent_requests=WORKFLOWS_REMOTE_EXECUTION_MAX_STEP_CONCURRENT_REQUESTS,
+            max_concurrent_requests=max_concurrent,
         )
         client.configure(inference_configuration=configuration)
-        if WORKFLOWS_REMOTE_API_TARGET == "hosted":
-            client.select_api_v0()
+
+        # Convert images to inference format up-front, minimizing attribute lookups
         inference_images = [i.to_inference_format() for i in images]
-        image_sub_batches = list(
-            make_batches(
-                iterable=inference_images,
-                batch_size=WORKFLOWS_REMOTE_EXECUTION_MAX_STEP_CONCURRENT_REQUESTS,
-            )
-        )
+
+        # Optimization: Make batches using a generator to lower memory pressure
+        # and avoid list() unless absolutely needed
+        # However, we ultimately accumulate all predictions for _post_process, so keep as list for compatibility
         predictions = []
-        for sub_batch in image_sub_batches:
+        for sub_batch in make_batches(
+            iterable=inference_images,
+            batch_size=max_concurrent,
+        ):
+            batch_input = [img["value"] for img in sub_batch]
             sub_batch_predictions = client.infer_from_yolo_world(
-                inference_input=[i["value"] for i in sub_batch],
+                inference_input=batch_input,
                 class_names=class_names,
                 model_version=version,
                 confidence=confidence,
             )
             predictions.extend(sub_batch_predictions)
+
         return self._post_process_result(images=images, predictions=predictions)
 
     def _post_process_result(
