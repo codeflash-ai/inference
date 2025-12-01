@@ -62,22 +62,26 @@ def aggregate_numeric_sequence(
     execution_context: str,
     **kwargs,
 ) -> Any:
+    # Fast path: empty input, return neutral_value, avoid exceptions and function lookup
+    if not value:
+        return neutral_value
+    # Avoid double lookup - do not use try/except for KeyError as control flow
+    func = AGGREGATION_FUNCTIONS.get(function)
+    if func is None:
+        # Only raise for unsupported function BEFORE attempting to call
+        raise InvalidInputTypeError(
+            public_message=f"While executing aggregate_numeric_sequence(...) in context {execution_context}, "
+            f"requested aggregation function {function.value} which is not supported.",
+            context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
+            inner_error=KeyError(function),
+        )
     try:
-        if len(value) == 0:
-            return neutral_value
-        return AGGREGATION_FUNCTIONS[function](value)
+        return func(value)
     except (TypeError, ValueError) as e:
         raise InvalidInputTypeError(
             public_message=f"While executing aggregate_numeric_sequence(...) in context {execution_context}, "
             f"encountered value of type {type(value)} which is not suited to execute operation. "
             f"Details: {e}",
-            context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
-            inner_error=e,
-        )
-    except KeyError as e:
-        raise InvalidInputTypeError(
-            public_message=f"While executing aggregate_numeric_sequence(...) in context {execution_context}, "
-            f"requested aggregation function {function.value} which is not supported.",
             context=f"step_execution | roboflow_query_language_evaluation | {execution_context}",
             inner_error=e,
         )
