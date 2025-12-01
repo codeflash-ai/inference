@@ -1315,25 +1315,39 @@ def grab_input_data_dimensionality_specifications(
     dimensionality_offstes: Dict[str, int],
 ) -> Dict[str, InputDimensionalitySpecification]:
     result = {}
+    # Local variables for faster access
+    get_offset = dimensionality_offstes.get
+    input_spec_cls = InputDimensionalitySpecification
+
     for parameter_name, dimensionality in inputs_dimensionalities.items():
-        parameter_offset = dimensionality_offstes.get(parameter_name, 0)
-        non_zero_dimensionalities_for_parameter = {d for d in dimensionality if d > 0}
-        if len(non_zero_dimensionalities_for_parameter) > 1:
-            raise AssumptionError(
-                public_message=f"Workflow Compiler for step: `{step_name}` and parameter: {parameter_name}"
-                f"found multiple different values of actual input dimensionalities: "
-                f"`{non_zero_dimensionalities_for_parameter}` which should be detected and addresses "
-                f"at earlier stages of compilation."
-                f"This is most likely the bug. Contact Roboflow team through github issues "
-                f"(https://github.com/roboflow/inference/issues) providing full "
-                f"context of the problem - including workflow definition you use.",
-                context="workflow_compilation | execution_graph_construction | collecting_step_inputs",
-            )
+        # Avoid creating a new set if all values are small
+        # Also, build the set in a memory-efficient way (generator)
+        non_zero_dimensionalities_for_parameter = set()
+        for d in dimensionality:
+            if d > 0:
+                if not non_zero_dimensionalities_for_parameter:
+                    non_zero_dimensionalities_for_parameter.add(d)
+                elif d not in non_zero_dimensionalities_for_parameter:
+                    # Early raise if more than one dimension is present
+                    non_zero_dimensionalities_for_parameter.add(d)
+                    raise AssumptionError(
+                        public_message=(
+                            f"Workflow Compiler for step: `{step_name}` and parameter: {parameter_name}"
+                            f"found multiple different values of actual input dimensionalities: "
+                            f"`{non_zero_dimensionalities_for_parameter}` which should be detected and addresses "
+                            f"at earlier stages of compilation."
+                            f"This is most likely the bug. Contact Roboflow team through github issues "
+                            f"(https://github.com/roboflow/inference/issues) providing full "
+                            f"context of the problem - including workflow definition you use."
+                        ),
+                        context="workflow_compilation | execution_graph_construction | collecting_step_inputs",
+                    )
         if non_zero_dimensionalities_for_parameter:
-            actual_dimensionality = next(iter(non_zero_dimensionalities_for_parameter))
-            result[parameter_name] = InputDimensionalitySpecification(
+            # Since we ensure only a single value is present, grab it without calling iter()
+            (actual_dimensionality,) = non_zero_dimensionalities_for_parameter
+            result[parameter_name] = input_spec_cls(
                 actual_dimensionality=actual_dimensionality,
-                expected_offset=parameter_offset,
+                expected_offset=get_offset(parameter_name, 0),
             )
     return result
 
