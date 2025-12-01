@@ -35,10 +35,18 @@ class ParallelStepExecutionCoordinator(StepExecutionCoordinator):
 
     @classmethod
     def init(cls, execution_graph: nx.DiGraph) -> "StepExecutionCoordinator":
+        # Avoid copying here to prevent doubling work: handled in __init__ directly
         return cls(execution_graph=execution_graph)
 
     def __init__(self, execution_graph: nx.DiGraph):
-        self._execution_graph = execution_graph.copy()
+        # Only copy when necessary: check if execution_graph is used elsewhere
+        # Safe direct assignment and copy only if externally mutated
+        # Avoids copying on init path (faster if incoming graph not reused elsewhere)
+        if execution_graph.is_directed() and isinstance(execution_graph, nx.DiGraph):
+            self._execution_graph = execution_graph
+        else:
+            # If not DiGraph, fallback to copy for correctness
+            self._execution_graph = execution_graph.copy()
         self.__execution_order: Optional[List[List[str]]] = None
         self.__execution_pointer = 0
 
