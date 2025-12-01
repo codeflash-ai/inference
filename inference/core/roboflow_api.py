@@ -610,19 +610,20 @@ def get_workflow_cache_file(
         if api_key is not None
         else "None"
     )
-    prefix = os.path.abspath(os.path.join(MODEL_CACHE_DIR, "workflow"))
-    result = os.path.abspath(
-        os.path.join(
-            prefix,
-            sanitized_workspace_id,
-            f"{sanitized_workflow_id}_{api_key_hash}.json",
-        )
+    # Avoid repeated abspaths; compose using join only
+    prefix = os.path.join(MODEL_CACHE_DIR, "workflow")
+    path = os.path.join(
+        prefix,
+        sanitized_workspace_id,
+        f"{sanitized_workflow_id}_{api_key_hash}.json",
     )
-    if not result.startswith(prefix):
+    abs_prefix = os.path.abspath(prefix)
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(abs_prefix):
         raise ValueError(
             "Detected attempt to save workflow definition in insecure location"
         )
-    return result
+    return abs_path
 
 
 def cache_workflow_response(
