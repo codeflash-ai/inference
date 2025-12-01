@@ -184,6 +184,7 @@ class IconVisualizationBlockV1(VisualizationBlock):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.annotatorCache = {}
+        self._position_attr_cache = {}
 
     @classmethod
     def get_manifest(cls) -> Type[WorkflowBlockManifest]:
@@ -195,15 +196,28 @@ class IconVisualizationBlockV1(VisualizationBlock):
         icon_height: int,
         position: Optional[str] = None,
     ) -> Optional[sv.annotators.base.BaseAnnotator]:
-        if position is not None:
-            key = f"dynamic_{icon_width}_{icon_height}_{position}"
-            if key not in self.annotatorCache:
-                self.annotatorCache[key] = sv.IconAnnotator(
-                    icon_resolution_wh=(icon_width, icon_height),
-                    icon_position=getattr(sv.Position, position),
-                )
-            return self.annotatorCache[key]
-        return None
+        # Fast path: position is None, skip dictionary lookups
+        if position is None:
+            return None
+
+        key = (icon_width, icon_height, position)
+        annotatorCache = self.annotatorCache
+        if key in annotatorCache:
+            return annotatorCache[key]
+
+        position_attr_cache = self._position_attr_cache
+        try:
+            icon_position = position_attr_cache[position]
+        except KeyError:
+            icon_position = getattr(sv.Position, position)
+            position_attr_cache[position] = icon_position
+
+        annotator = sv.IconAnnotator(
+            icon_resolution_wh=(icon_width, icon_height),
+            icon_position=icon_position,
+        )
+        annotatorCache[key] = annotator
+        return annotator
 
     def run(
         self,
