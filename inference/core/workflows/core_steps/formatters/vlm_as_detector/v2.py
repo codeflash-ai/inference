@@ -287,11 +287,18 @@ def parse_gemini_object_detection_response(
 
 
 def create_classes_index(classes: List[str]) -> Dict[str, int]:
-    return {class_name: idx for idx, class_name in enumerate(classes)}
+    return dict(zip(classes, range(len(classes))))
 
 
 def scale_confidence(value: float) -> float:
-    return min(max(float(value), 0.0), 1.0)
+    # Fast path: avoid redundant float conversion and function calls
+    v = value if isinstance(value, float) else float(value)
+    if v < 0.0:
+        return 0.0
+    elif v > 1.0:
+        return 1.0
+    else:
+        return v
 
 
 def parse_florence2_object_detection_response(
