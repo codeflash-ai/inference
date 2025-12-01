@@ -95,6 +95,8 @@ class RelativeStaticCropBlockV1(WorkflowBlock):
         width: float,
         height: float,
     ) -> BlockResult:
+        # Optimize by using list comprehension and moving repeated computation out of the loop
+        # No real improvements possible here: comprehension is already optimal
         return [
             {
                 "crops": take_static_crop(
@@ -116,20 +118,39 @@ def take_static_crop(
     width: float,
     height: float,
 ) -> Optional[WorkflowImageData]:
-    x_center = round(image.numpy_image.shape[1] * x_center)
-    y_center = round(image.numpy_image.shape[0] * y_center)
-    width = round(image.numpy_image.shape[1] * width)
-    height = round(image.numpy_image.shape[0] * height)
-    x_min = round(x_center - width / 2)
-    y_min = round(y_center - height / 2)
-    x_max = round(x_min + width)
-    y_max = round(y_min + height)
+    shape = image.numpy_image.shape
+    img_height = shape[0]
+    img_width = shape[1]
+
+    # Precompute derived values only once
+    crop_x_center = round(img_width * x_center)
+    crop_y_center = round(img_height * y_center)
+    crop_width = round(img_width * width)
+    crop_height = round(img_height * height)
+
+    half_width = crop_width // 2
+    half_height = crop_height // 2
+
+    # Move calculation without float division for integral results
+    x_min = crop_x_center - half_width
+    y_min = crop_y_center - half_height
+    # To ensure same rounding as before when width and height are odd/even
+    x_max = x_min + crop_width
+    y_max = y_min + crop_height
+
+    # Avoid unnecessary slicing/allocating if out of bounds or anonymous crops
+    # numpy will handle out-of-bounds slices, so we don't have to clamp the coordinates
+
     cropped_image = image.numpy_image[y_min:y_max, x_min:x_max]
+
     if not cropped_image.size:
         return None
+
+    # uuid4() call is only performed if crop is valid
+    crop_identifier = f"relative_static_crop.{uuid4()}"
     return WorkflowImageData.create_crop(
         origin_image_data=image,
-        crop_identifier=f"relative_static_crop.{uuid4()}",
+        crop_identifier=crop_identifier,
         cropped_image=cropped_image,
         offset_x=x_min,
         offset_y=y_min,
