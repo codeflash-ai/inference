@@ -16,6 +16,30 @@ from inference.core.env import TINY_CACHE
 from inference.core.logger import logger
 from inference.core.version import __version__
 
+RESPONSE_HANDLERS = {
+    ClassificationInferenceResponse: lambda r: [
+        {"class": pred.class_name, "confidence": pred.confidence}
+        for pred in r.predictions
+    ],
+    MultiLabelClassificationInferenceResponse: lambda r: [
+        {"class": cls, "confidence": pred.confidence}
+        for cls, pred in r.predictions.items()
+    ],
+    ObjectDetectionInferenceResponse: lambda r: [
+        {"class": pred.class_name, "confidence": pred.confidence}
+        for pred in r.predictions
+    ],
+    InstanceSegmentationInferenceResponse: lambda r: [
+        {"class": pred.class_name, "confidence": pred.confidence}
+        for pred in r.predictions
+    ],
+    KeypointsDetectionInferenceResponse: lambda r: [
+        {"class": keypoint.class_name, "confidence": keypoint.confidence}
+        for pred in r.predictions
+        for keypoint in pred.keypoints
+    ],
+}
+
 
 def to_cachable_inference_item(
     infer_request: InferenceRequest,
@@ -53,29 +77,29 @@ def build_condensed_response(responses):
     if not isinstance(responses, list):
         responses = [responses]
 
-    response_handlers = {
-        ClassificationInferenceResponse: from_classification_response,
-        MultiLabelClassificationInferenceResponse: from_multilabel_classification_response,
-        ObjectDetectionInferenceResponse: from_object_detection_response,
-        InstanceSegmentationInferenceResponse: from_instance_segmentation_response,
-        KeypointsDetectionInferenceResponse: from_keypoints_detection_response,
-    }
+    # Precompute classes tuple for maximal isinstance efficiency
+    handler_classes = tuple(RESPONSE_HANDLERS.keys())
 
     formatted_responses = []
     for response in responses:
-        if not getattr(response, "predictions", None):
+        # Short-circuit for None and empty values in one check
+        predictions = getattr(response, "predictions", None)
+        if not predictions:
             continue
         try:
-            handler = None
-            for cls, h in response_handlers.items():
-                if isinstance(response, cls):
-                    handler = h
-                    break
-            if handler:
-                predictions = handler(response)
+            # Fast path: use type as dict key instead of slow isinstance() check
+            resp_type = type(response)
+            handler = RESPONSE_HANDLERS.get(resp_type)
+            if handler is None:
+                # Slow path: fallback to isinstance for subclassing edge cases (rare)
+                for cls in handler_classes:
+                    if isinstance(response, cls):  # covers subclasses
+                        handler = RESPONSE_HANDLERS[cls]
+                        break
+            if handler is not None:
                 formatted_responses.append(
                     {
-                        "predictions": predictions,
+                        "predictions": handler(response),
                         "time": response.time,
                     }
                 )
