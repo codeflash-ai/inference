@@ -132,20 +132,19 @@ class TimeInZoneBlockV2(WorkflowBlock):
                 raise ValueError(
                     f"{self.__class__.__name__} requires zone to be a list containing more than 2 points"
                 )
-            if any(
-                (not isinstance(e, list) and not isinstance(e, tuple)) or len(e) != 2
-                for e in zone
-            ):
-                raise ValueError(
-                    f"{self.__class__.__name__} requires each point of zone to be a list containing exactly 2 coordinates"
-                )
-            if any(
-                not isinstance(e[0], (int, float)) or not isinstance(e[1], (int, float))
-                for e in zone
-            ):
-                raise ValueError(
-                    f"{self.__class__.__name__} requires each coordinate of zone to be a number"
-                )
+            for e in zone:
+                if (not isinstance(e, list) and not isinstance(e, tuple)) or len(
+                    e
+                ) != 2:
+                    raise ValueError(
+                        f"{self.__class__.__name__} requires each point of zone to be a list containing exactly 2 coordinates"
+                    )
+                if not isinstance(e[0], (int, float)) or not isinstance(
+                    e[1], (int, float)
+                ):
+                    raise ValueError(
+                        f"{self.__class__.__name__} requires each coordinate of zone to be a number"
+                    )
             self._batch_of_polygon_zones[metadata.video_identifier] = sv.PolygonZone(
                 polygon=np.array(zone),
                 triggering_anchors=(sv.Position(triggering_anchor),),
