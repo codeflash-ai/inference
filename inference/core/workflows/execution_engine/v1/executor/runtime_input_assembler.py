@@ -204,7 +204,7 @@ def _get_matching_deserializers(
 
 
 def _get_kind_name(kind: Union[Kind, str]) -> str:
-    if isinstance(kind, Kind):
+    if type(kind) is Kind:
         return kind.name
     return kind
 
