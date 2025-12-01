@@ -279,22 +279,50 @@ class RotaryEmbedding(Module):
             and self.freqs_for != "pixel"
         )
 
+        # Fast path: avoid unnecessary repeat/einsum if cache is valid
+        cached_freqs = self.cached_freqs
         if (
             should_cache
-            and exists(self.cached_freqs)
-            and (offset + seq_len) <= self.cached_freqs.shape[0]
+            and exists(cached_freqs)
+            and (offset + seq_len) <= cached_freqs.shape[0]
         ):
-            return self.cached_freqs[offset : (offset + seq_len)].detach()
+            return cached_freqs[offset : (offset + seq_len)].detach()
 
         freqs = self.freqs
 
-        freqs = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        # Optimize einsum and repeat by fusing operations
+        # Avoid type promotion and unnecessary data copy
+        t_dtype = t.dtype
+        freqs_dtype = freqs.dtype
+        t_type = t if t_dtype == freqs_dtype else t.type(freqs_dtype)
+        freqs_shape = freqs.shape
+        # This einsum + repeat can be replaced with a more efficient outer-product & reshape if possible
+
+        # Compute outer product, which is more efficient than einsum for this case
+        # t: (seq_len,)
+        # freqs: (f,) -> result: (seq_len, f)
+        # repeat (... n -> ... (n r)) with r=2 is equivalent to duplicating along last axis and then interleaving
+
+        # Note: Only apply when t is 1D or 2D; otherwise fallback to einsum/repeat
+        if t_type.ndim == 1 and freqs.ndim == 1:
+            # t: (seq_len,)
+            # freqs: (freq_dim,)
+            result = torch.outer(t_type, freqs)
+            out = torch.repeat_interleave(result, 2, dim=-1)
+        elif t_type.ndim == 2 and freqs.ndim == 1:
+            # t: (batch, seq_len)
+            # freqs: (freq_dim,)
+            result = t_type.unsqueeze(-1) * freqs  # (batch, seq_len, freq_dim)
+            out = torch.repeat_interleave(result, 2, dim=-1)
+        else:
+            # Fallback: legacy path
+            result = einsum("..., f -> ... f", t_type, freqs)
+            out = repeat(result, "... n -> ... (n r)", r=2)
 
         if should_cache:
-            self.tmp_store("cached_freqs", freqs.detach())
+            self.tmp_store("cached_freqs", out.detach())
 
-        return freqs
+        return out
 
 
 class Rope2D:
