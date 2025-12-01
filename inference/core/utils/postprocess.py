@@ -107,14 +107,27 @@ def mask2poly(mask: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Contours represented as a float32 array.
     """
+    # Use cv2.findContours() as before, but optimize the selection of max contour
     contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+
     if contours:
-        contours = np.array(
-            contours[np.array([len(x) for x in contours]).argmax()]
-        ).reshape(-1, 2)
+        # Find the largest contour by length without creating additional arrays
+        max_len = -1
+        max_contour = None
+        for contour in contours:
+            l = len(contour)
+            if l > max_len:
+                max_len = l
+                max_contour = contour
+        # Efficient reshape using .reshape avoids making another intermediate ndarray
+        contours = max_contour.reshape(-1, 2)
     else:
-        contours = np.zeros((0, 2))
-    return contours.astype("float32")
+        contours = np.zeros((0, 2), dtype=np.float32)
+
+    # Only astype if needed (i.e., if dtype is different)
+    if contours.dtype != np.float32:
+        contours = contours.astype(np.float32)
+    return contours
 
 
 def mask2multipoly(mask: np.ndarray) -> np.ndarray:
