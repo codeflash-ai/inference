@@ -383,16 +383,19 @@ def measure_distance_pixels(
     reference_bbox_1: Tuple[int, int, int, int],
     reference_bbox_2: Tuple[int, int, int, int],
 ):
+    # Extract relevant coordinates once for efficiency
+    x1_1, y1_1, x2_1, y2_1 = reference_bbox_1
+    x1_2, y1_2, x2_2, y2_2 = reference_bbox_2
+
     if reference_axis == "vertical":
-        distance_pixels = (
-            abs(reference_bbox_2[1] - reference_bbox_1[3])
-            if reference_bbox_2[1] > reference_bbox_1[3]
-            else abs(reference_bbox_1[1] - reference_bbox_2[3])
-        )
+        if y1_2 > y2_1:
+            distance_pixels = y1_2 - y2_1
+        else:
+            distance_pixels = y1_1 - y2_2 if y1_1 > y2_2 else y2_2 - y1_1
     else:
-        distance_pixels = (
-            abs(reference_bbox_2[0] - reference_bbox_1[2])
-            if reference_bbox_2[0] > reference_bbox_1[2]
-            else abs(reference_bbox_1[0] - reference_bbox_2[2])
-        )
+        if x1_2 > x2_1:
+            distance_pixels = x1_2 - x2_1
+        else:
+            distance_pixels = x1_1 - x2_2 if x1_1 > x2_2 else x2_2 - x1_1
+
     return distance_pixels
