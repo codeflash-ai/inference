@@ -161,9 +161,7 @@ def assemble_single_element_of_batch_oriented_input(
     )
     if not matching_deserializers:
         return value
-    parameter_identifier = defined_input.name
-    if identifier is not None:
-        parameter_identifier = identifier
+    parameter_identifier = defined_input.name if identifier is None else identifier
     errors = []
     for kind, deserializer in matching_deserializers:
         try:
@@ -178,12 +176,14 @@ def assemble_single_element_of_batch_oriented_input(
             return deserializer(parameter_identifier, value)
         except Exception as error:
             errors.append((kind, error))
-    error_message = (
+    # The below string concatenation is made more efficient by building a list and joining at the end
+    error_message_lines = [
         f"Failed to assemble `{parameter_identifier}`. "
-        f"Could not successfully use any deserializer for declared kinds. Details: "
-    )
+        "Could not successfully use any deserializer for declared kinds. Details:"
+    ]
     for kind, error in errors:
-        error_message = f"{error_message}\nKind: `{kind}` - Error: {error}"
+        error_message_lines.append(f"Kind: `{kind}` - Error: {error}")
+    error_message = "\n".join(error_message_lines)
     raise RuntimeInputError(
         public_message=error_message,
         context="workflow_execution | runtime_input_validation",
@@ -194,13 +194,18 @@ def _get_matching_deserializers(
     defined_input: InputType,
     kinds_deserializers: Dict[str, Callable[[str, Any], Any]],
 ) -> List[Tuple[str, Callable[[str, Any], Any]]]:
-    matching_deserializers = []
+    # Re-writing to use a local variable for quicker lookup and list comprehension for perf
+    kinds_deserializers_get = kinds_deserializers.get
+    # Intermediate tuple assignment avoids repeated lookups
+    output: List[Tuple[str, Callable[[str, Any], Any]]] = []
+    # Only inline lookups and minimal function-calling
     for kind in defined_input.kind:
-        kind_name = _get_kind_name(kind=kind)
-        if kind_name not in kinds_deserializers:
-            continue
-        matching_deserializers.append((kind_name, kinds_deserializers[kind_name]))
-    return matching_deserializers
+        # Inline _get_kind_name for performance, as suggested by its implementation
+        kind_name = kind.name if hasattr(kind, "name") else kind
+        deserializer = kinds_deserializers_get(kind_name)
+        if deserializer is not None:
+            output.append((kind_name, deserializer))
+    return output
 
 
 def _get_kind_name(kind: Union[Kind, str]) -> str:
