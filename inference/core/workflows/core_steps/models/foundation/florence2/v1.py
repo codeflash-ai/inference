@@ -446,19 +446,27 @@ def prepare_detection_grounding_prompts(
     grounding_detection: Union[Batch[sv.Detections], List[float], List[int]],
     grounding_selection_mode: GroundingSelectionMode,
 ) -> List[Optional[str]]:
+    # Use isinstance for list detection as before, else assume batch of detections
     if isinstance(grounding_detection, list):
-        return _prepare_grounding_bounding_box_from_coordinates(
-            images=images,
-            bounding_box=grounding_detection,
-        )
-    return [
-        _prepare_grounding_bounding_box_from_detections(
-            image=image.numpy_image,
-            detections=detections,
-            grounding_selection_mode=grounding_selection_mode,
-        )
-        for image, detections in zip(images, grounding_detection)
-    ]
+        # Fast path: only one bounding box, need output for every image
+        # This is more efficient as a list comprehension, avoids per-image extra check
+        return [
+            _extract_bbox_coordinates_as_location_prompt(
+                image=image.numpy_image,
+                bounding_box=grounding_detection,
+            )
+            for image in images
+        ]
+    else:
+        # Use indexed for-loop, avoids zip overhead (zip must build a new iterator)
+        return [
+            _prepare_grounding_bounding_box_from_detections(
+                image=images[i].numpy_image,
+                detections=grounding_detection[i],
+                grounding_selection_mode=grounding_selection_mode,
+            )
+            for i in range(len(images))
+        ]
 
 
 def _prepare_grounding_bounding_box_from_coordinates(
@@ -480,19 +488,24 @@ def _prepare_grounding_bounding_box_from_detections(
     if len(detections) == 0:
         return None
     height, width = image.shape[:2]
-    if grounding_selection_mode not in COORDINATES_EXTRACTION:
+    try:
+        extraction_function = COORDINATES_EXTRACTION[grounding_selection_mode]
+    except KeyError:
         raise ValueError(
             f"Unknown grounding selection mode: {grounding_selection_mode}"
         )
-    extraction_function = COORDINATES_EXTRACTION[grounding_selection_mode]
-    left_top_x, left_top_y, right_bottom_x, right_bottom_y = extraction_function(
-        detections
+
+    # Avoid multi-assignment to save unpack overhead
+    coords = extraction_function(detections)
+    # Process coordinates as floats, avoid tuple unpack/repack
+    left_top_x = _coordinate_to_loc(coords[0] / width)
+    left_top_y = _coordinate_to_loc(coords[1] / height)
+    right_bottom_x = _coordinate_to_loc(coords[2] / width)
+    right_bottom_y = _coordinate_to_loc(coords[3] / height)
+    return (
+        f"<loc_{left_top_x}><loc_{left_top_y}>"
+        f"<loc_{right_bottom_x}><loc_{right_bottom_y}>"
     )
-    left_top_x = _coordinate_to_loc(value=left_top_x / width)
-    left_top_y = _coordinate_to_loc(value=left_top_y / height)
-    right_bottom_x = _coordinate_to_loc(value=right_bottom_x / width)
-    right_bottom_y = _coordinate_to_loc(value=right_bottom_y / height)
-    return f"<loc_{left_top_x}><loc_{left_top_y}><loc_{right_bottom_x}><loc_{right_bottom_y}>"
 
 
 COORDINATES_EXTRACTION = {
@@ -539,12 +552,26 @@ def _extract_bbox_coordinates_as_location_prompt(
 
 
 def _coordinate_to_loc(value: float) -> int:
-    loc_bin = round(_scale_value(value=value, min_value=0.0, max_value=1.0) * LOC_BINS)
-    return _scale_value(  # to make sure 0-999 cutting out 1000 on 1.0
-        value=loc_bin,
-        min_value=0,
-        max_value=LOC_BINS - 1,
-    )
+    # Inlining and minimizing calls to improve performance
+    # Clamp value to [0.0, 1.0]
+    if value < 0.0:
+        value_clamped = 0.0
+    elif value > 1.0:
+        value_clamped = 1.0
+    else:
+        value_clamped = value
+
+    # Direct math instead of function call, then round
+    loc_bin_float = value_clamped * LOC_BINS
+    loc_bin = round(loc_bin_float)
+
+    # Clamp the result to [0, LOC_BINS - 1]
+    if loc_bin < 0:
+        return 0
+    elif loc_bin > LOC_BINS - 1:
+        return LOC_BINS - 1
+    else:
+        return loc_bin
 
 
 def _scale_value(
