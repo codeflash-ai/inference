@@ -1,5 +1,7 @@
 import supervision as sv
 
+_COLOR_NAMES = {name for name in dir(sv.Color) if not name.startswith("_")}
+
 
 def str_to_color(color: str) -> sv.Color:
     if color.startswith("#"):
@@ -10,7 +12,7 @@ def str_to_color(color: str) -> sv.Color:
     elif color.startswith("bgr"):
         b, g, r = map(int, color[4:-1].split(","))
         return sv.Color.from_bgr_tuple((b, g, r))
-    elif hasattr(sv.Color, color.upper()):
+    elif color.upper() in _COLOR_NAMES:
         return getattr(sv.Color, color.upper())
     else:
         raise ValueError(
