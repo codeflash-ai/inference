@@ -73,11 +73,17 @@ def draw_bbox(
     color: Tuple[int, ...],
     thickness: int,
 ) -> np.ndarray:
-    left_top, right_bottom = bbox_to_points(box=box)
+    # Inline bbox_to_points to reduce function call overhead
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    x2 = int(box.x + hw)
+    y1 = int(box.y - hh)
+    y2 = int(box.y + hh)
     return cv2.rectangle(
         image,
-        left_top,
-        right_bottom,
+        (x1, y1),
+        (x2, y2),
         color=color,
         thickness=thickness,
     )
@@ -150,8 +156,10 @@ def draw_labels(
 def bbox_to_points(
     box: Union[ObjectDetectionPrediction, InstanceSegmentationPrediction],
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    x1 = int(box.x - box.width / 2)
-    x2 = int(box.x + box.width / 2)
-    y1 = int(box.y - box.height / 2)
-    y2 = int(box.y + box.height / 2)
+    hw = box.width * 0.5
+    hh = box.height * 0.5
+    x1 = int(box.x - hw)
+    x2 = int(box.x + hw)
+    y1 = int(box.y - hh)
+    y2 = int(box.y + hh)
     return (x1, y1), (x2, y2)
