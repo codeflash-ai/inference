@@ -90,15 +90,7 @@ class BackgroundColorVisualizationBlockV1(PredictionsVisualizationBlock):
         color: str,
         opacity: float,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(
-                str,
-                [
-                    color,
-                    opacity,
-                ],
-            )
-        )
+        key = (color, opacity)
 
         if key not in self.annotatorCache:
             background_color = str_to_color(color)
