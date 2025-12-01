@@ -18,6 +18,24 @@ from inference.core.workflows.execution_engine.entities.types import (
 )
 from inference.core.workflows.prototypes.block import BlockResult
 
+_MPL_REVERSIBLE = {
+    "Greys_R",
+    "Purples_R",
+    "Blues_R",
+    "Greens_R",
+    "Oranges_R",
+    "Reds_R",
+    "Wistia",
+    "Pastel1",
+    "Pastel2",
+    "Paired",
+    "Accent",
+    "Dark2",
+    "Set1",
+    "Set2",
+    "Set3",
+}
+
 
 class ColorableVisualizationManifest(PredictionsVisualizationManifest, ABC):
     color_palette: Union[
@@ -116,35 +134,20 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
     @classmethod
     def getPalette(self, color_palette, palette_size, custom_colors):
         if color_palette == "CUSTOM":
-            return sv.ColorPalette(
-                colors=[str_to_color(color) for color in custom_colors]
-            )
+            # Use a helper to leverage str_to_color's LRU cache for large palettes
+            def cached_color(c):
+                return str_to_color(c)
+
+            colors = [cached_color(color) for color in custom_colors]
+            return sv.ColorPalette(colors=colors)
         elif hasattr(sv.ColorPalette, color_palette):
             return getattr(sv.ColorPalette, color_palette)
         else:
             palette_name = color_palette.replace("Matplotlib ", "")
-
-            if palette_name in [
-                "Greys_R",
-                "Purples_R",
-                "Blues_R",
-                "Greens_R",
-                "Oranges_R",
-                "Reds_R",
-                "Wistia",
-                "Pastel1",
-                "Pastel2",
-                "Paired",
-                "Accent",
-                "Dark2",
-                "Set1",
-                "Set2",
-                "Set3",
-            ]:
+            if palette_name in _MPL_REVERSIBLE:
                 palette_name = palette_name.capitalize()
             else:
                 palette_name = palette_name.lower()
-
             return sv.ColorPalette.from_matplotlib(palette_name, int(palette_size))
 
     @abstractmethod
