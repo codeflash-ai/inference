@@ -178,41 +178,40 @@ class KeypointVisualizationBlockV1(VisualizationBlock):
         annotator_type: str,
         edges: List[Tuple[int, int]],
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(
-                str,
-                [
-                    color,
-                    text_color,
-                    text_scale,
-                    text_thickness,
-                    text_padding,
-                    thickness,
-                    radius,
-                    annotator_type,
-                ],
-            )
+        # Use a tuple for cache key to avoid string join overhead and collisions
+        key = (
+            color,
+            text_color,
+            text_scale,
+            text_thickness,
+            text_padding,
+            thickness,
+            radius,
+            annotator_type,
         )
 
         if key not in self.annotatorCache:
-            color = str_to_color(color)
-            text_color = str_to_color(text_color)
+            color_obj = str_to_color(color)
+            # Only needed for "vertex_label"
+            text_color_obj = (
+                str_to_color(text_color) if annotator_type == "vertex_label" else None
+            )
 
             if annotator_type == "edge":
                 self.annotatorCache[key] = sv.EdgeAnnotator(
-                    color=color,
+                    color=color_obj,
                     thickness=thickness,
                     edges=edges,
                 )
             elif annotator_type == "vertex":
                 self.annotatorCache[key] = sv.VertexAnnotator(
-                    color=color,
+                    color=color_obj,
                     radius=radius,
                 )
             elif annotator_type == "vertex_label":
                 self.annotatorCache[key] = sv.VertexLabelAnnotator(
-                    color=color,
-                    text_color=text_color,
+                    color=color_obj,
+                    text_color=text_color_obj,
                     text_scale=text_scale,
                     text_thickness=text_thickness,
                     text_padding=text_padding,
