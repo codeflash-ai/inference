@@ -2,7 +2,6 @@ import math
 import statistics
 from collections import Counter
 from enum import Enum
-from functools import lru_cache
 from typing import Dict, Generator, List, Literal, Optional, Set, Tuple, Type, Union
 from uuid import uuid4
 
@@ -44,6 +43,23 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlock,
     WorkflowBlockManifest,
 )
+
+
+# Precompute and cache on module load for faster access
+_PRECOMPUTED_OUTPUTS: List[OutputDefinition] = [
+    OutputDefinition(
+        name="predictions",
+        kind=[
+            OBJECT_DETECTION_PREDICTION_KIND,
+            INSTANCE_SEGMENTATION_PREDICTION_KIND,
+        ],
+    ),
+    OutputDefinition(name="object_present", kind=[BOOLEAN_KIND, DICTIONARY_KIND]),
+    OutputDefinition(
+        name="presence_confidence",
+        kind=[FLOAT_ZERO_TO_ONE_KIND, DICTIONARY_KIND],
+    ),
+]
 
 
 class AggregationMode(Enum):
@@ -177,24 +193,9 @@ class BlockManifest(WorkflowBlockManifest):
         return ["predictions_batches"]
 
     @classmethod
-    @lru_cache(maxsize=None)
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="predictions",
-                kind=[
-                    OBJECT_DETECTION_PREDICTION_KIND,
-                    INSTANCE_SEGMENTATION_PREDICTION_KIND,
-                ],
-            ),
-            OutputDefinition(
-                name="object_present", kind=[BOOLEAN_KIND, DICTIONARY_KIND]
-            ),
-            OutputDefinition(
-                name="presence_confidence",
-                kind=[FLOAT_ZERO_TO_ONE_KIND, DICTIONARY_KIND],
-            ),
-        ]
+        # Return the precomputed, immutable outputs directly for fastest access.
+        return _PRECOMPUTED_OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
