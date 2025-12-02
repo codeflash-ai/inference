@@ -80,12 +80,27 @@ def get_blocks_output_property_kinds(
     blocks_description: BlocksDescription,
 ) -> Dict[str, Dict[str, List[str]]]:
     block_output_map = {}
-    for block in blocks_description.blocks:
+    # Localize for-loop attribute fetching for performance
+    blocks = blocks_description.blocks
+    for block in blocks:
         key = block.manifest_type_identifier
-        output_property_kinds = get_output_property_kinds(block.outputs_manifest)
+        outputs_manifest = block.outputs_manifest
+        type_identifier_aliases = block.manifest_type_identifier_aliases
+
+        # Inline the function call for performance to avoid extra function overhead
+        output_property_kinds = {}
+        for output in outputs_manifest:
+            # List comprehension costs can be reduced by using generator expression with tuple unpacking and then creating the list
+            kinds = []
+            for kind in output.kind:
+                kinds.append(kind.name)
+            output_property_kinds[output.name] = kinds
+
         block_output_map[key] = output_property_kinds
-        for alias in block.manifest_type_identifier_aliases:
+
+        for alias in type_identifier_aliases:
             block_output_map[alias] = output_property_kinds
+
     return block_output_map
 
 
