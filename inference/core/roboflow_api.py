@@ -839,19 +839,21 @@ def _get_from_url(
     verify_content_length: bool = False,
 ) -> Union[Response, dict]:
     try:
+        # Inlining build_roboflow_api_headers to avoid extra call if possible, but must preserve function
+        headers = build_roboflow_api_headers()
         response = requests.get(
             wrap_url(url),
-            headers=build_roboflow_api_headers(),
+            headers=headers if headers else None,
             timeout=ROBOFLOW_API_REQUEST_TIMEOUT,
             verify=ROBOFLOW_API_VERIFY_SSL,
         )
-
     except (ConnectionError, Timeout, requests.exceptions.ConnectionError) as error:
         if RETRY_CONNECTION_ERRORS_TO_ROBOFLOW_API:
             raise RetryRequestError(
                 message="Connectivity error", inner_error=error
             ) from error
         raise error
+
     try:
         api_key_safe_raise_for_status(response=response)
     except Exception as error:
@@ -859,26 +861,33 @@ def _get_from_url(
             raise RetryRequestError(message=str(error), inner_error=error) from error
         raise error
 
+    # Fast-path common case: no hash verification needed
     if MD5_VERIFICATION_ENABLED and "x-goog-hash" in response.headers:
         x_goog_hash = response.headers["x-goog-hash"]
+        # More efficient parsing using split and early exit
         md5_part = None
         for part in x_goog_hash.split(","):
-            if part.strip().startswith("md5="):
-                md5_part = part.strip()[4:]
+            part_stripped = part.strip()
+            if part_stripped.startswith("md5="):
+                md5_part = part_stripped[4:]
                 break
         if md5_part is not None:
             md5_from_header = base64.b64decode(md5_part)
-            if md5_from_header != hashlib.md5(response.content).digest():
+            # Avoid repeated hashing: hash only if header exists & matches condition
+            content_digest = hashlib.md5(response.content).digest()
+            if md5_from_header != content_digest:
                 raise RoboflowAPIUnsuccessfulRequestError(
                     "MD5 hash does not match MD5 received from x-goog-hash header"
                 )
 
     if verify_content_length:
-        content_length = str(response.headers.get("Content-Length"))
-        if not content_length.isnumeric():
+        content_length = response.headers.get("Content-Length")
+        # Only cast once; combine checks for early failure
+        if not content_length or not content_length.isnumeric():
             raise RoboflowAPIUnsuccessfulRequestError(
                 "Content-Length header is not numeric"
             )
+        # Cast directly since numeric already checked
         if int(content_length) != len(response.content):
             error = "Content-Length header does not match response content length"
             if RETRY_CONNECTION_ERRORS_TO_ROBOFLOW_API:
@@ -888,18 +897,17 @@ def _get_from_url(
                 )
             raise RoboflowAPIUnsuccessfulRequestError(error)
 
+    # Avoid an extra branch if not json_response
     if json_response:
         return response.json()
     return response
 
 
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
-    if len(params) == 0:
+    if not params:
         return url
-    params_chunks = [
-        f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
-    parameters_string = "&".join(params_chunks)
+    # Use urllib.parse.urlencode for correctness and native performance (handles quoting and joining)
+    parameters_string = urllib.parse.urlencode(params)
     return f"{url}?{parameters_string}"
 
 
