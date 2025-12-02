@@ -19,6 +19,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEFINITION_RGB_COLOR = OutputDefinition(name="rgb_color", kind=[RGB_COLOR_KIND])
+
 SHORT_DESCRIPTION = "Get the dominant color of an image in RGB format."
 LONG_DESCRIPTION = """
 Extract the dominant color from an input image using K-means clustering.
@@ -85,9 +87,7 @@ class DominantColorManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="rgb_color", kind=[RGB_COLOR_KIND]),
-        ]
+        return [_OUTPUT_DEFINITION_RGB_COLOR]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
