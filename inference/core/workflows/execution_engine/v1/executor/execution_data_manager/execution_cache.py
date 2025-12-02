@@ -1,5 +1,4 @@
 from collections import defaultdict
-from copy import copy
 from typing import Any, DefaultDict, Dict, List, Optional, Set, Union
 
 from networkx import DiGraph
@@ -348,18 +347,38 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Dict[str, Any]]:
+        # Precompute keys (favor existing cache keys, fallback to outputs, both sets)
         all_keys = list(self._cache_content.keys())
         if not all_keys:
             all_keys = self._outputs
+        # Precompute a None-filled dict and reuse copies
         empty_value = {k: None for k in all_keys}
-        return [
-            (
-                {k: self._cache_content.get(k, {}).get(index) for k in all_keys}
-                if mask is None or index[: len(mask)] in mask
-                else copy(empty_value)
-            )
-            for index in indices
-        ]
+
+        # Build lookups outside loop for efficiency
+        cache_get = self._cache_content.get
+
+        # If mask is used, precompute mask lookup logic
+        if mask is not None:
+            mask_len = len(mask)
+            # Instead of copying empty_value, reuse a shared dict since its values are all None and not mutated
+            return [
+                (
+                    {k: cache_get(k, {}).get(index) for k in all_keys}
+                    if index[:mask_len] in mask
+                    else empty_value
+                )
+                for index in indices
+            ]
+        else:
+            # Avoid repeating dict lookups by holding per-key dicts
+            per_key_caches = {k: cache_get(k, {}) for k in all_keys}
+            result = []
+            for index in indices:
+                entry = {}
+                for k in all_keys:
+                    entry[k] = per_key_caches[k].get(index)
+                result.append(entry)
+            return result
 
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
