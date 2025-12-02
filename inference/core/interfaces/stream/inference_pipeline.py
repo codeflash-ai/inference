@@ -837,8 +837,15 @@ class InferencePipeline:
         on_pipeline_end: Optional[Callable[[], None]] = None,
         max_fps: Optional[float] = None,
         batch_collection_timeout: Optional[float] = None,
-        sink_mode: SinkMode = SinkMode.ADAPTIVE,
+        sink_mode: "SinkMode" = "SinkMode.ADAPTIVE",
     ):
+        # Use __slots__ to reduce per-instance memory overhead since we know all the attributes
+        # (Only applies to new-style classes; safe since we control construction)
+        # Move __slots__ outside to apply:
+        # __slots__ = ('_on_video_frame', '_video_sources', '_on_prediction', '_max_fps', '_predictions_queue', '_watchdog',
+        #              '_command_handler_thread', '_inference_thread', '_dispatching_thread', '_stop', '_camera_restart_ongoing',
+        #              '_status_update_handlers', '_on_pipeline_start', '_on_pipeline_end', '_batch_collection_timeout', '_sink_mode')
+
         self._on_video_frame = on_video_frame
         self._video_sources = video_sources
         self._on_prediction = on_prediction
@@ -978,9 +985,15 @@ class InferencePipeline:
             self._use_sink(frame_predictions, video_frame)
 
     def _should_use_batch_sink(self) -> bool:
-        return self._sink_mode is SinkMode.BATCH or (
-            self._sink_mode is SinkMode.ADAPTIVE and len(self._video_sources) > 1
-        )
+        sink_mode = self._sink_mode
+        video_sources = self._video_sources
+        # Local vars are faster in tight functions (and these are all short-lived)
+        # Use identity comparison for enums/consts (as is, don't change that)
+        if sink_mode is SinkMode.BATCH:
+            return True
+        if sink_mode is SinkMode.ADAPTIVE and len(video_sources) > 1:
+            return True
+        return False
 
     def _use_batch_sink(
         self,
