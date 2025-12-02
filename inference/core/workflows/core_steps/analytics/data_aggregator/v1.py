@@ -571,14 +571,21 @@ def ensure_states_initialised(
     data_names: Iterable[str],
     aggregation_mode: Dict[str, List[AggregationType]],
 ) -> Dict[str, AggregationState]:
+    # Optimization: Prebind local vars for fast lookup in loops
+    state_initializers = STATE_INITIALIZERS
+    cache = aggregation_cache
+    get_aggregation_modes = aggregation_mode.get
     for data_name in data_names:
-        for mode in aggregation_mode.get(data_name, []):
-            state_key = generate_state_key(field_name=data_name, aggregation_mode=mode)
-            if state_key in aggregation_cache:
+        modes = get_aggregation_modes(data_name, [])
+        # Avoid attribute lookups, fuse loops
+        for mode in modes:
+            # Avoid extra function call since format is simple and used consistently
+            state_key = f"{data_name}_{mode}"
+            if state_key in cache:
                 continue
-            state = STATE_INITIALIZERS[mode]()
-            aggregation_cache[f"{data_name}_{mode}"] = state
-    return aggregation_cache
+            # Direct constructor calling
+            cache[state_key] = state_initializers[mode]()
+    return cache
 
 
 def generate_state_key(field_name: str, aggregation_mode: str) -> str:
