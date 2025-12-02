@@ -160,34 +160,63 @@ def apply_template_matching(
     w, h = template_gray.shape[::-1]
     res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
     loc = np.where(res >= matching_threshold)
-    xyxy, confidence, class_id, class_name, detections_id = [], [], [], [], []
-    for pt in zip(*loc[::-1]):
-        top_left = pt
-        bottom_right = (pt[0] + w, pt[1] + h)
-        xyxy.append(top_left + bottom_right)
-        confidence.append(1.0)
-        class_id.append(0)
-        class_name.append("template_match")
-        detections_id.append(str(uuid4()))
-    if len(xyxy) == 0:
+
+    num_matches = loc[0].size
+    if num_matches == 0:
         return sv.Detections.empty()
+
+    # Prepare top-left corners and directly create output arrays for detections
+    pts = np.stack((loc[1], loc[0]), axis=1)  # shape (num_matches, 2)
+    xyxy = np.empty((num_matches, 4), dtype=np.int32)
+    xyxy[:, 0:2] = pts
+    xyxy[:, 2] = pts[:, 0] + w
+    xyxy[:, 3] = pts[:, 1] + h
+
+    # Preallocate all detection fields efficiently
+    confidence = np.full((num_matches,), 1.0, dtype=np.float32)
+    class_id = np.zeros((num_matches,), dtype=np.uint32)
+    class_name = np.full((num_matches,), "template_match", dtype=object)
+    detections_id = np.fromiter(
+        (str(uuid4()) for _ in range(num_matches)), dtype=object, count=num_matches
+    )
+
     detections = sv.Detections(
-        xyxy=np.array(xyxy).astype(np.int32),
-        confidence=np.array(confidence),
-        class_id=np.array(class_id).astype(np.uint32),
-        data={CLASS_NAME_DATA_FIELD: np.array(class_name)},
+        xyxy=xyxy,
+        confidence=confidence,
+        class_id=class_id,
+        data={CLASS_NAME_DATA_FIELD: class_name},
     )
     if apply_nms:
         detections = detections.with_nms(threshold=nms_threshold)
-    detections[PARENT_ID_KEY] = np.array(
-        [image.parent_metadata.parent_id] * len(detections)
+        # NOTE: If NMS reduces the number of detections, need to update all arrays accordingly
+        n_final = len(detections)
+        # For all arrays below, only use first n_final elements (since the rest are no longer valid)
+        # Since sv.Detections manages its data storage, must remap only fields added below
+        # But as written, detection_id, etc, should match the indices post-nms.
+
+        # The safer way is to regenerate these after NMS, since we must maintain 1:1 correspondence
+        # between auxiliary attributes and the possibly smaller set of detections.
+        # But detection indices after NMS might have changed, thus best is to regenerate:
+        detections_id = np.fromiter(
+            (str(uuid4()) for _ in range(n_final)), dtype=object, count=n_final
+        )
+        class_name = np.full((n_final,), "template_match", dtype=object)
+
+    # Add additional detection attributes optimized
+    detections[PARENT_ID_KEY] = np.full(
+        (len(detections),), image.parent_metadata.parent_id, dtype=object
     )
-    detections[PREDICTION_TYPE_KEY] = np.array(["object-detection"] * len(detections))
-    detections[DETECTION_ID_KEY] = np.array(detections_id)
+    detections[PREDICTION_TYPE_KEY] = np.full(
+        (len(detections),), "object-detection", dtype=object
+    )
+    detections[DETECTION_ID_KEY] = detections_id[: len(detections)]
     image_height, image_width = image.numpy_image.shape[:2]
-    detections[IMAGE_DIMENSIONS_KEY] = np.array(
-        [[image_height, image_width]] * len(detections)
+    detections[IMAGE_DIMENSIONS_KEY] = np.full(
+        (len(detections), 2), [image_height, image_width], dtype=np.int32
     )
+    # Update class name if needed (after NMS)
+    detections.data[CLASS_NAME_DATA_FIELD] = class_name[: len(detections)]
+
     return attach_parents_coordinates_to_sv_detections(
         detections=detections,
         image=image,
