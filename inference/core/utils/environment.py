@@ -3,6 +3,10 @@ from typing import Any, Callable, List, Optional, Type, TypeVar, Union
 
 from inference.core.exceptions import InvalidEnvironmentVariableError
 
+_TRUE_STRINGS = {"true", "1", "yes", "on"}
+
+_FALSE_STRINGS = {"false", "0", "no", "off"}
+
 T = TypeVar("T")
 
 
@@ -28,28 +32,29 @@ def str2bool(value: Any) -> bool:
     Converts an environment variable to a boolean value.
 
     Args:
-        value (str or bool): The environment variable value to be converted.
+        value (str or bool or int): The environment variable value to be converted.
 
     Returns:
         bool: The converted boolean value.
 
     Raises:
-        InvalidEnvironmentVariableError: If the value is not 'true', 'false', or a boolean.
+        InvalidEnvironmentVariableError: If the value cannot be converted to a boolean.
     """
-    if isinstance(value, bool):
+    # Fast path for bool and int, bypass string logic entirely
+    if type(value) is bool:
         return value
-    if not issubclass(type(value), str):
-        raise InvalidEnvironmentVariableError(
-            f"Expected a boolean environment variable (true or false) but got '{value}'"
-        )
-    if value.lower() == "true":
-        return True
-    elif value.lower() == "false":
-        return False
-    else:
-        raise InvalidEnvironmentVariableError(
-            f"Expected a boolean environment variable (true or false) but got '{value}'"
-        )
+    if type(value) is int:
+        return bool(value)
+    # Accept only string type for str parsing
+    if type(value) is str:
+        v = value.lower().strip()
+        if v in _TRUE_STRINGS:
+            return True
+        if v in _FALSE_STRINGS:
+            return False
+    raise InvalidEnvironmentVariableError(
+        f"Expected a boolean environment variable (true or false) but got '{value}'"
+    )
 
 
 def safe_split_value(value: Optional[str], delimiter: str = ",") -> Optional[List[str]]:
