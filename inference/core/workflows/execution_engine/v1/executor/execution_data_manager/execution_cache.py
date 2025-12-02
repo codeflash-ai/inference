@@ -334,14 +334,16 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Any]:
-        return [
-            (
-                self._cache_content.get(property_name, {}).get(index)
-                if mask is None or index in mask
-                else None
-            )
-            for index in indices
-        ]
+        prop_content = self._cache_content.get(property_name)
+        if prop_content is None:
+            if mask is None:
+                return [None] * len(indices)
+            else:
+                return [None if index in mask else None for index in indices]
+
+        if mask is None:
+            return [prop_content.get(index) for index in indices]
+        return [prop_content.get(index) if index in mask else None for index in indices]
 
     def get_all_outputs(
         self,
