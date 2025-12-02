@@ -894,11 +894,13 @@ def _get_from_url(
 
 
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
-    if len(params) == 0:
+    if not params:
         return url
-    params_chunks = [
-        f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
+    quote_plus = urllib.parse.quote_plus  # Local reference for faster access
+    # Pre-allocate the list with the required size for memory efficiency
+    params_chunks = [None] * len(params)
+    for i, (name, value) in enumerate(params):
+        params_chunks[i] = f"{name}={quote_plus(value)}"
     parameters_string = "&".join(params_chunks)
     return f"{url}?{parameters_string}"
 
