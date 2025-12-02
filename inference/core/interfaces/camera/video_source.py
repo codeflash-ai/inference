@@ -1023,41 +1023,63 @@ class VideoConsumer:
             >= self._maximum_adaptive_frames_dropped_in_row
         ):
             return False
-        if (
-            len(self._stream_consumption_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
-        ):
+
+        # Save method attribute access
+        stream_timestamps = self._stream_consumption_pace_monitor.all_timestamps
+        min_adaptive_samples = self._minimum_adaptive_mode_samples
+        if len(stream_timestamps) <= min_adaptive_samples:
+            # not enough observations
             # not enough observations
             return False
-        if hasattr(self._stream_consumption_pace_monitor, "fps"):
-            stream_consumption_pace = self._stream_consumption_pace_monitor.fps
+
+        # Inline most-streamlined 'get fps'
+        stream_consumption_monitor = self._stream_consumption_pace_monitor
+        # Access .fps directly unless it's not a property
+        if hasattr(stream_consumption_monitor, "fps"):
+            stream_consumption_pace = stream_consumption_monitor.fps
         else:
-            stream_consumption_pace = self._stream_consumption_pace_monitor()
-        announced_stream_fps = stream_consumption_pace
-        if declared_source_fps is not None and declared_source_fps > 0:
-            announced_stream_fps = declared_source_fps
+            stream_consumption_pace = stream_consumption_monitor()
+
+        announced_stream_fps = (
+            declared_source_fps
+            if declared_source_fps is not None and declared_source_fps > 0
+            else stream_consumption_pace
+        )
+
         if (
             announced_stream_fps - stream_consumption_pace
             > self._adaptive_mode_stream_pace_tolerance
         ):
             # cannot keep up with stream emission
             return True
+
+        reader_timestamps = self._reader_pace_monitor.all_timestamps
+        decoding_timestamps = self._decoding_pace_monitor.all_timestamps
+
         if (
-            len(self._reader_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
-        ) or (
-            len(self._decoding_pace_monitor.all_timestamps)
-            <= self._minimum_adaptive_mode_samples
+            len(reader_timestamps) <= min_adaptive_samples
+            or len(decoding_timestamps) <= min_adaptive_samples
         ):
             # not enough observations
             return False
-        actual_reader_pace = get_fps_if_tick_happens_now(
-            fps_monitor=self._reader_pace_monitor
-        )
-        if hasattr(self._decoding_pace_monitor, "fps"):
-            decoding_pace = self._decoding_pace_monitor.fps
+
+        # Avoid function call if length 0, since get_fps_if_tick_happens_now does that check too
+        if len(reader_timestamps) == 0:
+            actual_reader_pace = 0.0
         else:
-            decoding_pace = self._decoding_pace_monitor()
+            # Inlined get_fps_if_tick_happens_now for small speed gain, no functional diff
+            min_reader_timestamp = reader_timestamps[0]
+            now = time.monotonic()
+            epsilon = 1e-8
+            reader_taken_time = (now - min_reader_timestamp) + epsilon
+            actual_reader_pace = (len(reader_timestamps) + 1) / reader_taken_time
+
+        decoding_monitor = self._decoding_pace_monitor
+        if hasattr(decoding_monitor, "fps"):
+            decoding_pace = decoding_monitor.fps
+        else:
+            decoding_pace = decoding_monitor()
+
         if (
             decoding_pace - actual_reader_pace
             > self._adaptive_mode_reader_pace_tolerance
