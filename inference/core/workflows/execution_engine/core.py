@@ -18,6 +18,7 @@ from inference.core.workflows.execution_engine.v1.core import (
     EXECUTION_ENGINE_V1_VERSION,
     ExecutionEngineV1,
 )
+from functools import lru_cache
 
 REGISTERED_ENGINES = {
     EXECUTION_ENGINE_V1_VERSION: ExecutionEngineV1,
@@ -130,6 +131,7 @@ def _select_execution_engine(
     return REGISTERED_ENGINES[matching_versions[0]]
 
 
+@lru_cache(maxsize=16)
 def _prepare_requested_version_specifier_set(
     requested_engine_version: Version,
 ) -> SpecifierSet:
