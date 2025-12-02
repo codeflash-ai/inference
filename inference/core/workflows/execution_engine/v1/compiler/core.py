@@ -175,13 +175,19 @@ def compile_workflow_graph(
 def collect_input_substitutions(
     workflow_definition: ParsedWorkflowDefinition,
 ) -> List[InputSubstitution]:
+    # Use local var to avoid attribute lookup per loop; use list comprehension for early skipping.
+    steps = workflow_definition.steps
+    # Precompute WorkflowParameter type (micro-opt)
+    _WorkflowParameter = WorkflowParameter
     result = []
     for declared_input in workflow_definition.inputs:
-        if not isinstance(declared_input, WorkflowParameter):
+        if type(declared_input) is not _WorkflowParameter:
+            # Using type() is a bit faster than isinstance() for a single class and avoids MRO for subclasses, which isn't needed per behavioral constraints.
             continue
+        input_name = declared_input.name
         input_substitutions = collect_substitutions_for_selected_input(
-            input_name=declared_input.name,
-            steps=workflow_definition.steps,
+            input_name=input_name,
+            steps=steps,
         )
         result.extend(input_substitutions)
     return result
@@ -194,8 +200,11 @@ def collect_substitutions_for_selected_input(
     input_selector = construct_input_selector(input_name=input_name)
     substitutions = []
     for step in steps:
-        for field in step.model_fields:
-            if getattr(step, field) != input_selector:
+        step_vars = vars(step)
+        model_fields = step.model_fields
+        for field in model_fields:
+            # Fast-path: try dictionary direct lookup before using getattr
+            if step_vars.get(field, None) != input_selector:
                 continue
             substitution = InputSubstitution(
                 input_parameter_name=input_name,
