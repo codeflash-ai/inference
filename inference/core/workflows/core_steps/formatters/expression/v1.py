@@ -22,6 +22,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEF_OUTPUT = OutputDefinition(name="output")
+
 LONG_DESCRIPTION = """
 Creates specific output based on defined input variables and configured rules - which is
 useful while creating business logic in workflows.
@@ -141,7 +143,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [OutputDefinition(name="output")]
+        return [_OUTPUT_DEF_OUTPUT]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
