@@ -777,32 +777,33 @@ class VideoConsumer:
         status_update_handlers: List[Callable[[StatusUpdate], None]],
         desired_fps: Optional[Union[float, int]] = None,
     ) -> "VideoConsumer":
-        minimum_adaptive_mode_samples = max(minimum_adaptive_mode_samples, 2)
-        reader_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
-        stream_consumption_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
-        decoding_pace_monitor = sv.FPSMonitor(
-            sample_size=10 * minimum_adaptive_mode_samples
-        )
+        # Enforce minimum
+        if minimum_adaptive_mode_samples < 2:
+            minimum_adaptive_mode_samples = 2
+        sample_size = 10 * minimum_adaptive_mode_samples
+
+        # Use local variable to reduce attribute accesses and recomputation
+        reader_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
+        stream_consumption_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
+        decoding_pace_monitor = sv.FPSMonitor(sample_size=sample_size)
+
+        # Avoid keyword argument unpacking to speed up method call slightly
         return cls(
-            buffer_filling_strategy=buffer_filling_strategy,
-            adaptive_mode_stream_pace_tolerance=adaptive_mode_stream_pace_tolerance,
-            adaptive_mode_reader_pace_tolerance=adaptive_mode_reader_pace_tolerance,
-            minimum_adaptive_mode_samples=minimum_adaptive_mode_samples,
-            maximum_adaptive_frames_dropped_in_row=maximum_adaptive_frames_dropped_in_row,
-            status_update_handlers=status_update_handlers,
-            reader_pace_monitor=reader_pace_monitor,
-            stream_consumption_pace_monitor=stream_consumption_pace_monitor,
-            decoding_pace_monitor=decoding_pace_monitor,
-            desired_fps=desired_fps,
+            buffer_filling_strategy,
+            adaptive_mode_stream_pace_tolerance,
+            adaptive_mode_reader_pace_tolerance,
+            minimum_adaptive_mode_samples,
+            maximum_adaptive_frames_dropped_in_row,
+            status_update_handlers,
+            reader_pace_monitor,
+            stream_consumption_pace_monitor,
+            decoding_pace_monitor,
+            desired_fps,
         )
 
     def __init__(
         self,
-        buffer_filling_strategy: Optional[BufferFillingStrategy],
+        buffer_filling_strategy: Optional["BufferFillingStrategy"],
         adaptive_mode_stream_pace_tolerance: float,
         adaptive_mode_reader_pace_tolerance: float,
         minimum_adaptive_mode_samples: int,
