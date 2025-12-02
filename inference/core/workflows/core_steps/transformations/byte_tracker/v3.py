@@ -196,13 +196,18 @@ class InstanceCache:
 
     def __init__(self, size: int):
         size = max(1, size)
-        self._cache_inserts_track = deque(maxlen=size)
+        self._maxlen = size
+        self._cache_inserts_track = deque()
         self._cache = set()
 
     def record_instance(self, tracker_id: int) -> bool:
         in_cache = tracker_id in self._cache
         if not in_cache:
-            self._cache_new_tracker_id(tracker_id=tracker_id)
+            if len(self._cache) == self._maxlen:
+                to_drop = self._cache_inserts_track.popleft()
+                self._cache.remove(to_drop)
+            self._cache_inserts_track.append(tracker_id)
+            self._cache.add(tracker_id)
         return in_cache
 
     def _cache_new_tracker_id(self, tracker_id: int) -> None:
