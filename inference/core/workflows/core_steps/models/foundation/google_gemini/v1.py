@@ -717,14 +717,19 @@ def prepare_generation_config(
     temperature: Optional[float],
     response_mime_type: str = "text/plain",
 ) -> dict:
-    result = {
-        "max_output_tokens": max_tokens,
-        "response_mime_type": response_mime_type,
-        "candidate_count": 1,
-    }
-    if temperature is not None:
-        result["temperature"] = temperature
-    return result
+    if temperature is None:
+        return {
+            "max_output_tokens": max_tokens,
+            "response_mime_type": response_mime_type,
+            "candidate_count": 1,
+        }
+    else:
+        return {
+            "max_output_tokens": max_tokens,
+            "response_mime_type": response_mime_type,
+            "candidate_count": 1,
+            "temperature": temperature,
+        }
 
 
 def google_api_key_safe_raise_for_status(response: Response) -> None:
