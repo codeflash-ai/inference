@@ -481,13 +481,9 @@ class DistinctState(AggregationState):
         self._distinct = set()
 
     def on_data(self, value: Any) -> None:
-        if (
-            isinstance(value, list)
-            or isinstance(value, set)
-            or isinstance(value, tuple)
-        ):
-            for v in value:
-                self._distinct.add(v)
+        # Use a tuple for faster isinstance checks (single C call).
+        if isinstance(value, (list, set, tuple)):
+            self._distinct.update(value)
             return None
         self._distinct.add(value)
 
