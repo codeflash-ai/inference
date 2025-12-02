@@ -563,15 +563,16 @@ def deserialize_rgb_color_kind(
 
 
 def deserialize_bytes_kind(parameter: str, value: Any) -> bytes:
-    if not isinstance(value, str) and not isinstance(value, bytes):
-        raise RuntimeInputError(
-            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
-            f"bytes string, but invalid type of data found (`{type(value).__name__}`).",
-            context="workflow_execution | runtime_input_validation",
-        )
+    # Check bytes first for fast-path return, skip unnecessary type checks
     if isinstance(value, bytes):
         return value
-    return pybase64.b64decode(value)
+    if isinstance(value, str):
+        return pybase64.b64decode(value)
+    raise RuntimeInputError(
+        public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+        f"bytes string, but invalid type of data found (`{type(value).__name__}`).",
+        context="workflow_execution | runtime_input_validation",
+    )
 
 
 def deserialize_timestamp(parameter: str, value: Any) -> datetime:
