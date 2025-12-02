@@ -90,26 +90,35 @@ class BoundingBoxVisualizationBlockV1(ColorableVisualizationBlock):
         thickness: int,
         roundness: float,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(
-            map(str, [color_palette, palette_size, color_axis, thickness, roundness])
+        # Use tuple as cache key for speed and natural argument grouping
+        key = (
+            color_palette,
+            palette_size,
+            tuple(custom_colors),
+            color_axis,
+            thickness,
+            roundness,
         )
 
         if key not in self.annotatorCache:
-            palette = self.getPalette(color_palette, palette_size, custom_colors)
+            palette = self.getPalette(color_palette, palette_size, tuple(custom_colors))
+            # Cache color_lookup per color_axis alongside the annotator
+            color_lookup = getattr(sv.ColorLookup, color_axis)
 
             if roundness == 0:
-                self.annotatorCache[key] = sv.BoxAnnotator(
+                annotator = sv.BoxAnnotator(
                     color=palette,
-                    color_lookup=getattr(sv.ColorLookup, color_axis),
+                    color_lookup=color_lookup,
                     thickness=thickness,
                 )
             else:
-                self.annotatorCache[key] = sv.RoundBoxAnnotator(
+                annotator = sv.RoundBoxAnnotator(
                     color=palette,
-                    color_lookup=getattr(sv.ColorLookup, color_axis),
+                    color_lookup=color_lookup,
                     thickness=thickness,
                     roundness=roundness,
                 )
+            self.annotatorCache[key] = annotator
         return self.annotatorCache[key]
 
     def run(
