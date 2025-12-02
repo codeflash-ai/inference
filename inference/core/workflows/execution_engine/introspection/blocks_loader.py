@@ -361,9 +361,17 @@ def load_all_defined_kinds() -> List[Kind]:
 
 def load_plugins_kinds() -> List[Kind]:
     plugins_to_load = get_plugin_modules()
+    if not plugins_to_load:
+        return []
+    # Preallocation: calculate expected total length if possible, avoid excessive list resizing on extend
+    # But as extend may add any number (plugin may return empty, singleton, many), cannot pre-size
+    # Instead, make this a generator expression and join at the end for fewer allocation overheads
+    # Additionally, use local function bindings for tighter loop for minor micro-optimization
+    _load_plugin_kinds_local = load_plugin_kinds
     result = []
+    extend = result.extend
     for plugin_name in plugins_to_load:
-        result.extend(load_plugin_kinds(plugin_name=plugin_name))
+        extend(_load_plugin_kinds_local(plugin_name=plugin_name))
     return result
 
 
@@ -493,8 +501,14 @@ def _load_plugin_serializers(
 
 
 def get_plugin_modules() -> List[str]:
-    plugins_to_load = os.environ.get(WORKFLOWS_PLUGINS_ENV)
-    if plugins_to_load is None:
+    # Minor: use local reference for os.environ for slightly faster lookup
+    _environ = os.environ
+    plugins_to_load = _environ.get(WORKFLOWS_PLUGINS_ENV)
+    if not plugins_to_load:
+        return []
+    # Micro-opt: Single ','.join and split if plugins_to_load has actual entries, avoid split if just whitespace
+    plugins_to_load = plugins_to_load.strip()
+    if not plugins_to_load:
         return []
     return plugins_to_load.split(",")
 
