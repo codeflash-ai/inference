@@ -97,15 +97,16 @@ def construct_steps_flow_graph(
         execution_graph=execution_graph,
         category=NodeCategory.STEP_NODE,
     )
+    step_nodes_set = set(step_nodes)
     for step_node in step_nodes:
-        has_predecessors = False
-        for predecessor in execution_graph.predecessors(step_node):
-            start_node = predecessor if predecessor in step_nodes else super_start_node
-            steps_flow_graph.add_edge(start_node, step_node)
-            has_predecessors = True
-        if not has_predecessors:
+        predecessors = list(execution_graph.predecessors(step_node))
+        valid_predecessors = [p for p in predecessors if p in step_nodes_set]
+        for predecessor in valid_predecessors:
+            steps_flow_graph.add_edge(predecessor, step_node)
+        if not valid_predecessors:
             steps_flow_graph.add_edge(super_start_node, step_node)
-        for successor in execution_graph.successors(step_node):
-            if successor in step_nodes:
+        successors = list(execution_graph.successors(step_node))
+        for successor in successors:
+            if successor in step_nodes_set:
                 steps_flow_graph.add_edge(step_node, successor)
     return steps_flow_graph
