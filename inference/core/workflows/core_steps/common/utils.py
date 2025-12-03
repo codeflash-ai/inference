@@ -282,16 +282,14 @@ def sv_detections_to_root_coordinates(
                 keypoints += [shift_x, shift_y]
     if detections_copy.mask is not None:
         origin_mask_base = np.full((origin_height, origin_width), False)
-        new_anchored_masks = np.array(
-            [origin_mask_base.copy() for _ in detections_copy]
+        new_anchored_masks = np.zeros(
+            (len(detections_copy), origin_height, origin_width), dtype=bool
         )
-        for anchored_mask, original_mask in zip(
-            new_anchored_masks, detections_copy.mask
-        ):
+        for idx, original_mask in enumerate(detections_copy.mask):
             mask_h, mask_w = original_mask.shape
             # TODO: instead of shifting mask we could store contours in data instead of storing mask (even if calculated)
             #       it would be faster to shift contours but at expense of having to remember to generate mask from contour when it's needed
-            anchored_mask[shift_y : shift_y + mask_h, shift_x : shift_x + mask_w] = (
+            new_anchored_masks[idx, shift_y : shift_y + mask_h, shift_x : shift_x + mask_w] = (
                 original_mask
             )
         detections_copy.mask = new_anchored_masks
