@@ -36,6 +36,7 @@ from inference.core.exceptions import (
 )
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
+from functools import lru_cache
 
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
@@ -132,21 +133,27 @@ def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]
         Tuple[Any, Optional[ImageType]]: A tuple containing the extracted image data and the corresponding image type.
     """
     image_type = None
-    if issubclass(type(value), InferenceRequestImage):
-        image_type = value.type
-        value = value.value
-    elif issubclass(type(value), dict):
+    # Use type(...) is X instead of issubclass(type(...), X) for faster exact type checks
+    # Check for the most likely case first (dict), so reordered
+    typ = type(value)
+    if typ is dict:
         image_type = value.get("type")
         value = value.get("value")
-    allowed_payload_types = {e.value for e in ImageType}
+    elif typ is InferenceRequestImage:
+        image_type = value.type
+        value = value.value
     if image_type is None:
         return value, image_type
-    if image_type.lower() not in allowed_payload_types:
+    allowed_payload_types = _get_allowed_payload_types()
+    image_type_lower = image_type.lower()
+    if image_type_lower not in allowed_payload_types:
         raise InvalidImageTypeDeclared(
-            message=f"Declared image type: {image_type.lower()} which is not in allowed types: {allowed_payload_types}.",
+            message=(
+                f"Declared image type: {image_type_lower} which is not in allowed types: {allowed_payload_types}."
+            ),
             public_message="Image declaration contains not recognised image type.",
         )
-    return value, ImageType(image_type.lower())
+    return value, ImageType(image_type_lower)
 
 
 def load_image_with_known_type(
@@ -597,3 +604,9 @@ def encode_image_to_jpeg_bytes(image: np.ndarray, jpeg_quality: int = 90) -> byt
     encoding_param = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
     _, img_encoded = cv2.imencode(".jpg", image, encoding_param)
     return np.array(img_encoded).tobytes()
+
+
+@lru_cache(maxsize=1)
+def _get_allowed_payload_types() -> set:
+    # Compute allowed types once, since ImageType is presumably an Enum
+    return {e.value for e in ImageType}
