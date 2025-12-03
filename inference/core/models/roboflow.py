@@ -1101,7 +1101,7 @@ def color_mapping_available_in_environment(environment: Optional[dict]) -> bool:
     return (
         environment is not None
         and "COLORS" in environment
-        and issubclass(type(environment["COLORS"]), dict)
+        and isinstance(environment["COLORS"], dict)
     )
 
 
