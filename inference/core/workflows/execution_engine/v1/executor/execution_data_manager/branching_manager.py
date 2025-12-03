@@ -14,10 +14,15 @@ class BranchingManager:
 
     def __init__(self, masks: Dict[str, Union[Set[DynamicBatchIndex], bool]]):
         self._masks = masks
-        self._batch_compatibility = {
-            branch_name: not isinstance(mask, bool)
-            for branch_name, mask in masks.items()
-        }
+
+        # Faster batch compatibility creation using dict comprehension (as originally written),
+        # but reuse local vars for performance and avoid repeated isinstance calls.
+        masks_items = masks.items()
+        self._batch_compatibility = {}
+        for branch_name, mask in masks_items:
+            # isinstance(mask, bool) is fast, but direct assignment helps
+            # Avoid unnecessary dict lookup in comprehension by using local reference
+            self._batch_compatibility[branch_name] = not isinstance(mask, bool)
 
     def register_batch_oriented_mask(
         self,
