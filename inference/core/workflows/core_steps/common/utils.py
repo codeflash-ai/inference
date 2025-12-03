@@ -131,43 +131,45 @@ def add_inference_keypoints_to_sv_detections(
             f"Detected missmatch in number of detections in sv.Detections instance ({len(detections)}) "
             f"and `inference` predictions ({len(inference_prediction)}) while attempting to add keypoints metadata."
         )
-    keypoints_class_names = []
-    keypoints_class_ids = []
-    keypoints_confidences = []
-    keypoints_xy = []
-    for inference_detection in inference_prediction:
-        keypoints = inference_detection.get(KEYPOINTS_KEY_IN_INFERENCE_RESPONSE, [])
-        keypoints_class_names.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_class_ids.append(
-            np.array(
-                [k[KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE] for k in keypoints]
-            )
-        )
-        keypoints_confidences.append(
-            np.array(
-                [k[KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE] for k in keypoints],
-                dtype=np.float32,
-            )
-        )
-        keypoints_xy.append(
-            np.array([[k[X_KEY], k[Y_KEY]] for k in keypoints], dtype=np.float32)
-        )
-    detections[KEYPOINTS_CLASS_NAME_KEY_IN_SV_DETECTIONS] = np.array(
+    n = len(inference_prediction)
+    keypoints_class_names = [None] * n
+    keypoints_class_ids = [None] * n
+    keypoints_confidences = [None] * n
+    keypoints_xy = [None] * n
+
+    # Pre-bind variable names for speed
+    get = dict.get
+    arr = np.array
+
+    for i in range(n):
+        inference_detection = inference_prediction[i]
+        keypoints = get(inference_detection, KEYPOINTS_KEY_IN_INFERENCE_RESPONSE, ())
+        # Precompute lengths and use list comprehensions for faster execution,
+        # and avoid repeated key lookup by assigning to local variables.
+        class_names = []
+        class_ids = []
+        confidences = []
+        xy = []
+        for k in keypoints:
+            class_names.append(k[KEYPOINTS_CLASS_NAME_KEY_IN_INFERENCE_RESPONSE])
+            class_ids.append(k[KEYPOINTS_CLASS_ID_KEY_IN_INFERENCE_RESPONSE])
+            confidences.append(k[KEYPOINTS_CONFIDENCE_KEY_IN_INFERENCE_RESPONSE])
+            xy.append([k[X_KEY], k[Y_KEY]])
+        keypoints_class_names[i] = arr(class_names)
+        keypoints_class_ids[i] = arr(class_ids)
+        keypoints_confidences[i] = arr(confidences, dtype=np.float32)
+        keypoints_xy[i] = arr(xy, dtype=np.float32)
+
+    detections[KEYPOINTS_CLASS_NAME_KEY_IN_SV_DETECTIONS] = arr(
         keypoints_class_names, dtype="object"
     )
-    detections[KEYPOINTS_CLASS_ID_KEY_IN_SV_DETECTIONS] = np.array(
+    detections[KEYPOINTS_CLASS_ID_KEY_IN_SV_DETECTIONS] = arr(
         keypoints_class_ids, dtype="object"
     )
-    detections[KEYPOINTS_CONFIDENCE_KEY_IN_SV_DETECTIONS] = np.array(
+    detections[KEYPOINTS_CONFIDENCE_KEY_IN_SV_DETECTIONS] = arr(
         keypoints_confidences, dtype="object"
     )
-    detections[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS] = np.array(
-        keypoints_xy, dtype="object"
-    )
+    detections[KEYPOINTS_XY_KEY_IN_SV_DETECTIONS] = arr(keypoints_xy, dtype="object")
     return detections
 
 
