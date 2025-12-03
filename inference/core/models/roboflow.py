@@ -1116,7 +1116,14 @@ def is_model_artefacts_bucket_available() -> bool:
 
 
 def parse_keypoints_metadata(metadata: list) -> dict:
-    return {
-        e["object_class_id"]: {int(key): value for key, value in e["keypoints"].items()}
-        for e in metadata
-    }
+    # Using a local variable for the result dictionary to avoid dict comprehension overhead
+    # on larger metadata lists. Also, avoiding multiple lookups of "keypoints" key.
+    result = {}
+    for e in metadata:
+        keypoints = e["keypoints"]
+        # Preallocate a new dictionary for the keypoints mapping
+        keypoints_dict = {}
+        for key, value in keypoints.items():
+            keypoints_dict[int(key)] = value
+        result[e["object_class_id"]] = keypoints_dict
+    return result
