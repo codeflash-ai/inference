@@ -61,14 +61,22 @@ def is_step_selector(selector_or_value: Any) -> bool:
 def is_step_output_selector(selector_or_value: Any) -> bool:
     if not is_selector(selector_or_value=selector_or_value):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 3
-    )
+    s = selector_or_value
+    # Only one split needed; avoid creating three items of the split list if possible
+    # Use startswith and count('.')
+    # "$steps.{step}.{prop}" always has 2 dots: "$steps.step.property"
+    # Ensure only two dots (i.e., three segments)
+    return s.startswith("$steps.") and s.count(".") == 2
 
 
 def get_step_selector_from_its_output(step_output_selector: str) -> str:
-    return ".".join(step_output_selector.split(".")[:2])
+    # Returns "$steps.<step>" from Caret. Instead of splitting and joining, use partition.
+    # "$steps.foo.bar" => "$steps.foo"
+    s = step_output_selector
+    first, sep, rest = s.rpartition(".")
+    if first:
+        return first
+    return s  # If no dot, return as is
 
 
 def get_nodes_of_specific_category(
@@ -82,7 +90,12 @@ def get_nodes_of_specific_category(
 
 
 def get_last_chunk_of_selector(selector: str) -> str:
-    return selector.split(".")[-1]
+    # Instead of creating a list for split, use rpartition to get last chunk after last '.'
+    s = selector
+    head, sep, tail = s.rpartition(".")
+    if sep:
+        return tail
+    return s
 
 
 def is_flow_control_step(execution_graph: DiGraph, node: str) -> bool:
