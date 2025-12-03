@@ -94,11 +94,11 @@ def ensure_dynamic_blocks_allowed(dynamic_blocks_definitions: List[dict]) -> Non
     if not dynamic_blocks_definitions:
         return
 
-    # Check if we're using Modal for secure remote execution
-    is_modal_mode = WORKFLOWS_CUSTOM_PYTHON_EXECUTION_MODE == "modal"
-
-    # Allow if either local execution is enabled OR Modal mode is set
-    if not ALLOW_CUSTOM_PYTHON_EXECUTION_IN_WORKFLOWS and not is_modal_mode:
+    # Combined check for local or Modal mode without storing intermediate
+    if not (
+        ALLOW_CUSTOM_PYTHON_EXECUTION_IN_WORKFLOWS
+        or WORKFLOWS_CUSTOM_PYTHON_EXECUTION_MODE == "modal"
+    ):
         raise WorkflowEnvironmentConfigurationError(
             public_message="Cannot use dynamic blocks with custom Python code in this installation of `workflows`. "
             "This can be changed by either setting environmental variable "
