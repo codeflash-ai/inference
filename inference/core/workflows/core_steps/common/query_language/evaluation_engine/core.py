@@ -24,6 +24,9 @@ from inference.core.workflows.core_steps.common.query_language.errors import (
 from inference.core.workflows.core_steps.common.query_language.evaluation_engine.detection.geometry import (
     is_point_in_zone,
 )
+from inference.core.workflows.core_steps.common.query_language.operations.core import (
+    build_operations_chain,
+)
 
 BINARY_OPERATORS = {
     "==": lambda a, b: a == b,
@@ -116,23 +119,37 @@ def create_operand_builder(
     definition: Union[StaticOperand, DynamicOperand],
     execution_context: str,
 ) -> Callable[[Dict[str, T]], V]:
-    if isinstance(definition, StaticOperand):
-        return create_static_operand_builder(
-            definition, execution_context=execution_context
+    # Avoid repeated isinstance and call by using direct comparison and shared fast-path
+    # This is safe since DynamicOperand and StaticOperand are distinct types
+    cls = type(definition)
+    if cls is StaticOperand:
+        # Use fast path for StaticOperand
+        operations_fun = build_operations_chain(
+            operations=definition.operations,
+            execution_context=f"{execution_context}.operations",
         )
-    return create_dynamic_operand_builder(
-        definition, execution_context=execution_context
-    )
+        return partial(
+            static_operand_builder,
+            static_value=definition.value,
+            operations_function=operations_fun,
+        )
+    else:
+        # Assume only StaticOperand and DynamicOperand ever used
+        operations_fun = build_operations_chain(
+            operations=definition.operations,
+            execution_context=f"{execution_context}.operations",
+        )
+        return partial(
+            dynamic_operand_builder,
+            operand_name=definition.operand_name,
+            operations_function=operations_fun,
+        )
 
 
 def create_static_operand_builder(
     definition: StaticOperand,
     execution_context: str,
 ) -> Callable[[Dict[str, T]], V]:
-    # local import to avoid circular dependency of modules with operations and evaluation
-    from inference.core.workflows.core_steps.common.query_language.operations.core import (
-        build_operations_chain,
-    )
 
     operations_fun = build_operations_chain(
         operations=definition.operations,
@@ -157,10 +174,6 @@ def create_dynamic_operand_builder(
     definition: DynamicOperand,
     execution_context: str,
 ) -> Callable[[Dict[str, T]], V]:
-    # local import to avoid circular dependency of modules with operations and evaluation
-    from inference.core.workflows.core_steps.common.query_language.operations.core import (
-        build_operations_chain,
-    )
 
     operations_fun = build_operations_chain(
         operations=definition.operations,
