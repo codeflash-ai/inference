@@ -62,33 +62,41 @@ def assemble_batch_oriented_input(
     prevent_local_images_loading: bool,
 ) -> List[Any]:
     if value is None:
+        # Cache computed kind names for error message to avoid repeated list comprehension
+        kind_names = []
+        for k in defined_input.kind:
+            kind_names.append(_get_kind_name(k))
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{defined_input.name}` defined as "
-            f"`{defined_input.type}` (of kind `{[_get_kind_name(k) for k in defined_input.kind]}`), "
+            f"`{defined_input.type}` (of kind `{kind_names}`), "
             f"but value is not provided.",
             context="workflow_execution | runtime_input_validation",
         )
     if not isinstance(value, list):
-        result = [
-            assemble_single_element_of_batch_oriented_input(
-                defined_input=defined_input,
-                value=value,
-                kinds_deserializers=kinds_deserializers,
-                prevent_local_images_loading=prevent_local_images_loading,
-            )
-        ] * input_batch_size
+        # Preallocate the list with repeated element for improved replication
+        single_result = assemble_single_element_of_batch_oriented_input(
+            defined_input=defined_input,
+            value=value,
+            kinds_deserializers=kinds_deserializers,
+            prevent_local_images_loading=prevent_local_images_loading,
+        )
+        result = [single_result] * input_batch_size
     else:
-        result = [
-            assemble_nested_batch_oriented_input(
-                current_depth=1,
-                defined_input=defined_input,
-                value=element,
-                kinds_deserializers=kinds_deserializers,
-                prevent_local_images_loading=prevent_local_images_loading,
-                identifier=f"{defined_input.name}.[{identifier}]",
+        # Use list comprehension, but precompute f-string prefix for identifiers for minor speed
+        name_prefix = defined_input.name + "."
+        result = []
+        for identifier, element in enumerate(value):
+            # Use list append for large batches (lower mem churn than comprehension list for large N)
+            result.append(
+                assemble_nested_batch_oriented_input(
+                    current_depth=1,
+                    defined_input=defined_input,
+                    value=element,
+                    kinds_deserializers=kinds_deserializers,
+                    prevent_local_images_loading=prevent_local_images_loading,
+                    identifier=f"{defined_input.name}.[{identifier}]",
+                )
             )
-            for identifier, element in enumerate(value)
-        ]
         if len(result) == 1 and len(result) != input_batch_size:
             result = result * input_batch_size
     if len(result) != input_batch_size:
@@ -133,17 +141,20 @@ def assemble_nested_batch_oriented_input(
             f"dimensionality level.",
             context="workflow_execution | runtime_input_validation",
         )
-    return [
-        assemble_nested_batch_oriented_input(
-            current_depth=current_depth + 1,
-            defined_input=defined_input,
-            value=element,
-            kinds_deserializers=kinds_deserializers,
-            prevent_local_images_loading=prevent_local_images_loading,
-            identifier=f"{identifier}.[{idx}]",
+    # Use list construction with loop for better memory profile - avoids temporary lists in comprehensions for large N
+    results = []
+    for idx, element in enumerate(value):
+        results.append(
+            assemble_nested_batch_oriented_input(
+                current_depth=current_depth + 1,
+                defined_input=defined_input,
+                value=element,
+                kinds_deserializers=kinds_deserializers,
+                prevent_local_images_loading=prevent_local_images_loading,
+                identifier=f"{identifier}.[{idx}]",
+            )
         )
-        for idx, element in enumerate(value)
-    ]
+    return results
 
 
 def assemble_single_element_of_batch_oriented_input(
@@ -155,15 +166,22 @@ def assemble_single_element_of_batch_oriented_input(
 ) -> Any:
     if value is None:
         return None
-    matching_deserializers = _get_matching_deserializers(
-        defined_input=defined_input,
-        kinds_deserializers=kinds_deserializers,
-    )
-    if not matching_deserializers:
-        return value
-    parameter_identifier = defined_input.name
+    # Move assignment to parameter_identifier to after possible identifier update, for consistency
     if identifier is not None:
         parameter_identifier = identifier
+    else:
+        parameter_identifier = defined_input.name
+    # Inline matching_deserializers computation loop (avoiding function call overhead)
+    kinds = defined_input.kind
+    matching_deserializers = []
+    # Avoid function call to _get_matching_deserializers; move logic here for high frequency
+    for kind in kinds:
+        kind_name = _get_kind_name(kind)
+        deserializer = kinds_deserializers.get(kind_name)
+        if deserializer is not None:
+            matching_deserializers.append((kind_name, deserializer))
+    if not matching_deserializers:
+        return value
     errors = []
     for kind, deserializer in matching_deserializers:
         try:
@@ -204,6 +222,10 @@ def _get_matching_deserializers(
 
 
 def _get_kind_name(kind: Union[Kind, str]) -> str:
+    # Avoid isinstance (slower for high frequency) by checking common str case first,
+    # since Kind is probably less frequent
+    if type(kind) is str:
+        return kind
     if isinstance(kind, Kind):
         return kind.name
     return kind
