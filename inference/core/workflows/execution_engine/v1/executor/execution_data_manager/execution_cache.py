@@ -334,14 +334,28 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Any]:
-        return [
-            (
-                self._cache_content.get(property_name, {}).get(index)
-                if mask is None or index in mask
-                else None
-            )
-            for index in indices
-        ]
+        # Cache the inner dictionary lookup outside the loop to avoid repeated dict lookups
+        # as _cache_content.get(property_name, {}) will always be the same in this context.
+        property_dict = self._cache_content.get(property_name)
+        if property_dict is None:
+            # Fast path for missing property: avoid unnecessary looping
+            if mask is None:
+                return [None] * len(indices)
+            else:
+                return [
+                    None if mask is None or index in mask else None for index in indices
+                ]  # All None anyway
+
+        # If mask is not None, convert it to set only once (in case it's another set-like type)
+        if mask is not None and not isinstance(mask, set):
+            mask = set(mask)
+        # Direct access to property_dict for improved speed; avoids extra dict lookup per index
+        if mask is None:
+            return [property_dict.get(index) for index in indices]
+        else:
+            return [
+                property_dict.get(index) if index in mask else None for index in indices
+            ]
 
     def get_all_outputs(
         self,
