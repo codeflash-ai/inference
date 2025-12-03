@@ -163,7 +163,7 @@ def select_first_detection(detections: sv.Detections) -> sv.Detections:
 
 def select_last_detection(detections: sv.Detections) -> sv.Detections:
     if len(detections) == 0:
-        return deepcopy(detections)
+        return detections.copy()
     return detections[-1]
 
 
