@@ -1,5 +1,4 @@
 from collections import defaultdict
-from copy import copy
 from typing import Any, DefaultDict, Dict, List, Optional, Set, Union
 
 from networkx import DiGraph
@@ -348,18 +347,35 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Dict[str, Any]]:
-        all_keys = list(self._cache_content.keys())
+        # Collect keys with cached content
+        cache_content = self._cache_content
+        all_keys = list(cache_content.keys())
         if not all_keys:
             all_keys = self._outputs
         empty_value = {k: None for k in all_keys}
-        return [
-            (
-                {k: self._cache_content.get(k, {}).get(index) for k in all_keys}
-                if mask is None or index[: len(mask)] in mask
-                else copy(empty_value)
-            )
-            for index in indices
-        ]
+
+        # Pre-extract .get for hot path
+        cache_getters = {
+            k: cache_content[k].get if k in cache_content else lambda _: None
+            for k in all_keys
+        }
+
+        # Compute mask membership efficiently if mask is provided
+        use_mask = mask is not None
+        mask_len = len(mask) if use_mask else 0
+        mask_set = mask if use_mask else None
+
+        results = []
+        for index in indices:
+            if not use_mask or index[:mask_len] in mask_set:
+                d = {}
+                for k, getter in cache_getters.items():
+                    d[k] = getter(index)
+                results.append(d)
+            else:
+                # empty_value is never mutated so can be reused as the same dict object
+                results.append(empty_value)
+        return results
 
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
