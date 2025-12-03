@@ -423,9 +423,10 @@ def remove_unexpected_keys_from_dictionary(
     expected_keys: set,
 ) -> dict:
     """This function mutates input `dictionary`"""
-    unexpected_keys = set(dictionary.keys()).difference(expected_keys)
-    for unexpected_key in unexpected_keys:
-        del dictionary[unexpected_key]
+    # Avoid creating new set for dictionary keys; use view intersection for better performance
+    for key in list(dictionary.keys()):
+        if key not in expected_keys:
+            del dictionary[key]
     return dictionary
 
 
