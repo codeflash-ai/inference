@@ -175,35 +175,32 @@ def attach_parents_coordinates_to_batch_of_sv_detections(
     predictions: List[sv.Detections],
     images: Iterable[WorkflowImageData],
 ) -> List[sv.Detections]:
-    result = []
-    for prediction, image in zip(predictions, images):
-        result.append(
-            attach_parents_coordinates_to_sv_detections(
-                detections=prediction,
-                image=image,
-            )
-        )
-    return result
+    # Use list comprehension for faster result construction
+    return [
+        attach_parents_coordinates_to_sv_detections(prediction, image)
+        for prediction, image in zip(predictions, images)
+    ]
 
 
 def attach_parents_coordinates_to_sv_detections(
     detections: sv.Detections,
     image: WorkflowImageData,
 ) -> sv.Detections:
-    detections = attach_parent_coordinates_to_detections(
-        detections=detections,
-        parent_metadata=image.workflow_root_ancestor_metadata,
-        parent_id_key=ROOT_PARENT_ID_KEY,
-        coordinates_key=ROOT_PARENT_COORDINATES_KEY,
-        dimensions_key=ROOT_PARENT_DIMENSIONS_KEY,
+    # Combine both parent metadata updates in one function for better efficiency
+    # This way, we minimize intermediate copies and Python interpreter overhead
+    # Note: The signature and end behavior (two consecutive calls) are preserved
+    detections = _attach_both_parent_coordinates_to_detections(
+        detections,
+        image.workflow_root_ancestor_metadata,
+        ROOT_PARENT_ID_KEY,
+        ROOT_PARENT_COORDINATES_KEY,
+        ROOT_PARENT_DIMENSIONS_KEY,
+        image.parent_metadata,
+        PARENT_ID_KEY,
+        PARENT_COORDINATES_KEY,
+        PARENT_DIMENSIONS_KEY,
     )
-    return attach_parent_coordinates_to_detections(
-        detections=detections,
-        parent_metadata=image.parent_metadata,
-        parent_id_key=PARENT_ID_KEY,
-        coordinates_key=PARENT_COORDINATES_KEY,
-        dimensions_key=PARENT_DIMENSIONS_KEY,
-    )
+    return detections
 
 
 def attach_parent_coordinates_to_detections(
@@ -455,3 +452,59 @@ def run_in_parallel(tasks: List[Callable[[], T]], max_workers: int = 1) -> List[
 
 def _run(fun: Callable[[], T]) -> T:
     return fun()
+
+
+def _attach_both_parent_coordinates_to_detections(
+    detections: sv.Detections,
+    parent1_metadata,
+    parent1_id_key: str,
+    parent1_coordinates_key: str,
+    parent1_dimensions_key: str,
+    parent2_metadata,
+    parent2_id_key: str,
+    parent2_coordinates_key: str,
+    parent2_dimensions_key: str,
+) -> sv.Detections:
+    # Inline the attach_parent_coordinates_to_detections logic for both parents, avoid double intermediate copies
+    import numpy as np
+
+    # First parent
+    parent_coordinates_system = parent1_metadata.origin_coordinates
+    n = len(detections)
+    detections[parent1_id_key] = np.full(n, parent1_metadata.parent_id)
+    detections[parent1_coordinates_key] = np.repeat(
+        [[parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y]],
+        n,
+        axis=0,
+    )
+    detections[parent1_dimensions_key] = np.repeat(
+        [
+            [
+                parent_coordinates_system.origin_height,
+                parent_coordinates_system.origin_width,
+            ]
+        ],
+        n,
+        axis=0,
+    )
+
+    # Second parent
+    parent_coordinates_system = parent2_metadata.origin_coordinates
+    detections[parent2_id_key] = np.full(n, parent2_metadata.parent_id)
+    detections[parent2_coordinates_key] = np.repeat(
+        [[parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y]],
+        n,
+        axis=0,
+    )
+    detections[parent2_dimensions_key] = np.repeat(
+        [
+            [
+                parent_coordinates_system.origin_height,
+                parent_coordinates_system.origin_width,
+            ]
+        ],
+        n,
+        axis=0,
+    )
+
+    return detections
