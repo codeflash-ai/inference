@@ -37,6 +37,10 @@ from inference.core.exceptions import (
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
 
+_CV_IMREAD_COLOR: int = cv2.IMREAD_COLOR
+_CV_IMREAD_IGNORE_ORIENTATION: int = cv2.IMREAD_IGNORE_ORIENTATION
+_CV_IMREAD_COLOR_IGNORE_ORIENT: int = _CV_IMREAD_COLOR | _CV_IMREAD_IGNORE_ORIENTATION
+
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
 
@@ -113,10 +117,9 @@ def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     Returns:
         int: OpenCV image decoding flags.
     """
-    cv_imread_flags = cv2.IMREAD_COLOR
     if disable_preproc_auto_orient:
-        cv_imread_flags = cv_imread_flags | cv2.IMREAD_IGNORE_ORIENTATION
-    return cv_imread_flags
+        return _CV_IMREAD_COLOR_IGNORE_ORIENT
+    return _CV_IMREAD_COLOR
 
 
 def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]]:
