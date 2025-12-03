@@ -1537,9 +1537,10 @@ def grab_parameters_defining_batch_inputs(
 ) -> Set[str]:
     result = set()
     for paremeter, dimensionalities in inputs_dimensionalities.items():
-        batch_dimensionalities = {d for d in dimensionalities if d > 0}
-        if len(batch_dimensionalities):
-            result.add(paremeter)
+        for d in dimensionalities:
+            if d > 0:
+                result.add(paremeter)
+                break
     return result
 
 
