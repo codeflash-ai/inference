@@ -1782,8 +1782,8 @@ def establish_batch_oriented_step_lineage(
         dimensionality_reference_property=dimensionality_reference_property,
     )
     if output_dimensionality_offset < 0:
-        result_dimensionality = reference_lineage[:output_dimensionality_offset]
-        return result_dimensionality
+        # Slicing returns a copy for normal lists, so refcopy not needed.
+        return reference_lineage[:output_dimensionality_offset]
     if output_dimensionality_offset == 0:
         return reference_lineage
     reference_lineage.append(step_selector)
@@ -1797,7 +1797,9 @@ def get_reference_lineage(
     dimensionality_reference_property: Optional[str],
 ) -> List[str]:
     if len(all_lineages) == 1:
-        return copy(all_lineages[0])
+        # Only one lineage; simply return a shallow copy of the list
+        # Avoid using copy module for lists, as list.copy() is faster in CPython
+        return all_lineages[0].copy()
     if dimensionality_reference_property not in input_data:
         raise AssumptionError(
             public_message=f"Workflow Compiler for step: `{step_selector}` expected dimensionality_reference_property "
@@ -1809,20 +1811,18 @@ def get_reference_lineage(
         )
     property_data = input_data[dimensionality_reference_property]
     if property_data.is_compound_input():
-        lineage = None
         for nested_element in property_data.iterate_through_definitions():
             if nested_element.is_batch_oriented():
-                lineage = copy(nested_element.data_lineage)
-                return lineage
-        if lineage is None:
-            raise AssumptionError(
-                public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
-                f"At this stage it is expected to succeed - lack of success indicates bug. "
-                f"Contact Roboflow team through github issues "
-                f"(https://github.com/roboflow/inference/issues) providing full "
-                f"context of the problem - including workflow definition you use.",
-                context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
-            )
+                return nested_element.data_lineage.copy()
+        # lineage was never found
+        raise AssumptionError(
+            public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
+            f"At this stage it is expected to succeed - lack of success indicates bug. "
+            f"Contact Roboflow team through github issues "
+            f"(https://github.com/roboflow/inference/issues) providing full "
+            f"context of the problem - including workflow definition you use.",
+            context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
+        )
     if not property_data.is_batch_oriented():
         raise AssumptionError(
             public_message=f"Workflow Compiler for step: `{step_selector}` cannot establish output lineage. "
@@ -1832,7 +1832,7 @@ def get_reference_lineage(
             f"context of the problem - including workflow definition you use.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    return copy(property_data.data_lineage)
+    return property_data.data_lineage.copy()
 
 
 def get_property_with_invalid_selector(
