@@ -263,13 +263,16 @@ def retrieve_selectors_from_schema(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Dict[str, SelectorDefinition]:
-    result = []
-    for property_name, property_definition in schema[PROPERTIES_KEY].items():
+    # Pull values out once for improved efficiency
+    schema_properties = schema[PROPERTIES_KEY]
+    get_dimensionality_offset = inputs_dimensionality_offsets.get
+
+    result_append = []  # Pre-allocate list size is not possible; shortcut .append()
+    for property_name, property_definition in schema_properties.items():
         if property_name in EXCLUDED_PROPERTIES:
             continue
-        property_dimensionality_offset = inputs_dimensionality_offsets.get(
-            property_name, 0
-        )
+
+        property_dimensionality_offset = get_dimensionality_offset(property_name, 0)
         is_dimensionality_reference_property = (
             property_name == dimensionality_reference_property
         )
@@ -286,34 +289,39 @@ def retrieve_selectors_from_schema(
                 inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
-        elif property_definition.get(TYPE_KEY) == OBJECT_TYPE and isinstance(
-            property_definition.get(ADDITIONAL_PROPERTIES_KEY), dict
-        ):
-            selector = retrieve_selectors_from_simple_property(
-                property_name=property_name,
-                property_description=property_description,
-                property_definition=property_definition[ADDITIONAL_PROPERTIES_KEY],
-                property_dimensionality_offset=property_dimensionality_offset,
-                is_dimensionality_reference_property=is_dimensionality_reference_property,
-                is_dict_element=True,
-                inputs_accepting_batches=inputs_accepting_batches,
-                inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
-                inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
-            )
         else:
-            selector = retrieve_selectors_from_simple_property(
-                property_name=property_name,
-                property_description=property_description,
-                property_definition=property_definition,
-                property_dimensionality_offset=property_dimensionality_offset,
-                is_dimensionality_reference_property=is_dimensionality_reference_property,
-                inputs_accepting_batches=inputs_accepting_batches,
-                inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
-                inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
-            )
+            pd_type = property_definition.get(TYPE_KEY)
+            if (
+                pd_type is not None
+                and pd_type == OBJECT_TYPE
+                and isinstance(property_definition.get(ADDITIONAL_PROPERTIES_KEY), dict)
+            ):
+                selector = retrieve_selectors_from_simple_property(
+                    property_name=property_name,
+                    property_description=property_description,
+                    property_definition=property_definition[ADDITIONAL_PROPERTIES_KEY],
+                    property_dimensionality_offset=property_dimensionality_offset,
+                    is_dimensionality_reference_property=is_dimensionality_reference_property,
+                    is_dict_element=True,
+                    inputs_accepting_batches=inputs_accepting_batches,
+                    inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
+                    inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+                )
+            else:
+                selector = retrieve_selectors_from_simple_property(
+                    property_name=property_name,
+                    property_description=property_description,
+                    property_definition=property_definition,
+                    property_dimensionality_offset=property_dimensionality_offset,
+                    is_dimensionality_reference_property=is_dimensionality_reference_property,
+                    inputs_accepting_batches=inputs_accepting_batches,
+                    inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
+                    inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
+                )
         if selector is not None:
-            result.append(selector)
-    return OrderedDict((r.property_name, r) for r in result)
+            result_append.append(selector)
+    # Use dict comprehension directly for better cache-locality, also allows skipping empty cases
+    return OrderedDict((r.property_name, r) for r in result_append)
 
 
 def retrieve_selectors_from_simple_property(
@@ -345,13 +353,12 @@ def retrieve_selectors_from_simple_property(
                 }
         else:
             points_to_batch = {declared_points_to_batch}
+        # Hot-path: avoid list comprehension for singleton list
+        _kind_val = property_definition.get(KIND_KEY)
         allowed_references = [
             ReferenceDefinition(
                 selected_element=property_definition[SELECTED_ELEMENT_KEY],
-                kind=[
-                    Kind.model_validate(k)
-                    for k in property_definition.get(KIND_KEY, [])
-                ],
+                kind=[Kind.model_validate(k) for k in _kind_val] if _kind_val else [],
                 points_to_batch=points_to_batch,
             )
         ]
@@ -379,7 +386,12 @@ def retrieve_selectors_from_simple_property(
             inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             is_list_element=True,
         )
-    if property_defines_union(property_definition=property_definition):
+    # property_defines_union inlined for performance
+    if (
+        ANY_OF_KEY in property_definition
+        or ONE_OF_KEY in property_definition
+        or ALL_OF_KEY in property_definition
+    ):
         return retrieve_selectors_from_union_definition(
             property_name=property_name,
             property_description=property_description,
