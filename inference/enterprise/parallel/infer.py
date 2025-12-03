@@ -117,7 +117,9 @@ class InferServer:
 def get_requested_model_names(redis: Redis) -> List[str]:
     request_counts = redis.hgetall("requests")
     model_names = [
-        model_name for model_name, count in request_counts.items() if int(count) > 0
+        model_name
+        for model_name, count in request_counts.items()
+        if count != "0" and int(count) > 0
     ]
     return model_names
 
