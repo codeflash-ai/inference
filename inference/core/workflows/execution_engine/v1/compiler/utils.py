@@ -36,7 +36,7 @@ def construct_step_selector(step_name: str) -> str:
 
 
 def get_output_selectors(outputs: List[JsonField]) -> Set[str]:
-    return {construct_output_selector(name=output.name) for output in outputs}
+    return {f"$outputs.{output.name}" for output in outputs}
 
 
 def construct_output_selector(name: str) -> str:
