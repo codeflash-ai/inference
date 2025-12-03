@@ -333,25 +333,28 @@ def retrieve_selectors_from_simple_property(
             SELECTOR_POINTS_TO_BATCH_KEY, False
         )
         if declared_points_to_batch == "dynamic":
+            # reorder lookups for efficiency
+            auto_batch = property_name in inputs_enforcing_auto_batch_casting
             if property_name in inputs_accepting_batches_and_scalars:
-                if property_name in inputs_enforcing_auto_batch_casting:
+                if auto_batch:
                     points_to_batch = {True}
                 else:
                     points_to_batch = {True, False}
             else:
                 points_to_batch = {
-                    property_name in inputs_accepting_batches
-                    or property_name in inputs_enforcing_auto_batch_casting
+                    property_name in inputs_accepting_batches or auto_batch
                 }
         else:
             points_to_batch = {declared_points_to_batch}
+        # Use list comprehension directly, no change
+        # Avoid list allocation if no KIND_KEY, already handled by []
+        kind_values = property_definition.get(KIND_KEY)
         allowed_references = [
             ReferenceDefinition(
                 selected_element=property_definition[SELECTED_ELEMENT_KEY],
-                kind=[
-                    Kind.model_validate(k)
-                    for k in property_definition.get(KIND_KEY, [])
-                ],
+                kind=(
+                    [Kind.model_validate(k) for k in kind_values] if kind_values else []
+                ),
                 points_to_batch=points_to_batch,
             )
         ]
@@ -379,7 +382,10 @@ def retrieve_selectors_from_simple_property(
             inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             is_list_element=True,
         )
-    if property_defines_union(property_definition=property_definition):
+
+    # Avoid function call if no relevant keys
+    pd = property_definition
+    if ANY_OF_KEY in pd or ONE_OF_KEY in pd or ALL_OF_KEY in pd:
         return retrieve_selectors_from_union_definition(
             property_name=property_name,
             property_description=property_description,
@@ -415,12 +421,17 @@ def retrieve_selectors_from_union_definition(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Optional[SelectorDefinition]:
-    union_types = (
-        union_definition.get(ANY_OF_KEY, [])
-        + union_definition.get(ONE_OF_KEY, [])
-        + union_definition.get(ALL_OF_KEY, [])
-    )
+    # Pull union types efficiently
+    get = union_definition.get
+    union_types = []
+    for key in (ANY_OF_KEY, ONE_OF_KEY, ALL_OF_KEY):
+        types = get(key)
+        if types:
+            union_types.extend(types)
+
+    # Loop tight & avoid unnecessary function call if result will be empty
     results = []
+    append = results.append
     for type_definition in union_types:
         result = retrieve_selectors_from_simple_property(
             property_name=property_name,
@@ -433,35 +444,38 @@ def retrieve_selectors_from_union_definition(
             inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             is_list_element=is_list_element,
         )
-        if result is None:
-            continue
-        results.append(result)
+        if result is not None:
+            append(result)
+    if not results:
+        return None
+
+    # Flatten allowed references with itertools.chain
     results_references = list(
         itertools.chain.from_iterable(r.allowed_references for r in results)
     )
+
+    if not results_references:
+        return None
+
+    # Use a single loop to construct the merged dictionaries
     results_references_kind_by_selected_element = defaultdict(set)
     results_references_batch_pointing_by_selected_element = defaultdict(set)
     for reference in results_references:
-        results_references_kind_by_selected_element[reference.selected_element].update(
-            reference.kind
+        se = reference.selected_element
+        results_references_kind_by_selected_element[se].update(reference.kind)
+        results_references_batch_pointing_by_selected_element[se].update(
+            reference.points_to_batch
         )
-        results_references_batch_pointing_by_selected_element[
-            reference.selected_element
-        ].update(reference.points_to_batch)
-    merged_references = []
-    for (
-        reference_selected_element,
-        kind,
-    ) in results_references_kind_by_selected_element.items():
-        merged_references.append(
-            ReferenceDefinition(
-                selected_element=reference_selected_element,
-                kind=list(kind),
-                points_to_batch=results_references_batch_pointing_by_selected_element[
-                    reference_selected_element
-                ],
-            )
+
+    merged_references = [
+        ReferenceDefinition(
+            selected_element=se,
+            kind=list(kinds),
+            points_to_batch=results_references_batch_pointing_by_selected_element[se],
         )
+        for se, kinds in results_references_kind_by_selected_element.items()
+    ]
+
     if not merged_references:
         return None
     return SelectorDefinition(
