@@ -807,17 +807,13 @@ def separate_flow_control_predecessors_from_data_providers(
     execution_graph: DiGraph,
     node: str,
 ) -> Tuple[List[str], List[str]]:
-    all_predecessors = list(execution_graph.predecessors(node))
-    all_control_flow_predecessors = [
-        predecessor
-        for predecessor in all_predecessors
-        if is_flow_control_step(execution_graph=execution_graph, node=predecessor)
-    ]
-    all_non_control_flow_predecessors = [
-        predecessor
-        for predecessor in all_predecessors
-        if not is_flow_control_step(execution_graph=execution_graph, node=predecessor)
-    ]
+    all_control_flow_predecessors = []
+    all_non_control_flow_predecessors = []
+    for predecessor in execution_graph.predecessors(node):
+        if is_flow_control_step(execution_graph=execution_graph, node=predecessor):
+            all_control_flow_predecessors.append(predecessor)
+        else:
+            all_non_control_flow_predecessors.append(predecessor)
     return all_control_flow_predecessors, all_non_control_flow_predecessors
 
 
