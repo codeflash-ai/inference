@@ -90,14 +90,16 @@ def retrieve_selectors_from_dictionary(
         return []
     result = []
     for key, element in property_value.items():
-        selector = retrieve_selector_from_simple_property(
-            step_name=step_name,
-            property_value=element,
-            selector_definition=selector_definition,
-            key=key,
-        )
-        if selector is not None:
-            result.append(selector)
+        if is_selector(element):
+            result.append(
+                ParsedSelector(
+                    definition=selector_definition,
+                    step_name=step_name,
+                    value=element,
+                    index=None,
+                    key=key,
+                )
+            )
     return result
 
 
