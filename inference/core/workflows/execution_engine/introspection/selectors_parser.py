@@ -68,15 +68,19 @@ def retrieve_selectors_from_array(
 ) -> List[ParsedSelector]:
     if not isinstance(property_value, list):
         return []
-    result = []
+    result: List[ParsedSelector] = []
+    # Localize functions and variables for greater lookup speed in inner loop
+    retrieve_selector = retrieve_selector_from_simple_property
     for index, element in enumerate(property_value):
-        selector = retrieve_selector_from_simple_property(
-            step_name=step_name,
-            property_value=element,
-            selector_definition=selector_definition,
-            index=index,
-        )
-        if selector is not None:
+        # Inline fast path: skip non-selector elements early
+        if is_selector(element):
+            selector = ParsedSelector(
+                definition=selector_definition,
+                step_name=step_name,
+                value=element,
+                index=index,
+                key=None,
+            )
             result.append(selector)
     return result
 
