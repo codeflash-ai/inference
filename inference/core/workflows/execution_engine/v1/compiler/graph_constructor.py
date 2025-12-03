@@ -1613,20 +1613,20 @@ def get_input_data_lineage_excluding_auto_batch_casting(
     scalar_parameters_to_be_batched: Set[str],
 ) -> List[List[str]]:
     lineage_deduplication_set = set()
-    lineages = []
+    lineages: List[List[str]] = []
+    extend = lineages.extend  # local var for perf
+    scalar_params = scalar_parameters_to_be_batched  # local var
     for property_name, input_definition in input_data.items():
-        new_lineages_detected_within_property_data = get_lineage_for_input_property(
+        new_lineages = get_lineage_for_input_property(
             step_name=step_name,
             property_name=property_name,
             input_definition=input_definition,
             lineage_deduplication_set=lineage_deduplication_set,
         )
-        if (
-            property_name in scalar_parameters_to_be_batched
-            and len(new_lineages_detected_within_property_data) == 0
-        ):
+        if property_name in scalar_params and not new_lineages:
             continue
-        lineages.extend(new_lineages_detected_within_property_data)
+        if new_lineages:
+            extend(new_lineages)
     if not lineages:
         return lineages
     verify_lineages(step_name=step_name, detected_lineages=lineages)
@@ -1680,14 +1680,13 @@ def get_lineage_for_input_property(
             input_definition=input_definition,
             lineage_deduplication_set=lineage_deduplication_set,
         )
-    lineages = []
     if input_definition.is_batch_oriented():
         lineage = input_definition.data_lineage
         lineage_id = identify_lineage(lineage=lineage)
         if lineage_id not in lineage_deduplication_set:
             lineage_deduplication_set.add(lineage_id)
-            lineages.append(lineage)
-    return lineages
+            return [lineage]
+    return []
 
 
 def get_lineage_from_compound_input(
@@ -1715,36 +1714,52 @@ def get_lineage_from_compound_input(
 
 
 def verify_lineages(step_name: str, detected_lineages: List[List[str]]) -> None:
-    lineages_by_length = defaultdict(list)
+    # Fast-path for common case: only 1 or 0 lineages
+    n = len(detected_lineages)
+    if n <= 1:
+        return
+
+    # Build buckets only on demand, avoid full defaultdict allocations on simple cases
+    by_length = {}
     for lineage in detected_lineages:
-        lineages_by_length[len(lineage)].append(lineage)
-    if len(lineages_by_length) > 2:
+        l = len(lineage)
+        bucket = by_length.get(l)
+        if bucket is None:
+            by_length[l] = [lineage]
+        else:
+            bucket.append(lineage)
+    if len(by_length) > 2:
         raise StepInputLineageError(
             public_message=f"Input data provided for step: `{step_name}` comes with lineages at more than two "
             f"dimensionality levels, which should not be possible.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    lineage_lengths = sorted(lineages_by_length.keys())
-    for lineage_length in lineage_lengths:
-        if len(lineages_by_length[lineage_length]) > 1:
+    lengths = sorted(by_length)
+    # This loop can't be shortcut, but avoids defaultdict
+    for l in lengths:
+        bucket = by_length[l]
+        if len(bucket) > 1:
             raise StepInputLineageError(
                 public_message=f"Among step `{step_name}` inputs found different lineages at the same  "
                 f"dimensionality levels dimensionality.",
                 context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
             )
-    if len(lineages_by_length[lineage_lengths[-1]]) > 1 and len(lineage_lengths) < 2:
+    # Only check "last length" condition if we have at least one non-empty bucket
+    last_len = lengths[-1]
+    if len(by_length[last_len]) > 1 and len(lengths) < 2:
         raise StepInputLineageError(
             public_message=f"If lineage differ at the last level, then Execution Engine requires at least one "
             f"higher-dimension  input that will come with common lineage, but this is not the "
             f"case for step {step_name}.",
             context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
         )
-    if len(lineage_lengths) == 2:
-        reference_lineage = lineages_by_length[lineage_lengths[0]][0]
-        if reference_lineage != lineages_by_length[lineage_lengths[1]][0][:-1]:
+    if len(lengths) == 2:
+        shorter, longer = lengths
+        reference_lineage = by_length[shorter][0]
+        if reference_lineage != by_length[longer][0][:-1]:
             raise StepInputLineageError(
                 public_message=f"Step `{step_name}` inputs does not share common lineage. Differing element: "
-                f"{lineages_by_length[lineage_lengths[1]][0]}, "
+                f"{by_length[longer][0]}, "
                 f"reference lineage prefix: {reference_lineage}",
                 context="workflow_compilation | execution_graph_construction | collecting_step_inputs_lineage",
             )
