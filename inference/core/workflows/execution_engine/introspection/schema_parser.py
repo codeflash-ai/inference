@@ -333,25 +333,34 @@ def retrieve_selectors_from_simple_property(
             SELECTOR_POINTS_TO_BATCH_KEY, False
         )
         if declared_points_to_batch == "dynamic":
-            if property_name in inputs_accepting_batches_and_scalars:
-                if property_name in inputs_enforcing_auto_batch_casting:
+            points_to_batch = None
+            in_batches_and_scalars = (
+                property_name in inputs_accepting_batches_and_scalars
+            )
+            if in_batches_and_scalars:
+                in_auto_batch_casting = (
+                    property_name in inputs_enforcing_auto_batch_casting
+                )
+                if in_auto_batch_casting:
                     points_to_batch = {True}
                 else:
                     points_to_batch = {True, False}
             else:
-                points_to_batch = {
-                    property_name in inputs_accepting_batches
-                    or property_name in inputs_enforcing_auto_batch_casting
-                }
+                points_to_batch = set(
+                    (
+                        property_name in inputs_accepting_batches
+                        or property_name in inputs_enforcing_auto_batch_casting,
+                    )
+                )
         else:
             points_to_batch = {declared_points_to_batch}
+        kind_values = property_definition.get(KIND_KEY, [])
         allowed_references = [
             ReferenceDefinition(
                 selected_element=property_definition[SELECTED_ELEMENT_KEY],
-                kind=[
-                    Kind.model_validate(k)
-                    for k in property_definition.get(KIND_KEY, [])
-                ],
+                kind=(
+                    [Kind.model_validate(k) for k in kind_values] if kind_values else []
+                ),
                 points_to_batch=points_to_batch,
             )
         ]
@@ -379,7 +388,13 @@ def retrieve_selectors_from_simple_property(
             inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             is_list_element=True,
         )
-    if property_defines_union(property_definition=property_definition):
+    # Union property path
+    if (
+        ANY_OF_KEY in property_definition
+        or ONE_OF_KEY in property_definition
+        or ALL_OF_KEY in property_definition
+    ):
+        # Inline simple union check for efficiency, avoid extra function call
         return retrieve_selectors_from_union_definition(
             property_name=property_name,
             property_description=property_description,
@@ -415,11 +430,13 @@ def retrieve_selectors_from_union_definition(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Optional[SelectorDefinition]:
-    union_types = (
-        union_definition.get(ANY_OF_KEY, [])
-        + union_definition.get(ONE_OF_KEY, [])
-        + union_definition.get(ALL_OF_KEY, [])
-    )
+    # Use generator chain + local for loop variable to build the union_types efficiently
+    union_types = []
+    for k in (ANY_OF_KEY, ONE_OF_KEY, ALL_OF_KEY):
+        v = union_definition.get(k)
+        if v:
+            union_types.extend(v)
+    # Preallocate list for results to avoid repeated append checks
     results = []
     for type_definition in union_types:
         result = retrieve_selectors_from_simple_property(
@@ -433,15 +450,15 @@ def retrieve_selectors_from_union_definition(
             inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             is_list_element=is_list_element,
         )
-        if result is None:
-            continue
-        results.append(result)
-    results_references = list(
-        itertools.chain.from_iterable(r.allowed_references for r in results)
-    )
+        if result is not None:
+            results.append(result)
+    # Avoid building list until needed, use generator for flattening allowed_references
     results_references_kind_by_selected_element = defaultdict(set)
     results_references_batch_pointing_by_selected_element = defaultdict(set)
-    for reference in results_references:
+    # Use itertools.chain with generator expression for memory efficiency
+    for reference in itertools.chain.from_iterable(
+        r.allowed_references for r in results
+    ):
         results_references_kind_by_selected_element[reference.selected_element].update(
             reference.kind
         )
