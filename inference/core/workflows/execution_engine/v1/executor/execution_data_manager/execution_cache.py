@@ -185,8 +185,8 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        chunks = selector.split(".")
+        step_name = chunks[1]
         if self.step_outputs_batches(step_name=step_name):
             raise ExecutionEngineRuntimeError(
                 public_message=f"Error in execution engine. Attempted to get output in non-batch mode which is "
@@ -197,7 +197,7 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = chunks[2]
         return self._cache_content[step_name].get_outputs(property_name=property_name)
 
     def get_all_batch_step_outputs(
@@ -253,11 +253,13 @@ class ExecutionCache:
     def is_step_output_declared(self, selector: Any) -> bool:
         if not is_step_output_selector(selector_or_value=selector):
             return False
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        chunks = selector.split(".")
+        if len(chunks) < 3:
+            return False
+        step_name = chunks[1]
+        property_name = chunks[2]
         if not self.contains_step(step_name=step_name):
             return False
-        property_name = get_last_chunk_of_selector(selector=selector)
         return self._cache_content[step_name].is_property_defined(
             property_name=property_name
         )
