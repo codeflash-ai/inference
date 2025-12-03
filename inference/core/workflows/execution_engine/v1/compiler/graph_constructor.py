@@ -402,10 +402,13 @@ def establish_flow_control_edge(
 def step_definition_allows_flow_control_references(
     parsed_selector: ParsedSelector,
 ) -> bool:
-    return any(
-        definition.selected_element == STEP_AS_SELECTED_ELEMENT
-        for definition in parsed_selector.definition.allowed_references
-    )
+    # Use generator and built-in any, but perform attribute access locally for speed
+    allowed_references = parsed_selector.definition.allowed_references
+    target = STEP_AS_SELECTED_ELEMENT
+    for definition in allowed_references:
+        if definition.selected_element == target:
+            return True
+    return False
 
 
 def get_kind_of_value_provided_in_step_output(
