@@ -326,11 +326,17 @@ def filter_out_unwanted_classes_from_sv_detections_batch(
 ) -> List[sv.Detections]:
     if not classes_to_accept:
         return predictions
+    classes_to_accept_set = set(classes_to_accept)
     filtered_predictions = []
     for prediction in predictions:
-        filtered_prediction = prediction[
-            np.isin(prediction[CLASS_NAME_DATA_FIELD], classes_to_accept)
-        ]
+        class_names = prediction[CLASS_NAME_DATA_FIELD]
+        # Use list comprehension + set lookup for boolean mask (faster for small/medium-length class arrays)
+        mask = np.fromiter(
+            (class_name in classes_to_accept_set for class_name in class_names),
+            dtype=bool,
+            count=len(class_names),
+        )
+        filtered_prediction = prediction[mask]
         filtered_predictions.append(filtered_prediction)
     return filtered_predictions
 
