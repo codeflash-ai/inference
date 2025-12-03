@@ -117,7 +117,7 @@ def is_selector(selector_or_value: Any) -> bool:
 
 
 def identify_lineage(lineage: List[str]) -> int:
-    return sum(hash(e) for e in lineage)
+    return hash(tuple(lineage))
 
 
 def node_as(
