@@ -1,7 +1,6 @@
 import itertools
 import json
 import os
-import random
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -1089,11 +1088,18 @@ def class_mapping_not_available_in_environment(environment: dict) -> bool:
 def get_color_mapping_from_environment(
     environment: Optional[dict], class_names: List[str]
 ) -> Dict[str, str]:
-    if color_mapping_available_in_environment(environment=environment):
+    # Avoid function call overhead and redundant checks for simple value accesses.
+    if (
+        environment is not None
+        and "COLORS" in environment
+        and isinstance(environment["COLORS"], dict)
+    ):
         return environment["COLORS"]
+    palette = DEFAULT_COLOR_PALETTE
+    n_palette = len(palette)
+    # Use local variables and tuple unpacking for better performance in tight loops.
     return {
-        class_name: DEFAULT_COLOR_PALETTE[i % len(DEFAULT_COLOR_PALETTE)]
-        for i, class_name in enumerate(class_names)
+        class_name: palette[i % n_palette] for i, class_name in enumerate(class_names)
     }
 
 
