@@ -132,9 +132,15 @@ def build_simple_operation(
     operation_function: Callable[[T], V],
     execution_context: str,
 ) -> Callable[[T], V]:
-    kwargs = {
-        a: v for a, v in vars(operation_definition).items() if a != TYPE_PARAMETER_NAME
-    }
+    # Optimize by avoiding vars() and dict comprehension overhead; use __dict__ directly.
+    # Only copy when needed, and add "execution_context" in place.
+    odict = operation_definition.__dict__
+    if TYPE_PARAMETER_NAME in odict:
+        # Efficient dict copy minus one key; avoids iterating all for conditional copy.
+        kwargs = {**odict}
+        del kwargs[TYPE_PARAMETER_NAME]
+    else:
+        kwargs = odict.copy()
     kwargs["execution_context"] = execution_context
     return partial(operation_function, **kwargs)
 
