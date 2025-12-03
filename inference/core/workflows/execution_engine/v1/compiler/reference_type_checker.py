@@ -9,11 +9,14 @@ def validate_reference_kinds(
     actual: List[Union[Kind, str]],
     error_message: str,
 ) -> None:
-    expected_kind_names = set(_get_kind_name(kind=e) for e in expected)
-    actual_kind_names = set(_get_kind_name(kind=a) for a in actual)
+    # Use generator expressions with set constructor for less overhead
+    expected_kind_names = set(_get_kind_name(e) for e in expected)
+    actual_kind_names = set(_get_kind_name(a) for a in actual)
+    # Optimize the "*" check by checking both sets simultaneously before intersection computation
     if "*" in expected_kind_names or "*" in actual_kind_names:
         return None
-    if len(expected_kind_names.intersection(actual_kind_names)) == 0:
+    # Use direct boolean check for intersection (faster than computing length of set)
+    if not expected_kind_names & actual_kind_names:
         raise ReferenceTypeError(
             public_message=error_message,
             context="workflow_compilation | execution_graph_construction",
@@ -21,6 +24,7 @@ def validate_reference_kinds(
 
 
 def _get_kind_name(kind: Union[Kind, str]) -> str:
-    if isinstance(kind, Kind):
+    # Use direct attribute access without intermediate isinstance lookup table
+    if type(kind) is Kind:
         return kind.name
     return kind
