@@ -157,7 +157,7 @@ def select_rightmost_detection(detections: sv.Detections) -> sv.Detections:
 
 def select_first_detection(detections: sv.Detections) -> sv.Detections:
     if len(detections) == 0:
-        return deepcopy(detections)
+        return type(detections)()
     return detections[0]
 
 
