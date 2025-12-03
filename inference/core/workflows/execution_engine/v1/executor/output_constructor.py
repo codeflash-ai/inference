@@ -440,15 +440,15 @@ def data_contains_sv_detections(data: Any) -> bool:
     if isinstance(data, sv.Detections):
         return True
     if isinstance(data, dict):
-        result = set()
         for value in data.values():
-            result.add(data_contains_sv_detections(data=value))
-        return True in result
+            if data_contains_sv_detections(value):
+                return True
+        return False
     if isinstance(data, list):
-        result = set()
         for value in data:
-            result.add(data_contains_sv_detections(data=value))
-        return True in result
+            if data_contains_sv_detections(value):
+                return True
+        return False
     return False
 
 
