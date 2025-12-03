@@ -84,7 +84,8 @@ def read_text_file(
 
 
 def read_json(path: str, **kwargs) -> Optional[Union[dict, list]]:
-    with open(path) as f:
+    # Specify encoding for improved performance and reproducibility
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f, **kwargs)
 
 
