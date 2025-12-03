@@ -103,7 +103,7 @@ def parse_block_manifest_schema(
 
 
 def retrieve_primitives_from_schema(schema: dict) -> Dict[str, PrimitiveTypeDefinition]:
-    result = []
+    result = OrderedDict()
     for property_name, property_definition in schema[PROPERTIES_KEY].items():
         if property_name in EXCLUDED_PROPERTIES:
             continue
@@ -114,8 +114,8 @@ def retrieve_primitives_from_schema(schema: dict) -> Dict[str, PrimitiveTypeDefi
             property_definition=property_definition,
         )
         if primitive_metadata is not None:
-            result.append(primitive_metadata)
-    return OrderedDict((r.property_name, r) for r in result)
+            result[property_name] = primitive_metadata
+    return result
 
 
 def retrieve_primitive_type_from_property(
@@ -263,7 +263,7 @@ def retrieve_selectors_from_schema(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Dict[str, SelectorDefinition]:
-    result = []
+    result = OrderedDict()
     for property_name, property_definition in schema[PROPERTIES_KEY].items():
         if property_name in EXCLUDED_PROPERTIES:
             continue
@@ -312,8 +312,8 @@ def retrieve_selectors_from_schema(
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
         if selector is not None:
-            result.append(selector)
-    return OrderedDict((r.property_name, r) for r in result)
+            result[property_name] = selector
+    return result
 
 
 def retrieve_selectors_from_simple_property(
