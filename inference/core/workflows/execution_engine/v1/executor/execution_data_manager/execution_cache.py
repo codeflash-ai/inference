@@ -206,17 +206,36 @@ class ExecutionCache:
         batch_elements_indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Dict[str, Any]]:
-        if not self.step_outputs_batches(step_name=step_name):
+        # Avoid repeat lookup and function call overhead
+        cache_content = self._cache_content
+        batches_compatibility = self._batches_compatibility
+
+        # Inline step_outputs_batches for faster execution
+        if step_name not in cache_content:
             raise ExecutionEngineRuntimeError(
-                public_message=f"Error in execution engine. Attempted to get all outputs from step {step_name} "
-                f"which is not register in cache. That behavior should be prevented by "
-                f"workflows compiler, so this error should be treated as a bug."
-                f"Contact Roboflow team through github issues "
-                f"(https://github.com/roboflow/inference/issues) providing full context of"
-                f"the problem - including workflow definition you use.",
+                public_message=(
+                    f"Error in execution engine. Attempted to get all outputs from step {step_name} "
+                    "which is not register in cache. That behavior should be prevented by "
+                    "workflows compiler, so this error should be treated as a bug."
+                    "Contact Roboflow team through github issues "
+                    "(https://github.com/roboflow/inference/issues) providing full context of"
+                    "the problem - including workflow definition you use."
+                ),
                 context="workflow_execution | step_output_registration",
             )
-        return self._cache_content[step_name].get_all_outputs(
+        if not batches_compatibility[step_name]:
+            raise ExecutionEngineRuntimeError(
+                public_message=(
+                    f"Error in execution engine. Attempted to get all outputs from step {step_name} "
+                    "which is not register in cache. That behavior should be prevented by "
+                    "workflows compiler, so this error should be treated as a bug."
+                    "Contact Roboflow team through github issues "
+                    "(https://github.com/roboflow/inference/issues) providing full context of"
+                    "the problem - including workflow definition you use."
+                ),
+                context="workflow_execution | step_output_registration",
+            )
+        return cache_content[step_name].get_all_outputs(
             indices=batch_elements_indices,
             mask=mask,
         )
@@ -348,14 +367,31 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Dict[str, Any]]:
-        all_keys = list(self._cache_content.keys())
-        if not all_keys:
-            all_keys = self._outputs
+        # Avoid repeat conversion to list, create empty_value once
+        cache_keys = self._cache_content.keys()
+        if cache_keys:
+            all_keys = list(cache_keys)
+        else:
+            all_keys = list(self._outputs)
         empty_value = {k: None for k in all_keys}
+        cache_content = self._cache_content
+
+        # Precompute set membership if mask is set for fast lookup
+        if mask is None:
+            return [
+                {k: cache_content.get(k, {}).get(index) for k in all_keys}
+                for index in indices
+            ]
+        mask_len = len(mask)
+        # If mask contains exact index tuples, no need to slice index
+        if mask_len == 0:
+            return [copy(empty_value) for _ in indices]
+        # Convert mask to frozenset for O(1) lookup if needed
+        mask_frozen = mask if isinstance(mask, frozenset) else frozenset(mask)
         return [
             (
-                {k: self._cache_content.get(k, {}).get(index) for k in all_keys}
-                if mask is None or index[: len(mask)] in mask
+                {k: cache_content.get(k, {}).get(index) for k in all_keys}
+                if index[:mask_len] in mask_frozen
                 else copy(empty_value)
             )
             for index in indices
