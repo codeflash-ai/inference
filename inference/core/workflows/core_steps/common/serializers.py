@@ -342,9 +342,9 @@ def serialize_secret(secret: str) -> str:
     if len(secret) < MIN_SECRET_LENGTH_TO_REVEAL_PREFIX:
         return "*" * MIN_SECRET_LENGTH_TO_REVEAL_PREFIX
     prefix = secret[:2]
-    infix = "*" * MIN_SECRET_LENGTH_TO_REVEAL_PREFIX
+    infix = "********"
     suffix = secret[-2:]
-    return f"{prefix}{infix}{suffix}"
+    return prefix + infix + suffix
 
 
 def serialize_timestamp(timestamp: datetime) -> str:
