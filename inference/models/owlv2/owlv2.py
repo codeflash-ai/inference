@@ -148,24 +148,32 @@ def preprocess_image(
     r = min(image_size[0] / current_size[0], image_size[1] / current_size[1])
     target_size = (int(r * current_size[0]), int(r * current_size[1]))
 
-    torch_image = (
-        torch.tensor(np_image)
-        .permute(2, 0, 1)
-        .unsqueeze(0)
-        .to(DEVICE)
-        .to(dtype=torch.float32)
-        / 255.0
-    )
+    # Avoid unnecessary copy: use from_numpy which is much faster for float32, then move to float32 before GPU transfer
+    # Only convert if dtype != np.uint8, else avoid an extra copy
+    if np_image.dtype != np.uint8:
+        np_image = np_image.astype(np.uint8, copy=False)
+    torch_image = torch.from_numpy(np_image)
+
+    # This mimics original .permute(2,0,1), .unsqueeze(0), .to(dtype=torch.float32)/255, all on GPU right after
+    torch_image = torch_image.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32)
+    torch_image = torch_image.div_(255)  # Inplace division to save memory
+
+    # Move to DEVICE now to allow faster interpolation and avoid intermediate host/device copies
+    torch_image = torch_image.to(DEVICE, non_blocking=True)
+
+    # F.interpolate is the main bottleneck, so just call directly after all other ops
     torch_image = F.interpolate(
         torch_image, size=target_size, mode="bilinear", align_corners=False
     )
 
-    padded_image_tensor = torch.ones((1, 3, *image_size), device=DEVICE) * 0.5
-    padded_image_tensor[:, :, : torch_image.shape[2], : torch_image.shape[3]] = (
+    # Pre-allocate and fill the output tensor
+    padded_image_tensor = torch.full((1, 3, *image_size), 0.5, device=DEVICE)
+    padded_image_tensor[:, :, : torch_image.shape[2], : torch_image.shape[3]].copy_(
         torch_image
     )
 
-    padded_image_tensor = (padded_image_tensor - image_mean) / image_std
+    # Normalize
+    padded_image_tensor.sub_(image_mean).div_(image_std)
 
     return padded_image_tensor
 
