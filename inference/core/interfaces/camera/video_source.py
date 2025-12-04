@@ -343,7 +343,7 @@ class VideoSource:
         stream_reference: VideoSourceIdentifier,
         frames_buffer: Queue,
         status_update_handlers: List[Callable[[StatusUpdate], None]],
-        buffer_consumption_strategy: Optional[BufferConsumptionStrategy],
+        buffer_consumption_strategy: Optional["BufferConsumptionStrategy"],
         video_consumer: "VideoConsumer",
         video_source_properties: Optional[Dict[str, float]],
         source_id: Optional[int],

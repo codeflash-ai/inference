@@ -1,5 +1,4 @@
 import time
-from copy import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -151,21 +150,31 @@ class VideoSourcesManager:
             )
         else:
             batch_timeout_moment = None
-        for source_ord, (source, source_should_reconnect) in enumerate(
-            zip(self._video_sources.all_sources, self._video_sources.allow_reconnection)
-        ):
+
+        all_sources = self._video_sources.all_sources
+        allow_reconnection = self._video_sources.allow_reconnection
+        total_sources = len(all_sources)
+
+        now = datetime.now if batch_timeout_moment is not None else None
+
+        for source_ord in range(total_sources):
             if self._external_should_stop():
                 self.join_all_reconnection_threads(include_not_finished=True)
                 return None
-            if self._is_source_inactive(source_ord=source_ord):
+
+            # Inline _is_source_inactive for loop hot path
+            if (
+                source_ord in self._ended_sources
+                or source_ord in self._reconnection_threads
+            ):
                 continue
             batch_time_left = (
                 None
                 if batch_timeout_moment is None
-                else max((batch_timeout_moment - datetime.now()).total_seconds(), 0.0)
+                else max((batch_timeout_moment - now()).total_seconds(), 0.0)
             )
             try:
-                frame = source.read_frame(timeout=batch_time_left)
+                frame = all_sources[source_ord].read_frame(timeout=batch_time_left)
                 if frame is not None:
                     batch_frames.append(frame)
             except EndOfStreamError:
@@ -178,7 +187,7 @@ class VideoSourcesManager:
         return len(self._ended_sources) >= len(self._video_sources.all_sources)
 
     def join_all_reconnection_threads(self, include_not_finished: bool = False) -> None:
-        for source_ord in copy(self._threads_to_join):
+        for source_ord in set(self._threads_to_join):
             self._purge_reconnection_thread(source_ord=source_ord)
         if not include_not_finished:
             return None
