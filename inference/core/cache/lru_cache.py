@@ -17,11 +17,10 @@ class LRUCache:
             self.cache.popitem(last=False)
 
     def get(self, key):
-        try:
-            value = self.cache.pop(key)
-            self.cache[key] = value
-            return value
-        except KeyError:
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        else:
             return None
 
     def set(self, key, value):
