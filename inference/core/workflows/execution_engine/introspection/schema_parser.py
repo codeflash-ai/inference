@@ -103,19 +103,24 @@ def parse_block_manifest_schema(
 
 
 def retrieve_primitives_from_schema(schema: dict) -> Dict[str, PrimitiveTypeDefinition]:
-    result = []
-    for property_name, property_definition in schema[PROPERTIES_KEY].items():
-        if property_name in EXCLUDED_PROPERTIES:
+    # Avoid unnecessary list by populating the OrderedDict directly
+    out = OrderedDict()
+    properties = schema[PROPERTIES_KEY]
+    excluded = EXCLUDED_PROPERTIES
+    get_desc = DESCRIPTION_KEY
+    retrieve_primitive = retrieve_primitive_type_from_property
+    for property_name, property_definition in properties.items():
+        if property_name in excluded:
             continue
-        property_description = property_definition.get(DESCRIPTION_KEY, "not available")
-        primitive_metadata = retrieve_primitive_type_from_property(
+        property_description = property_definition.get(get_desc, "not available")
+        primitive_metadata = retrieve_primitive(
             property_name=property_name,
             property_description=property_description,
             property_definition=property_definition,
         )
         if primitive_metadata is not None:
-            result.append(primitive_metadata)
-    return OrderedDict((r.property_name, r) for r in result)
+            out[primitive_metadata.property_name] = primitive_metadata
+    return out
 
 
 def retrieve_primitive_type_from_property(
@@ -263,9 +268,20 @@ def retrieve_selectors_from_schema(
     inputs_accepting_batches_and_scalars: Set[str],
     inputs_enforcing_auto_batch_casting: Set[str],
 ) -> Dict[str, SelectorDefinition]:
-    result = []
-    for property_name, property_definition in schema[PROPERTIES_KEY].items():
-        if property_name in EXCLUDED_PROPERTIES:
+    # Avoid unnecessary list by populating the OrderedDict directly
+    out = OrderedDict()
+    properties = schema[PROPERTIES_KEY]
+    excluded = EXCLUDED_PROPERTIES
+    items_key = ITEMS_KEY
+    obj_type = OBJECT_TYPE
+    add_props_key = ADDITIONAL_PROPERTIES_KEY
+    type_key = TYPE_KEY
+
+    retrieve_selector = retrieve_selectors_from_simple_property
+    get_desc = DESCRIPTION_KEY
+
+    for property_name, property_definition in properties.items():
+        if property_name in excluded:
             continue
         property_dimensionality_offset = inputs_dimensionality_offsets.get(
             property_name, 0
@@ -273,12 +289,14 @@ def retrieve_selectors_from_schema(
         is_dimensionality_reference_property = (
             property_name == dimensionality_reference_property
         )
-        property_description = property_definition.get(DESCRIPTION_KEY, "not available")
-        if ITEMS_KEY in property_definition:
-            selector = retrieve_selectors_from_simple_property(
+        property_description = property_definition.get(get_desc, "not available")
+
+        selector = None
+        if items_key in property_definition:
+            selector = retrieve_selector(
                 property_name=property_name,
                 property_description=property_description,
-                property_definition=property_definition[ITEMS_KEY],
+                property_definition=property_definition[items_key],
                 property_dimensionality_offset=property_dimensionality_offset,
                 is_dimensionality_reference_property=is_dimensionality_reference_property,
                 is_list_element=True,
@@ -286,13 +304,13 @@ def retrieve_selectors_from_schema(
                 inputs_accepting_batches_and_scalars=inputs_accepting_batches_and_scalars,
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
-        elif property_definition.get(TYPE_KEY) == OBJECT_TYPE and isinstance(
-            property_definition.get(ADDITIONAL_PROPERTIES_KEY), dict
+        elif property_definition.get(type_key) == obj_type and isinstance(
+            property_definition.get(add_props_key), dict
         ):
-            selector = retrieve_selectors_from_simple_property(
+            selector = retrieve_selector(
                 property_name=property_name,
                 property_description=property_description,
-                property_definition=property_definition[ADDITIONAL_PROPERTIES_KEY],
+                property_definition=property_definition[add_props_key],
                 property_dimensionality_offset=property_dimensionality_offset,
                 is_dimensionality_reference_property=is_dimensionality_reference_property,
                 is_dict_element=True,
@@ -301,7 +319,7 @@ def retrieve_selectors_from_schema(
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
         else:
-            selector = retrieve_selectors_from_simple_property(
+            selector = retrieve_selector(
                 property_name=property_name,
                 property_description=property_description,
                 property_definition=property_definition,
@@ -312,8 +330,8 @@ def retrieve_selectors_from_schema(
                 inputs_enforcing_auto_batch_casting=inputs_enforcing_auto_batch_casting,
             )
         if selector is not None:
-            result.append(selector)
-    return OrderedDict((r.property_name, r) for r in result)
+            out[selector.property_name] = selector
+    return out
 
 
 def retrieve_selectors_from_simple_property(
