@@ -188,9 +188,39 @@ def generate_offsets(
     overlap_height = int(overlap_ratio_wh[1] * slice_height)
     width_stride = slice_width - overlap_width
     height_stride = slice_height - overlap_height
+
+    # Precompute ws and hs arrays (unchanged; already efficient)
     ws = np.arange(0, image_width, width_stride)
     hs = np.arange(0, image_height, height_stride)
-    xmin, ymin = np.meshgrid(ws, hs)
-    xmax = np.clip(xmin + slice_width, 0, image_width)
-    ymax = np.clip(ymin + slice_height, 0, image_height)
-    return np.stack([xmin, ymin, xmax, ymax], axis=-1).reshape(-1, 4)
+    ws_len = ws.shape[0]
+    hs_len = hs.shape[0]
+
+    # Instead of meshgrid + stack/reshape (which is memory- and compute-inefficient),
+    # use broadcasting to directly compute slices in a flat array
+    # Compute all combinations of ws and hs
+    # Each slice: [xmin, ymin, xmax, ymax]
+
+    # Preallocate output array
+    out = np.empty((ws_len * hs_len, 4), dtype=ws.dtype)
+
+    # Fill output array directly using broadcasting/index tricks (much faster, less memory)
+    # Compute xmin, ymin
+    # For index in output array k = i * ws_len + j: i in 0..hs_len-1, j in 0..ws_len-1
+    # k // ws_len -> i (rows/ymin), k % ws_len -> j (cols/xmin)
+
+    # Fill xmin (column index changes fastest)
+    out[:, 0] = np.tile(ws, hs_len)
+    # Fill ymin (row index changes slowest)
+    out[:, 1] = np.repeat(hs, ws_len)
+    # Fill xmax
+    np.add(
+        out[:, 0], slice_width, out=out[:, 2]
+    )  # same as out[:,2] = out[:,0] + slice_width
+    np.clip(out[:, 2], 0, image_width, out=out[:, 2])
+    # Fill ymax
+    np.add(
+        out[:, 1], slice_height, out=out[:, 3]
+    )  # same as out[:,3] = out[:,1] + slice_height
+    np.clip(out[:, 3], 0, image_height, out=out[:, 3])
+
+    return out
