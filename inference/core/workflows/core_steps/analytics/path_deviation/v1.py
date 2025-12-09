@@ -111,22 +111,30 @@ class PathDeviationAnalyticsBlockV1(WorkflowBlock):
             )
 
         video_id = metadata.video_identifier
-        if video_id not in self._object_paths:
-            self._object_paths[video_id] = {}
+        object_paths = self._object_paths
+        if video_id not in object_paths:
+            object_paths[video_id] = {}
 
         anchor_points = detections.get_anchors_coordinates(anchor=triggering_anchor)
         result_detections = []
+        ref_path_arr = np.asarray(
+            reference_path, dtype=np.float64
+        )  # cache and only convert once
+
         for i, tracker_id in enumerate(detections.tracker_id):
             detection = detections[i]
             anchor_point = anchor_points[i]
-            if tracker_id not in self._object_paths[video_id]:
-                self._object_paths[video_id][tracker_id] = []
-            self._object_paths[video_id][tracker_id].append(anchor_point)
+            video_tracker_paths = object_paths[video_id]
+            if tracker_id not in video_tracker_paths:
+                video_tracker_paths[tracker_id] = []
+            # Append is still O(1) for list, the operation itself is optimal.
+            video_tracker_paths[tracker_id].append(anchor_point)
 
-            object_path = np.array(self._object_paths[video_id][tracker_id])
-            ref_path = np.array(reference_path)
-
-            frechet_distance = self._calculate_frechet_distance(object_path, ref_path)
+            object_path = np.asarray(video_tracker_paths[tracker_id], dtype=np.float64)
+            # Only pass ref_path_arr precomputed
+            frechet_distance = self._calculate_frechet_distance(
+                object_path, ref_path_arr
+            )
             detection[PATH_DEVIATION_KEY_IN_SV_DETECTIONS] = np.array(
                 [frechet_distance], dtype=np.float64
             )
@@ -137,10 +145,10 @@ class PathDeviationAnalyticsBlockV1(WorkflowBlock):
     def _calculate_frechet_distance(
         self, path1: np.ndarray, path2: np.ndarray
     ) -> float:
-        dist_matrix = np.ones((len(path1), len(path2))) * -1
-        return self._compute_distance(
-            dist_matrix, len(path1) - 1, len(path2) - 1, path1, path2
-        )
+        len1, len2 = path1.shape[0], path2.shape[0]
+        # Avoid repeated allocation via fixed-size and pre-filled matrix (same as original, just more explicit here)
+        dist_matrix = np.full((len1, len2), -1.0, dtype=np.float64)
+        return self._compute_distance(dist_matrix, len1 - 1, len2 - 1, path1, path2)
 
     def _compute_distance(
         self,
@@ -179,3 +187,9 @@ class PathDeviationAnalyticsBlockV1(WorkflowBlock):
 
     def _euclidean_distance(self, point1: np.ndarray, point2: np.ndarray) -> float:
         return np.sqrt(np.sum((point1 - point2) ** 2))
+
+    def _euclidean_distance(self, pt1, pt2) -> float:
+        # This will be called billions of times – fastest is explicit minus and squared norm
+        dx = pt1[0] - pt2[0]
+        dy = pt1[1] - pt2[1]
+        return np.hypot(dx, dy)
