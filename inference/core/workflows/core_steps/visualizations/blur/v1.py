@@ -74,11 +74,13 @@ class BlurVisualizationBlockV1(PredictionsVisualizationBlock):
         self,
         kernel_size: int,
     ) -> sv.annotators.base.BaseAnnotator:
-        key = "_".join(map(str, [kernel_size]))
-
-        if key not in self.annotatorCache:
-            self.annotatorCache[key] = sv.BlurAnnotator(kernel_size=kernel_size)
-        return self.annotatorCache[key]
+        key = str(kernel_size)
+        annotatorCache = self.annotatorCache
+        annotator = annotatorCache.get(key)
+        if annotator is None:
+            annotator = sv.BlurAnnotator(kernel_size=kernel_size)
+            annotatorCache[key] = annotator
+        return annotator
 
     def run(
         self,
