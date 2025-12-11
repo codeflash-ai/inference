@@ -107,8 +107,8 @@ class IdentifyOutliersBlockV1(WorkflowBlock):
             return None, None
 
         # Sum all embeddings:
-        sum_vec = np.sum(embeddings, axis=0)
-        R = np.linalg.norm(sum_vec)
+        sum_vec = np.add.reduce(embeddings, axis=0)
+        R = np.sqrt(np.dot(sum_vec, sum_vec))
         if R == 0:
             # All embeddings canceled out, no direction
             return None, None
