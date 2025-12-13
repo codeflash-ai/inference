@@ -157,10 +157,14 @@ def apply_histogram_equalisation(image: np.ndarray) -> np.ndarray:
 
 
 def apply_adaptive_equalisation(image: np.ndarray) -> np.ndarray:
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(clipLimit=0.03, tileGridSize=(8, 8))
-    image = clahe.apply(image)
-    return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    # Convert to grayscale in-place for memory efficiency
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Reuse CLAHE object across function calls is not possible here due to function scope
+    clahe_apply = cv2.createCLAHE(clipLimit=0.03, tileGridSize=(8, 8)).apply
+    # Apply CLAHE
+    equalized = clahe_apply(gray_image)
+    # Use OpenCV's optimized color conversion
+    return cv2.cvtColor(equalized, cv2.COLOR_GRAY2BGR)
 
 
 CONTRAST_ADJUSTMENTS_METHODS = {
