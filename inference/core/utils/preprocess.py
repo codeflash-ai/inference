@@ -207,16 +207,29 @@ def letterbox_image(
         image=image,
         desired_size=desired_size,
     )
-    new_height, new_width = (
-        resized_img.shape[:2]
-        if isinstance(resized_img, np.ndarray)
-        else resized_img.shape[-2:]
-    )
+
+    # Unroll shape lookups for performance and avoid repeated isinstance checks
+    if isinstance(resized_img, np.ndarray):
+        new_height, new_width = resized_img.shape[:2]
+    else:
+        # torch.Tensor (BCHW or CHW)
+        new_height, new_width = resized_img.shape[-2], resized_img.shape[-1]
+
     top_padding = (desired_size[1] - new_height) // 2
     bottom_padding = desired_size[1] - new_height - top_padding
     left_padding = (desired_size[0] - new_width) // 2
     right_padding = desired_size[0] - new_width - left_padding
+
     if isinstance(resized_img, np.ndarray):
+        # Use a static (precomputed) borderType and value for performance
+        # If no padding is required, skip copyMakeBorder
+        if (
+            top_padding == 0
+            and bottom_padding == 0
+            and left_padding == 0
+            and right_padding == 0
+        ):
+            return resized_img
         return cv2.copyMakeBorder(
             resized_img,
             top_padding,
@@ -227,6 +240,16 @@ def letterbox_image(
             value=color,
         )
     elif USE_PYTORCH_FOR_PREPROCESSING:
+        # Use torch.nn.functional.pad only if any padding is required
+        if (
+            top_padding == 0
+            and bottom_padding == 0
+            and left_padding == 0
+            and right_padding == 0
+        ):
+            return resized_img
+        # Quick-path: If the color channels >1, pad all channels with color[0]
+        # (Original behavior preserved)
         return torch.nn.functional.pad(
             resized_img,
             (left_padding, right_padding, top_padding, bottom_padding),
@@ -262,31 +285,38 @@ def resize_image_keeping_aspect_ratio(
     - desired_size: tuple (width, height) representing the target dimensions.
     """
     if isinstance(image, np.ndarray):
-        img_ratio = image.shape[1] / image.shape[0]
+        img_height, img_width = image.shape[:2]
+        img_ratio = img_width / img_height
     elif USE_PYTORCH_FOR_PREPROCESSING:
-        img_ratio = image.shape[-1] / image.shape[-2]
+        img_height, img_width = image.shape[-2], image.shape[-1]
+        img_ratio = img_width / img_height
     else:
         raise ValueError(
             f"Received an image of unknown type, {type(image)}; "
             "This is most likely a bug. Contact Roboflow team through github issues "
             "(https://github.com/roboflow/inference/issues) providing full context of the problem"
         )
-    desired_ratio = desired_size[0] / desired_size[1]
 
-    # Determine the new dimensions
-    if img_ratio >= desired_ratio:
-        # Resize by width
-        new_width = desired_size[0]
-        new_height = int(desired_size[0] / img_ratio)
-    else:
-        # Resize by height
-        new_height = desired_size[1]
-        new_width = int(desired_size[1] * img_ratio)
+    desired_width, desired_height = desired_size
+    desired_ratio = desired_width / desired_height
 
-    # Resize the image to new dimensions
+    # Calculate new dimensions in a branchless manner
+    resize_by_width = img_ratio >= desired_ratio
+    new_width = desired_width if resize_by_width else int(desired_height * img_ratio)
+    new_height = int(desired_width / img_ratio) if resize_by_width else desired_height
+
     if isinstance(image, np.ndarray):
-        return cv2.resize(image, (new_width, new_height))
+        # If shape already matches, skip cv2.resize
+        if image.shape[1] == new_width and image.shape[0] == new_height:
+            return image
+        return cv2.resize(
+            image, (new_width, new_height), interpolation=cv2.INTER_LINEAR
+        )
     elif USE_PYTORCH_FOR_PREPROCESSING:
+        # If shape already matches, skip interpolate
+        if image.shape[-2] == new_height and image.shape[-1] == new_width:
+            return image
+        # Interpolate uses NHWC or NCHW; original always sets size=(H,W)
         return torch.nn.functional.interpolate(
             image, size=(new_height, new_width), mode="bilinear"
         )
