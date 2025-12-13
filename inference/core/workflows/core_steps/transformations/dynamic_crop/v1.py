@@ -264,19 +264,23 @@ def convert_color_to_bgr_tuple(
     if isinstance(color, str):
         return convert_string_color_to_bgr_tuple(color=color)
     if isinstance(color, tuple) and len(color) == 3:
-        return color[::-1]
+        return (color[2], color[1], color[0])
     raise ValueError(f"Invalid color format: {color}")
 
 
 def convert_string_color_to_bgr_tuple(color: str) -> Tuple[int, int, int]:
     if color.startswith("#") and len(color) == 7:
         try:
-            return tuple(int(color[i : i + 2], 16) for i in (5, 3, 1))
+            return (int(color[5:7], 16), int(color[3:5], 16), int(color[1:3], 16))
         except ValueError as e:
             raise ValueError(f"Invalid hex color format: {color}") from e
     if color.startswith("#") and len(color) == 4:
         try:
-            return tuple(int(color[i] + color[i], 16) for i in (3, 2, 1))
+            return (
+                int(color[3] + color[3], 16),
+                int(color[2] + color[2], 16),
+                int(color[1] + color[1], 16),
+            )
         except ValueError as e:
             raise ValueError(f"Invalid hex color format: {color}") from e
     if color.startswith("(") and color.endswith(")"):
