@@ -210,6 +210,7 @@ class BasePipelineWatchDog(PipelineWatchDog):
         self._inference_throughput_monitor = sv.FPSMonitor()
         self._latency_monitors: Dict[Optional[int], LatencyMonitor] = {}
         self._stream_updates = deque(maxlen=MAX_UPDATES_CONTEXT)
+        self._debug_severity_value = UpdateSeverity.DEBUG.value
 
     def register_video_sources(self, video_sources: List[VideoSource]) -> None:
         self._video_sources = video_sources
@@ -219,7 +220,8 @@ class BasePipelineWatchDog(PipelineWatchDog):
             )
 
     def on_status_update(self, status_update: StatusUpdate) -> None:
-        if status_update.severity.value <= UpdateSeverity.DEBUG.value:
+        severity_value = status_update.severity.value
+        if severity_value <= self._debug_severity_value:
             return None
         self._stream_updates.append(status_update)
 
