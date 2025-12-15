@@ -18,6 +18,18 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Cache the list at the class level to avoid recreating it on every call
+_OUTPUT_DEFINITIONS: List[OutputDefinition] = [
+    OutputDefinition(
+        name="distance_cm",
+        kind=[INTEGER_KIND],
+    ),
+    OutputDefinition(
+        name="distance_pixel",
+        kind=[INTEGER_KIND],
+    ),
+]
+
 SHORT_DESCRIPTION = "Calculate the distance between two bounding boxes on a 2D plane."
 
 LONG_DESCRIPTION = """
@@ -146,16 +158,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_KEY_CENTIMETER,
-                kind=[INTEGER_KIND],
-            ),
-            OutputDefinition(
-                name=OUTPUT_KEY_PIXEL,
-                kind=[INTEGER_KIND],
-            ),
-        ]
+        return _OUTPUT_DEFINITIONS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
