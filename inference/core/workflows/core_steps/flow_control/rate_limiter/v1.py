@@ -117,22 +117,31 @@ class RateLimiterBlockV1(WorkflowBlock):
         next_steps: List[StepSelector],
         video_reference_image: Optional[WorkflowImageData] = None,
     ) -> BlockResult:
+        # Use local variables to slightly optimize attribute access
+        last_executed_at = self._last_executed_at
+
+        # Avoid try..except around costly datetime.now() by getting only video_metadata in try block.
         current_time = datetime.now()
-        try:
-            metadata = video_reference_image.video_metadata
-            current_time = datetime.fromtimestamp(
-                1 / metadata.fps * metadata.frame_number
-            )
-        except Exception:
-            # reference not passed, metadata not set, or not a video frame
-            pass
+        if video_reference_image is not None:
+            video_metadata = getattr(video_reference_image, "video_metadata", None)
+            if video_metadata is not None:
+                fps = getattr(video_metadata, "fps", None)
+                frame_number = getattr(video_metadata, "frame_number", None)
+                # Skip the conversion if any attribute missing or fps is invalid
+                if fps and frame_number is not None:
+                    try:
+                        # 1/fps * frame_number = elapsed seconds from epoch
+                        current_time = datetime.fromtimestamp(
+                            (1.0 / fps) * frame_number
+                        )
+                    except Exception:
+                        pass  # Keep as in original
 
         should_throttle = False
-        if self._last_executed_at is not None:
-            should_throttle = (
-                current_time - self._last_executed_at
-            ).total_seconds() < cooldown_seconds
-        if should_throttle:
-            return FlowControl(mode="terminate_branch")
+        if last_executed_at is not None:
+            # Compute time since last execution and do early exit if throttled
+            if (current_time - last_executed_at).total_seconds() < cooldown_seconds:
+                return FlowControl(mode="terminate_branch")
+        # Write back last executed timestamp only if needed
         self._last_executed_at = current_time
         return FlowControl(mode="select_step", context=next_steps)
