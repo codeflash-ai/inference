@@ -214,22 +214,21 @@ def attach_parent_coordinates_to_detections(
     dimensions_key: str,
 ) -> sv.Detections:
     parent_coordinates_system = parent_metadata.origin_coordinates
-    detections[parent_id_key] = np.array([parent_metadata.parent_id] * len(detections))
-    coordinates = np.array(
-        [[parent_coordinates_system.left_top_x, parent_coordinates_system.left_top_y]]
-        * len(detections)
-    )
-    detections[coordinates_key] = coordinates
-    dimensions = np.array(
-        [
-            [
-                parent_coordinates_system.origin_height,
-                parent_coordinates_system.origin_width,
-            ]
-        ]
-        * len(detections)
-    )
-    detections[dimensions_key] = dimensions
+    n = len(detections)
+    # Preallocate arrays using np.full/out broadcasting to avoid Python list multiplication overhead
+    parent_id_arr = np.full(n, parent_metadata.parent_id)
+    detections[parent_id_key] = parent_id_arr
+
+    coordinates_arr = np.empty((n, 2), dtype=np.float32)
+    coordinates_arr[:, 0] = parent_coordinates_system.left_top_x
+    coordinates_arr[:, 1] = parent_coordinates_system.left_top_y
+    detections[coordinates_key] = coordinates_arr
+
+    dimensions_arr = np.empty((n, 2), dtype=np.float32)
+    dimensions_arr[:, 0] = parent_coordinates_system.origin_height
+    dimensions_arr[:, 1] = parent_coordinates_system.origin_width
+    detections[dimensions_key] = dimensions_arr
+
     return detections
 
 
