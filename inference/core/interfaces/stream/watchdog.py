@@ -183,7 +183,12 @@ def compute_events_latency(
     earlier_event: Optional[ModelActivityEvent],
     later_event: Optional[ModelActivityEvent],
 ) -> Optional[float]:
-    if not are_events_compatible(events=[earlier_event, later_event]):
+    # Inline and optimize are_events_compatible for this specific call to reduce function-call overhead
+    if (
+        earlier_event is None
+        or later_event is None
+        or earlier_event.frame_id != later_event.frame_id
+    ):
         return None
     return (later_event.event_timestamp - earlier_event.event_timestamp).total_seconds()
 
