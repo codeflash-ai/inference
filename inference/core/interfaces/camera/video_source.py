@@ -968,10 +968,60 @@ class VideoConsumer:
                 source_id=source_id,
             )
             return True
-        if self._frame_should_be_adaptively_dropped(
-            declared_source_fps=declared_source_fps
-        ):
-            self._adaptive_frames_dropped_in_row += 1
+
+        # Eliminate one function call when buffer is obviously not full or strategy is WAIT (most common case)
+        buffer_filling_strategy = self._buffer_filling_strategy
+
+        # Inline hot ADAPTIVE-dropped check
+        # Save local for faster repeated access
+        adaptive_frames_dropped_in_row = self._adaptive_frames_dropped_in_row
+        frame_should_be_dropped = False
+
+        # Minimize function call if clearly not ADAPTIVE
+        if buffer_filling_strategy in ADAPTIVE_STRATEGIES:
+            # _frame_should_be_adaptively_dropped is somewhat hot (see profiling)
+            if (
+                adaptive_frames_dropped_in_row
+                < self._maximum_adaptive_frames_dropped_in_row
+                and len(self._stream_consumption_pace_monitor.all_timestamps)
+                > self._minimum_adaptive_mode_samples
+            ):
+                if hasattr(self._stream_consumption_pace_monitor, "fps"):
+                    stream_consumption_pace = self._stream_consumption_pace_monitor.fps
+                else:
+                    stream_consumption_pace = self._stream_consumption_pace_monitor()
+                announced_stream_fps = (
+                    declared_source_fps
+                    if declared_source_fps is not None and declared_source_fps > 0
+                    else stream_consumption_pace
+                )
+                if (
+                    announced_stream_fps - stream_consumption_pace
+                    > self._adaptive_mode_stream_pace_tolerance
+                ):
+                    frame_should_be_dropped = True
+                else:
+                    if (
+                        len(self._reader_pace_monitor.all_timestamps)
+                        > self._minimum_adaptive_mode_samples
+                        and len(self._decoding_pace_monitor.all_timestamps)
+                        > self._minimum_adaptive_mode_samples
+                    ):
+                        actual_reader_pace = get_fps_if_tick_happens_now(
+                            fps_monitor=self._reader_pace_monitor
+                        )
+                        if hasattr(self._decoding_pace_monitor, "fps"):
+                            decoding_pace = self._decoding_pace_monitor.fps
+                        else:
+                            decoding_pace = self._decoding_pace_monitor()
+                        if (
+                            decoding_pace - actual_reader_pace
+                            > self._adaptive_mode_reader_pace_tolerance
+                        ):
+                            frame_should_be_dropped = True
+
+        if frame_should_be_dropped:
+            self._adaptive_frames_dropped_in_row = adaptive_frames_dropped_in_row + 1
             send_frame_drop_update(
                 frame_timestamp=frame_timestamp,
                 frame_id=self._frame_counter,
@@ -981,10 +1031,10 @@ class VideoConsumer:
             )
             return True
         self._adaptive_frames_dropped_in_row = 0
-        if (
-            not buffer.full()
-            or self._buffer_filling_strategy is BufferFillingStrategy.WAIT
-        ):
+
+        # Only call buffer.full() once by moving check up, and cache
+        buffer_is_full = buffer.full()
+        if not buffer_is_full or buffer_filling_strategy is BufferFillingStrategy.WAIT:
             return decode_video_frame_to_buffer(
                 frame_timestamp=frame_timestamp,
                 frame_id=self._frame_counter,
@@ -996,13 +1046,21 @@ class VideoConsumer:
                 measured_source_fps=measured_source_fps,
                 comes_from_video_file=is_source_video_file,
             )
-        if self._buffer_filling_strategy in DROP_OLDEST_STRATEGIES:
-            return self._process_stream_frame_dropping_oldest(
+        elif buffer_filling_strategy in DROP_OLDEST_STRATEGIES:
+            # Inlining the process_stream_frame_dropping_oldest body for minimal overhead
+            drop_single_frame_from_buffer(
+                buffer=buffer,
+                cause="DROP_OLDEST strategy",
+                status_update_handlers=self._status_update_handlers,
+            )
+            return decode_video_frame_to_buffer(
                 frame_timestamp=frame_timestamp,
+                frame_id=self._frame_counter,
                 video=video,
                 buffer=buffer,
+                decoding_pace_monitor=self._decoding_pace_monitor,
                 source_id=source_id,
-                is_video_file=is_source_video_file,
+                comes_from_video_file=is_source_video_file,
             )
         send_frame_drop_update(
             frame_timestamp=frame_timestamp,
@@ -1201,13 +1259,13 @@ def decode_video_frame_to_buffer(
         return False
     decoding_pace_monitor.tick()
     video_frame = VideoFrame(
-        image=image,
-        frame_id=frame_id,
-        frame_timestamp=frame_timestamp,
-        fps=declared_source_fps,
-        measured_fps=measured_source_fps,
-        source_id=source_id,
-        comes_from_video_file=comes_from_video_file,
+        image,
+        frame_id,
+        frame_timestamp,
+        declared_source_fps,
+        measured_source_fps,
+        source_id,
+        comes_from_video_file,
     )
     buffer.put(video_frame)
     return True
