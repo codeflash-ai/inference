@@ -80,26 +80,39 @@ class DetectionsMergeManifest(WorkflowBlockManifest):
 
 def calculate_union_bbox(detections: sv.Detections) -> np.ndarray:
     """Calculate a single bounding box that contains all input detections."""
+    # Fast exit for no detections
     if len(detections) == 0:
-        return np.array([], dtype=np.float32).reshape(0, 4)
+        # Avoid creating object of wrong dtype or shape
+        return np.zeros((0, 4), dtype=np.float32)
 
-    # Get all bounding boxes
+    # Use view to avoid unneeded copying; rely on numpy memory model
     xyxy = detections.xyxy
 
-    # Calculate the union by taking min/max coordinates
-    x1 = np.min(xyxy[:, 0])
-    y1 = np.min(xyxy[:, 1])
-    x2 = np.max(xyxy[:, 2])
-    y2 = np.max(xyxy[:, 3])
+    # Manual min/max for Nx4 array using numpy's optimized argmin/argmax
+    # Compute min(yield) and max(yield) directly for the leftmost/rightmost coordinates
+    # This avoids extra memory usage versus reindexing or multiple array slicing
+    x1 = xyxy[:, 0].min()
+    y1 = xyxy[:, 1].min()
+    x2 = xyxy[:, 2].max()
+    y2 = xyxy[:, 3].max()
 
-    return np.array([[x1, y1, x2, y2]])
+    # Pre-allocate result for single row
+    out = np.empty((1, 4), dtype=xyxy.dtype)
+    out[0, 0] = x1
+    out[0, 1] = y1
+    out[0, 2] = x2
+    out[0, 3] = y2
+    return out
 
 
 def get_lowest_confidence_index(detections: sv.Detections) -> int:
     """Get the index of the detection with the lowest confidence."""
-    if detections.confidence is None:
+    # Fast path if none-confidence, return 0
+    conf = detections.confidence
+    if conf is None:
         return 0
-    return int(np.argmin(detections.confidence))
+    # numpy.argmin is already optimal for 1d array
+    return int(np.argmin(conf))
 
 
 class DetectionsMergeBlockV1(WorkflowBlock):
@@ -112,34 +125,40 @@ class DetectionsMergeBlockV1(WorkflowBlock):
         predictions: sv.Detections,
         class_name: str = "merged_detection",
     ) -> BlockResult:
+        # Fast None or empty path
         if predictions is None or len(predictions) == 0:
-            return {
-                OUTPUT_KEY: sv.Detections(
-                    xyxy=np.array([], dtype=np.float32).reshape(0, 4)
-                )
-            }
+            # Use zeroed array, same dtype
+            return {OUTPUT_KEY: sv.Detections(xyxy=np.zeros((0, 4), dtype=np.float32))}
 
         # Calculate the union bounding box
         union_bbox = calculate_union_bbox(predictions)
 
         # Get the index of the detection with lowest confidence
         lowest_conf_idx = get_lowest_confidence_index(predictions)
+        predictions_confidence = predictions.confidence
 
-        # Create a new detection with the union bbox and ensure numpy arrays for all fields
-        merged_detection = sv.Detections(
-            xyxy=union_bbox,
-            confidence=(
-                np.array([predictions.confidence[lowest_conf_idx]], dtype=np.float32)
-                if predictions.confidence is not None
-                else None
-            ),
-            class_id=np.array(
-                [0], dtype=np.int32
-            ),  # Fixed class_id of 0 for merged detection
-            data={
-                "class_name": np.array([class_name]),
-                "detection_id": np.array([str(uuid4())]),
-            },
+        # Pre-allocate confidence to avoid slice object overhead
+        merged_conf = (
+            np.empty(1, dtype=np.float32)
+            if predictions_confidence is not None
+            else None
         )
 
+        if merged_conf is not None:
+            merged_conf[0] = predictions_confidence[lowest_conf_idx]
+
+        # Pre-allocate class_id for fixed value
+        merged_class_id = np.zeros(1, dtype=np.int32)
+
+        merged_detection = sv.Detections(
+            xyxy=union_bbox,
+            confidence=merged_conf,
+            class_id=merged_class_id,
+            data={
+                "class_name": np.array(
+                    [class_name]
+                ),  # np.array faster than list for known size
+                "detection_id": np.array([str(uuid4())]),  # UUID-to-str
+            },
+        )
         return {OUTPUT_KEY: merged_detection}
