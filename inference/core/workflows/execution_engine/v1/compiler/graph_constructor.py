@@ -1569,6 +1569,8 @@ def verify_declared_batch_compatibility_against_actual_inputs(
         step_node_data.step_manifest.get_parameters_enforcing_auto_batch_casting()
         + step_node_data.step_manifest.get_parameters_accepting_batches()
     )
+    step_accepts_batch_input = step_node_data.step_manifest.accepts_batch_input()
+
     for property_name, input_definition in input_data.items():
         if property_name not in batch_compatibility_of_properties:
             actual_input_is_batch = {False}
@@ -1587,7 +1589,6 @@ def verify_declared_batch_compatibility_against_actual_inputs(
         else:
             actual_input_is_batch = {input_definition.is_batch_oriented()}
             batch_compatibility = batch_compatibility_of_properties[property_name]
-        step_accepts_batch_input = step_node_data.step_manifest.accepts_batch_input()
         if (
             step_accepts_batch_input
             and batch_compatibility == {False}
