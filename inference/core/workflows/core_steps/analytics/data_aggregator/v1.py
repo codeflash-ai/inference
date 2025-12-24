@@ -541,11 +541,16 @@ class ValuesDifferenceState(AggregationState):
         if self._min_value is None:
             self._min_value = value
             return None
-        if self._max_value is None:
+        elif self._max_value is None:
             self._max_value = value
             return None
-        self._min_value = min(self._min_value, value)
-        self._max_value = max(self._max_value, value)
+        # Manually compare values instead of calling min/max for better performance
+        min_value = self._min_value
+        max_value = self._max_value
+        if value < min_value:
+            self._min_value = value
+        if value > max_value:
+            self._max_value = value
 
     def get_result(self) -> Any:
         if self._min_value is None or self._max_value is None:
@@ -571,14 +576,23 @@ def ensure_states_initialised(
     data_names: Iterable[str],
     aggregation_mode: Dict[str, List[AggregationType]],
 ) -> Dict[str, AggregationState]:
+    # Local alias for better performance inside tight loop
+    state_initializers = STATE_INITIALIZERS
+    agg_get = aggregation_mode.get
+    cache = aggregation_cache
+
+    # Avoid extra function call and f-string performance penalty in hot path
     for data_name in data_names:
-        for mode in aggregation_mode.get(data_name, []):
-            state_key = generate_state_key(field_name=data_name, aggregation_mode=mode)
-            if state_key in aggregation_cache:
+        modes = agg_get(data_name)
+        if not modes:
+            continue
+        for mode in modes:
+            # Inline the key computation for performance
+            state_key = f"{data_name}_{mode}"
+            if state_key in cache:
                 continue
-            state = STATE_INITIALIZERS[mode]()
-            aggregation_cache[f"{data_name}_{mode}"] = state
-    return aggregation_cache
+            cache[state_key] = state_initializers[mode]()
+    return cache
 
 
 def generate_state_key(field_name: str, aggregation_mode: str) -> str:
