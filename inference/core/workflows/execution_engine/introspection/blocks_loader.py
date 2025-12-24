@@ -156,13 +156,14 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
     core_blocks = load_blocks()
     if LOAD_ENTERPRISE_BLOCKS:
         core_blocks.extend(load_enterprise_blocks())
-    already_spotted_blocks = set()
+
+    already_spotted_identifiers = set()
     result = []
     for block in core_blocks:
-        manifest_class = block.get_manifest()
         identifier = get_full_type_name(selected_type=block)
-        if block in already_spotted_blocks:
+        if identifier in already_spotted_identifiers:
             continue
+        manifest_class = block.get_manifest()
         result.append(
             BlockSpecification(
                 block_source=WORKFLOWS_CORE_PLUGIN_NAME,
@@ -171,16 +172,18 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
                 manifest_class=manifest_class,
             )
         )
-        already_spotted_blocks.add(block)
+        already_spotted_identifiers.add(identifier)
     return result
 
 
 def load_plugins_blocks() -> List[BlockSpecification]:
     plugins_to_load = get_plugin_modules()
-    custom_blocks = []
-    for plugin_name in plugins_to_load:
-        custom_blocks.extend(load_blocks_from_plugin(plugin_name=plugin_name))
-    return custom_blocks
+    # Use list comprehension for faster aggregation (avoid repeated extend and intermediate allocations)
+    return [
+        block
+        for plugin_name in plugins_to_load
+        for block in load_blocks_from_plugin(plugin_name=plugin_name)
+    ]
 
 
 def load_blocks_from_plugin(plugin_name: str) -> List[BlockSpecification]:
@@ -242,7 +245,7 @@ def is_block_compatible_with_execution_engine(
     block_source: str,
     block_identifier: str,
 ) -> bool:
-    if block_execution_engine_compatibility is None or execution_engine_version is None:
+    if execution_engine_version is None or block_execution_engine_compatibility is None:
         return True
     try:
         return SpecifierSet(block_execution_engine_compatibility).contains(
