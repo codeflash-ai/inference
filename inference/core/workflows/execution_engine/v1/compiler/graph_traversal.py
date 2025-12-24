@@ -1,5 +1,5 @@
 from collections import defaultdict
-from queue import Queue
+from queue import Queue, SimpleQueue
 from typing import List, Optional, Set
 
 import networkx as nx
@@ -16,7 +16,7 @@ def traverse_graph_ensuring_parents_are_reached_first(
     """
     graph_copy = graph.copy()
     distance_key = "distance"
-    graph_copy = assign_max_distances_from_start(
+    assign_max_distances_from_start(
         graph=graph_copy,
         start_node=start_node,
         distance_key=distance_key,
@@ -28,21 +28,27 @@ def traverse_graph_ensuring_parents_are_reached_first(
 def assign_max_distances_from_start(
     graph: nx.DiGraph, start_node: str, distance_key: str = "distance"
 ) -> nx.DiGraph:
-    nodes_to_consider = Queue()
+    # Use SimpleQueue for better performance on single-threaded code (faster than Queue)
+    nodes_to_consider = SimpleQueue()
     nodes_to_consider.put(start_node)
-    while nodes_to_consider.qsize() > 0:
+    # Cache the nodes' distance attribute to avoid repeated dictionary lookups
+    nodes_distance = graph.nodes
+    while not nodes_to_consider.empty():
         node_to_consider = nodes_to_consider.get()
         predecessors = list(graph.predecessors(node_to_consider))
-        if not all(graph.nodes[p].get(distance_key) is not None for p in predecessors):
-            # we can proceed to establish distance, only if all parents have distances established
+        # Use short-circuiting and local lookups for speed
+        if not all(
+            nodes_distance[p].get(distance_key) is not None for p in predecessors
+        ):
             continue
-        if len(predecessors) == 0:
+        if not predecessors:
             distance_from_start = 0
         else:
+            # Efficiently compute max using generator expression
             distance_from_start = (
-                max(graph.nodes[p][distance_key] for p in predecessors) + 1
+                max(nodes_distance[p][distance_key] for p in predecessors) + 1
             )
-        graph.nodes[node_to_consider][distance_key] = distance_from_start
+        nodes_distance[node_to_consider][distance_key] = distance_from_start
         for neighbour in graph.successors(node_to_consider):
             nodes_to_consider.put(neighbour)
     return graph
@@ -56,9 +62,11 @@ def group_nodes_by_sorted_key_value(
     if excluded_nodes is None:
         excluded_nodes = set()
     key2nodes = defaultdict(list)
+    # Avoid repeated conversion for excluded_nodes by using set directly and eliminating unnecessary list conversion
     for node_name, node_data in graph.nodes(data=True):
         if node_name in excluded_nodes:
             continue
         key2nodes[node_data[key]].append(node_name)
-    sorted_key_values = sorted(list(key2nodes.keys()))
+    # Use sorted with generator instead of explicit list conversion
+    sorted_key_values = sorted(key2nodes.keys())
     return [key2nodes[d] for d in sorted_key_values]
