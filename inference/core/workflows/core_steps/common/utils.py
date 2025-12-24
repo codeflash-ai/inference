@@ -347,10 +347,13 @@ def grab_batch_parameters(
 
 
 def grab_non_batch_parameters(operations_parameters: Dict[str, Any]) -> Dict[str, Any]:
+    # Use dict comprehension with local variable for faster isinstance checks
+    BatchType = Batch
     return {
         key: value
         for key, value in operations_parameters.items()
-        if not isinstance(value, Batch)
+        if type(value)
+        is not BatchType  # type comparison is a bit faster than isinstance for a single type
     }
 
 
