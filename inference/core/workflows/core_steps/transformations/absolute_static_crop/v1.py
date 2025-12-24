@@ -20,6 +20,10 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+
+# Precompute the constant list once at class level for efficiency.
+_IMAGES_PARAM: List[str] = ["images"]
+
 LONG_DESCRIPTION = """
 Crop a Region of Interest (RoI) from an image, using absolute coordinates.
 
@@ -67,7 +71,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
-        return ["images"]
+        return _IMAGES_PARAM
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
