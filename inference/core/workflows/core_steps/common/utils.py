@@ -67,9 +67,7 @@ def load_core_model(
     core_model: str,
 ) -> str:
     version_id_field = f"{core_model}_version_id"
-    core_model_id = (
-        f"{core_model}/{inference_request.__getattribute__(version_id_field)}"
-    )
+    core_model_id = f"{core_model}/{getattr(inference_request, version_id_field)}"
     model_manager.add_model(
         core_model_id,
         inference_request.api_key,
