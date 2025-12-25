@@ -31,13 +31,14 @@ def extract_top_class_confidence_single(prediction: dict) -> Union[float, List[f
     if "confidence" in prediction:
         return prediction["confidence"]
     predicted_classes = prediction.get("predicted_classes", [])
-    predicted_confidences = [
-        prediction["predictions"][class_name]["confidence"]
-        for class_name in predicted_classes
-    ]
-    if not predicted_confidences:
+    predictions = prediction.get("predictions", {})
+    predicted_confidences = (
+        predictions[class_name]["confidence"] for class_name in predicted_classes
+    )
+    try:
+        return max(predicted_confidences)
+    except ValueError:
         return 0.0
-    return max(predicted_confidences)
 
 
 def extract_all_class_names(prediction: dict) -> List[str]:
