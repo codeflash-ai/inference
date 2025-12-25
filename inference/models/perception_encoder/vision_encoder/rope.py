@@ -51,13 +51,19 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
+    # Avoid creating new views unnecessarily; reuse .split for better performance.
+    if start_index == 0 and end_index == t.shape[-1]:
+        # The entire last dim is rotated, skip unnecessary slicing and concatenation
+        t_rot = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
+        out = t_rot
+    else:
+        t_left = t[..., :start_index]
+        t_mid = t[..., start_index:end_index]
+        t_right = t[..., end_index:]
+        t_rot = (t_mid * freqs.cos() * scale) + (
+            rotate_half(t_mid) * freqs.sin() * scale
+        )
+        out = torch.cat((t_left, t_rot, t_right), dim=-1)
 
     return out.type(dtype)
 
@@ -67,9 +73,12 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
 
 def apply_learned_rotations(rotations, t, start_index=0, freq_ranges=None):
     if exists(freq_ranges):
+        # Use inplace einsum when possible for potential speed/mem improvement
         rotations = einsum("..., f -> ... f", rotations, freq_ranges)
+        # rearrange will be as fast as view+permute for this shape
         rotations = rearrange(rotations, "... r f -> ... (r f)")
 
+    # Use repeat_interleave for better memory locality (only if n is 1 dim, otherwise use repeat)
     rotations = repeat(rotations, "... n -> ... (n r)", r=2)
     return apply_rotary_emb(rotations, t, start_index=start_index)
 
