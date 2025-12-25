@@ -502,10 +502,20 @@ def undo_image_padding_for_predicted_polygons(
     inter_h = int(origin_shape[0] * scale)
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
+    inv_scale = 1.0 / scale  # Precompute inverse for speed
+
+    # Hoist loop variables and use list comprehensions for inner loops for less Python-level overhead
+    # Inline append to avoid extra enclosing list construction
     result = []
     for poly in polygons:
-        poly = [((p[0] - pad_x) / scale, (p[1] - pad_y) / scale) for p in poly]
-        result.append(poly)
+        if poly:
+            poly_result = []
+            for x, y in poly:
+                poly_result.append(((x - pad_x) * inv_scale, (y - pad_y) * inv_scale))
+            result.append(poly_result)
+        else:
+            # keep empty polygons as-is
+            result.append([])
     return result
 
 
