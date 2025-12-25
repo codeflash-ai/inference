@@ -34,6 +34,13 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# The output definitions are constant, so precompute them once at class load time
+_OUTPUT_DEFS: List[OutputDefinition] = [
+    OutputDefinition(name="text", kind=[STRING_KIND]),
+    OutputDefinition(name="language", kind=[STRING_KIND]),
+    OutputDefinition(name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]),
+]
+
 LONG_DESCRIPTION = """
 Detect text in images using Google Vision OCR.
 
@@ -100,13 +107,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="text", kind=[STRING_KIND]),
-            OutputDefinition(name="language", kind=[STRING_KIND]),
-            OutputDefinition(
-                name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]
-            ),
-        ]
+        return _OUTPUT_DEFS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
