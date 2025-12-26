@@ -149,7 +149,8 @@ def add_input_nodes_for_graph(
     execution_graph: DiGraph,
 ) -> DiGraph:
     for input_spec in inputs:
-        input_selector = construct_input_selector(input_name=input_spec.name)
+        # Inlined selector construction for performance
+        input_selector = f"$inputs.{input_spec.name}"
         if input_spec.is_batch_oriented():
             if input_spec.dimensionality < 1:
                 raise ExecutionGraphStructureError(
@@ -159,14 +160,10 @@ def add_input_nodes_for_graph(
                     f"your Workflow.",
                     context="workflow_compilation | execution_graph_construction",
                 )
-            data_lineage = [WORKFLOW_INPUT_BATCH_LINEAGE_ID]
-            for _ in range(input_spec.dimensionality - 1):
-                # TODO: this may end up being a bug - with ability for multi-step debugging, if we will
-                #  ever have a situation that there will be multiple step outputs with nested
-                #  dimensionality with the same lineage, this re-construction method will
-                #  assign a different lineage identifier, causing the inputs being non-composable in
-                #  a single execution branch
-                data_lineage.append(f"{uuid4()}")
+            # Preallocate list to avoid repeated append
+            data_lineage = [WORKFLOW_INPUT_BATCH_LINEAGE_ID] + [
+                str(uuid4()) for _ in range(input_spec.dimensionality - 1)
+            ]
         else:
             data_lineage = []
         compilation_output = InputNode(
