@@ -512,29 +512,39 @@ def deserialize_point_kind(parameter: str, value: Any) -> Tuple[AnyNumber, AnyNu
 def deserialize_zone_kind(
     parameter: str, value: Any
 ) -> List[List[Tuple[AnyNumber, AnyNumber]]]:
+    # Precompute and cache isinstance for tuple for tighter loop
+    tuple_type = tuple
+
+    # Fast fail for type and length checks, before iterating
     if not isinstance(value, list) or len(value) < 3:
         raise RuntimeInputError(
             public_message=f"Detected runtime parameter `{parameter}` declared to hold "
             f"zone coordinates, but defined zone is not a list with at least 3 points coordinates.",
             context="workflow_execution | runtime_input_validation",
         )
-    if any(
-        (not isinstance(e, list) and not isinstance(e, tuple)) or len(e) != 2
-        for e in value
-    ):
-        raise RuntimeInputError(
-            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
-            f"zone coordinates, but defined zone contains at least one element which is not a point with"
-            f"exactly two coordinates (x, y).",
-            context="workflow_execution | runtime_input_validation",
-        )
-    if any(not _is_number(e[0]) or not _is_number(e[1]) for e in value):
-        raise RuntimeInputError(
-            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
-            f"zone coordinates, but defined zone contains at least one element which is not a point with"
-            f"exactly two coordinates (x, y) being numbers.",
-            context="workflow_execution | runtime_input_validation",
-        )
+
+    # Use a single pass for all element checks rather than multiple loops
+    # This reduces memory lookups and avoids iterating the value list more than once.
+    for e in value:
+        if (not isinstance(e, list) and not isinstance(e, tuple_type)) or len(e) != 2:
+            raise RuntimeInputError(
+                public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+                f"zone coordinates, but defined zone contains at least one element which is not a point with"
+                f"exactly two coordinates (x, y).",
+                context="workflow_execution | runtime_input_validation",
+            )
+        # Inline number checks for slightly better efficiency
+        x, y = e
+        # Use direct isinstance rather than function call for speed
+        if not (isinstance(x, int) or isinstance(x, float)) or not (
+            isinstance(y, int) or isinstance(y, float)
+        ):
+            raise RuntimeInputError(
+                public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+                f"zone coordinates, but defined zone contains at least one element which is not a point with"
+                f"exactly two coordinates (x, y) being numbers.",
+                context="workflow_execution | runtime_input_validation",
+            )
     return value
 
 
