@@ -589,12 +589,7 @@ def merge_detections(
 
 def get_majority_class(detections: sv.Detections) -> Tuple[str, int]:
     class_counts = Counter(
-        [
-            (str(class_name), int(class_id))
-            for class_name, class_id in zip(
-                detections["class_name"], detections.class_id
-            )
-        ]
+        zip(map(str, detections["class_name"]), map(int, detections.class_id))
     )
     return class_counts.most_common(1)[0][0]
 
