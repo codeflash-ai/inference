@@ -945,9 +945,9 @@ def stream_url_to_cache(
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
     if len(params) == 0:
         return url
-    params_chunks = [
-        f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
+    # Use a list comprehension with local variable bindings for performance
+    quote_plus = urllib.parse.quote_plus  # local ref, faster in loop
+    params_chunks = [f"{name}={quote_plus(value)}" for name, value in params]
     parameters_string = "&".join(params_chunks)
     return f"{url}?{parameters_string}"
 
