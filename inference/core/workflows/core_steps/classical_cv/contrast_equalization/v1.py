@@ -106,21 +106,25 @@ class ContrastEqualizationBlockV1(WorkflowBlock):
 def update_image(img: np.ndarray, how: str):
 
     if how == "Contrast Stretching":
-        # grab 2nd and 98 percentile
-        p2 = np.percentile(img, 2)
-        p98 = np.percentile(img, 98)
+        # grab 2nd and 98 percentile in one pass for efficiency
+        p2, p98 = np.percentile(img, [2, 98])
         # rescale
         img_rescale = exposure.rescale_intensity(img, in_range=(p2, p98))
         return img_rescale
 
     elif how == "Histogram Equalization":
-        img = img.astype(np.float32) / 255
-        img_eq = exposure.equalize_hist(img) * 255
+        # Use vectorized division and casting for minimal memory overhead
+        img_norm = img.astype(np.float32)
+        np.divide(img_norm, 255, out=img_norm)
+        img_eq = exposure.equalize_hist(img_norm)
+        np.multiply(img_eq, 255, out=img_eq)
         return img_eq.astype(np.uint8)
 
     elif how == "Adaptive Equalization":
-        img = img.astype(np.float32) / 255
-        img_adapteq = exposure.equalize_adapthist(img, clip_limit=0.03) * 255
+        img_norm = img.astype(np.float32)
+        np.divide(img_norm, 255, out=img_norm)
+        img_adapteq = exposure.equalize_adapthist(img_norm, clip_limit=0.03)
+        np.multiply(img_adapteq, 255, out=img_adapteq)
         return img_adapteq.astype(np.uint8)
 
     raise ValueError(f"contrast equalization type `{how}` not implemented!")
