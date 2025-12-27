@@ -528,20 +528,27 @@ def merge_detections(
     boxes_aggregation_mode: AggregationMode,
     mask_aggregation_mode: MaskAggregationMode,
 ) -> sv.Detections:
-    class_name, class_id = AGGREGATION_MODE2CLASS_SELECTOR[confidence_aggregation_mode](
-        detections
-    )
+    class_selector = AGGREGATION_MODE2CLASS_SELECTOR[confidence_aggregation_mode]
+    class_name, class_id = class_selector(detections)
+
+    # Fast conditional logic for mask/box computation
+    mask = None
     if detections.mask is not None:
-        mask = np.array(
-            [AGGREGATION_MODE2MASKS_AGGREGATOR[mask_aggregation_mode](detections)]
-        )
+        # Avoid constructing repeated arrays and intermediate conversion
+        masks_aggregator = AGGREGATION_MODE2MASKS_AGGREGATOR[mask_aggregation_mode]
+        aggregated_mask = masks_aggregator(detections)
+        mask = np.expand_dims(
+            aggregated_mask, axis=0
+        )  # explicit expanddim for clarity and to avoid list allocation
+        # sv.mask_to_xyxy returns shape (N, 4) - we only need the first
         x1, y1, x2, y2 = sv.mask_to_xyxy(mask)[0]
     else:
-        mask = None
-        x1, y1, x2, y2 = AGGREGATION_MODE2BOXES_AGGREGATOR[boxes_aggregation_mode](
-            detections
-        )
-    data = {
+        boxes_aggregator = AGGREGATION_MODE2BOXES_AGGREGATOR[boxes_aggregation_mode]
+        x1, y1, x2, y2 = boxes_aggregator(detections)
+
+    # Pre-compute the keys and their source arrays to avoid repeated attribute lookups
+    ddata = detections.data
+    base_data = {
         "class_name": np.array([class_name]),
         PARENT_ID_KEY: np.array([detections[PARENT_ID_KEY][0]]),
         DETECTION_ID_KEY: np.array([str(uuid4())]),
@@ -557,32 +564,32 @@ def merge_detections(
         ),
         IMAGE_DIMENSIONS_KEY: np.array([detections[IMAGE_DIMENSIONS_KEY][0]]),
     }
-    if SCALING_RELATIVE_TO_PARENT_KEY in detections.data:
-        data[SCALING_RELATIVE_TO_PARENT_KEY] = np.array(
-            [detections[SCALING_RELATIVE_TO_PARENT_KEY][0]]
-        )
-    else:
-        data[SCALING_RELATIVE_TO_PARENT_KEY] = np.array([1.0])
-    if SCALING_RELATIVE_TO_ROOT_PARENT_KEY in detections.data:
-        data[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array(
-            [detections[SCALING_RELATIVE_TO_ROOT_PARENT_KEY][0]]
-        )
-    else:
-        data[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = np.array([1.0])
+
+    # Precompute the presence of scaling keys only once with dict.get
+    scaling_parent = ddata.get(SCALING_RELATIVE_TO_PARENT_KEY)
+    base_data[SCALING_RELATIVE_TO_PARENT_KEY] = (
+        np.array([scaling_parent[0]]) if scaling_parent is not None else np.array([1.0])
+    )
+
+    scaling_root_parent = ddata.get(SCALING_RELATIVE_TO_ROOT_PARENT_KEY)
+    base_data[SCALING_RELATIVE_TO_ROOT_PARENT_KEY] = (
+        np.array([scaling_root_parent[0]])
+        if scaling_root_parent is not None
+        else np.array([1.0])
+    )
+
+    # Aggregate confidence efficiently (always only one value after aggregation)
+    agg_confidence = aggregate_field_values(
+        detections=detections,
+        field="confidence",
+        aggregation_mode=confidence_aggregation_mode,
+    )
+
     return sv.Detections(
         xyxy=np.array([[x1, y1, x2, y2]], dtype=np.float64),
         class_id=np.array([class_id]),
-        confidence=np.array(
-            [
-                aggregate_field_values(
-                    detections=detections,
-                    field="confidence",
-                    aggregation_mode=confidence_aggregation_mode,
-                )
-            ],
-            dtype=np.float64,
-        ),
-        data=data,
+        confidence=np.array([agg_confidence], dtype=np.float64),
+        data=base_data,
         mask=mask,
     )
 
@@ -699,13 +706,20 @@ def aggregate_field_values(
     field: str,
     aggregation_mode: AggregationMode = AggregationMode.AVERAGE,
 ) -> float:
-    values = []
+    # Try attribute fast-path first
+    vals = None
     if hasattr(detections, field):
-        values = getattr(detections, field)
-        if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+        vals = getattr(detections, field)
     elif hasattr(detections, "data") and field in detections.data:
-        values = detections[field]
-        if isinstance(values, np.ndarray):
-            values = values.astype(float).tolist()
+        vals = detections[field]
+
+    # Avoid unnecessary conversion if already float64 array
+    if isinstance(vals, np.ndarray):
+        if vals.dtype == np.float64 or np.issubdtype(vals.dtype, np.floating):
+            values = vals.tolist()
+        else:
+            values = vals.astype(float).tolist()
+    else:
+        values = list(vals) if vals is not None else []
+
     return AGGREGATION_MODE2FIELD_AGGREGATOR[aggregation_mode](values)
