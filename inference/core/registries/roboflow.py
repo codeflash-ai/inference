@@ -267,7 +267,8 @@ def _get_model_metadata_from_cache(
     model_type_cache_path = construct_model_type_cache_path(
         dataset_id=dataset_id, version_id=version_id
     )
-    if not os.path.isfile(model_type_cache_path):
+    # os.path.exists is faster and sufficient; open will fail if not a file
+    if not os.path.exists(model_type_cache_path):
         return None
     try:
         model_metadata = read_json(path=model_type_cache_path)
@@ -285,7 +286,8 @@ def model_metadata_content_is_invalid(content: Optional[Union[list, dict]]) -> b
     if content is None:
         logger.warning("Empty model metadata file encountered in cache.")
         return True
-    if not issubclass(type(content), dict):
+    # Use isinstance for direct and efficient type checking
+    if not isinstance(content, dict):
         logger.warning("Malformed file encountered in cache.")
         return True
     if PROJECT_TASK_TYPE_KEY not in content or MODEL_TYPE_KEY not in content:
@@ -343,7 +345,7 @@ def _save_model_metadata_in_cache(
 def construct_model_type_cache_path(
     dataset_id: Union[DatasetID, ModelID], version_id: Optional[VersionID]
 ) -> str:
-    cache_dir = os.path.join(
-        MODEL_CACHE_DIR, dataset_id, version_id if version_id else ""
+    # Combine path construction into a single step for performance/memory optimization
+    return os.path.join(
+        MODEL_CACHE_DIR, dataset_id, version_id if version_id else "", "model_type.json"
     )
-    return os.path.join(cache_dir, "model_type.json")
