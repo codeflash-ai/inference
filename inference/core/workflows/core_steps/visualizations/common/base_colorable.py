@@ -17,6 +17,27 @@ from inference.core.workflows.execution_engine.entities.types import (
     Selector,
 )
 from inference.core.workflows.prototypes.block import BlockResult
+from functools import lru_cache
+
+_cached_str_to_color = lru_cache(maxsize=128)(str_to_color)
+
+_MPL_REVERSED = {
+    "Greys_R",
+    "Purples_R",
+    "Blues_R",
+    "Greens_R",
+    "Oranges_R",
+    "Reds_R",
+    "Wistia",
+    "Pastel1",
+    "Pastel2",
+    "Paired",
+    "Accent",
+    "Dark2",
+    "Set1",
+    "Set2",
+    "Set3",
+}
 
 
 class ColorableVisualizationManifest(PredictionsVisualizationManifest, ABC):
@@ -117,30 +138,14 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
     def getPalette(self, color_palette, palette_size, custom_colors):
         if color_palette == "CUSTOM":
             return sv.ColorPalette(
-                colors=[str_to_color(color) for color in custom_colors]
+                colors=[_cached_str_to_color(color) for color in custom_colors]
             )
         elif hasattr(sv.ColorPalette, color_palette):
             return getattr(sv.ColorPalette, color_palette)
         else:
             palette_name = color_palette.replace("Matplotlib ", "")
 
-            if palette_name in [
-                "Greys_R",
-                "Purples_R",
-                "Blues_R",
-                "Greens_R",
-                "Oranges_R",
-                "Reds_R",
-                "Wistia",
-                "Pastel1",
-                "Pastel2",
-                "Paired",
-                "Accent",
-                "Dark2",
-                "Set1",
-                "Set2",
-                "Set3",
-            ]:
+            if palette_name in _MPL_REVERSED:
                 palette_name = palette_name.capitalize()
             else:
                 palette_name = palette_name.lower()
