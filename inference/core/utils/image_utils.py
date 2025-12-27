@@ -13,6 +13,9 @@ import pybase64
 import requests
 import tldextract
 from _io import _IOBase
+from line_profiler import profile as codeflash_line_profile
+
+codeflash_line_profile.enable(output_prefix="/tmp/codeflash_8p0z4d9w/baseline_lprof")
 from PIL import Image
 from requests import RequestException
 from tldextract.tldextract import ExtractResult
@@ -36,6 +39,10 @@ from inference.core.exceptions import (
 )
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
+
+_IMREAD_FLAGS_WITH_ORIENT = cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+
+_IMREAD_FLAGS_NO_ORIENT = cv2.IMREAD_COLOR
 
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
@@ -104,6 +111,7 @@ def load_image(
     return np_image, is_bgr
 
 
+@codeflash_line_profile
 def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     """Choose the appropriate OpenCV image decoding flags.
 
@@ -113,10 +121,10 @@ def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     Returns:
         int: OpenCV image decoding flags.
     """
-    cv_imread_flags = cv2.IMREAD_COLOR
+    # Use precomputed flags for faster selection
     if disable_preproc_auto_orient:
-        cv_imread_flags = cv_imread_flags | cv2.IMREAD_IGNORE_ORIENTATION
-    return cv_imread_flags
+        return _IMREAD_FLAGS_WITH_ORIENT
+    return _IMREAD_FLAGS_NO_ORIENT
 
 
 def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]]:
@@ -456,12 +464,18 @@ def _ensure_resource_fqdn_allowed(fqdn: str) -> None:
 
 
 def _concatenate_chunks_of_network_location(extraction_result: ExtractResult) -> str:
-    chunks = [
+    subdomain, domain, suffix = (
         extraction_result.subdomain,
         extraction_result.domain,
         extraction_result.suffix,
-    ]
-    non_empty_chunks = [chunk for chunk in chunks if chunk]
+    )
+    non_empty_chunks = []
+    if subdomain:
+        non_empty_chunks.append(subdomain)
+    if domain:
+        non_empty_chunks.append(domain)
+    if suffix:
+        non_empty_chunks.append(suffix)
     result = ".".join(non_empty_chunks)
     if result.startswith("[") and result.endswith("]"):
         # dropping brackets for IPv6
