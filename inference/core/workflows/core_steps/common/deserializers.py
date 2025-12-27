@@ -374,7 +374,13 @@ def deserialize_numpy_array(parameter: str, raw_array: Any) -> np.ndarray:
 def deserialize_optional_string_kind(parameter: str, value: Any) -> Optional[str]:
     if value is None:
         return None
-    return deserialize_string_kind(parameter=parameter, value=value)
+    if not isinstance(value, str):
+        raise RuntimeInputError(
+            public_message=f"Detected runtime parameter `{parameter}` declared to hold "
+            f"string value, but invalid type of data found (`{type(value).__name__}`).",
+            context="workflow_execution | runtime_input_validation",
+        )
+    return value
 
 
 def deserialize_string_kind(parameter: str, value: Any) -> str:
