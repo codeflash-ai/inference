@@ -159,10 +159,10 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
     already_spotted_blocks = set()
     result = []
     for block in core_blocks:
-        manifest_class = block.get_manifest()
-        identifier = get_full_type_name(selected_type=block)
         if block in already_spotted_blocks:
             continue
+        manifest_class = block.get_manifest()
+        identifier = get_full_type_name(selected_type=block)
         result.append(
             BlockSpecification(
                 block_source=WORKFLOWS_CORE_PLUGIN_NAME,
@@ -177,6 +177,8 @@ def load_core_workflow_blocks() -> List[BlockSpecification]:
 
 def load_plugins_blocks() -> List[BlockSpecification]:
     plugins_to_load = get_plugin_modules()
+    if not plugins_to_load:
+        return []
     custom_blocks = []
     for plugin_name in plugins_to_load:
         custom_blocks.extend(load_blocks_from_plugin(plugin_name=plugin_name))
@@ -245,7 +247,8 @@ def is_block_compatible_with_execution_engine(
     if block_execution_engine_compatibility is None or execution_engine_version is None:
         return True
     try:
-        return SpecifierSet(block_execution_engine_compatibility).contains(
+        # Leverage cached parsing for specifier requirement strings
+        return _cached_specifier_set(block_execution_engine_compatibility).contains(
             execution_engine_version
         )
     except ValueError as error:
@@ -507,3 +510,8 @@ def _cached_model_json_schema(manifest_class):
 @lru_cache(maxsize=256)
 def _cached_describe_outputs(manifest_class):
     return manifest_class.describe_outputs()
+
+
+@lru_cache(maxsize=128)
+def _cached_specifier_set(requirement: str) -> SpecifierSet:
+    return SpecifierSet(requirement)
