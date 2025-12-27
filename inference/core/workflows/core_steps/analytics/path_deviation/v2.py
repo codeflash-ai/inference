@@ -179,4 +179,8 @@ class PathDeviationAnalyticsBlockV2(WorkflowBlock):
         return dist_matrix[i, j]
 
     def _euclidean_distance(self, point1: np.ndarray, point2: np.ndarray) -> float:
-        return np.sqrt(np.sum((point1 - point2) ** 2))
+        # Avoid unnecessary sum intermediate array for 2D or 1D points
+        diff = point1 - point2
+        if diff.shape == (2,):
+            return np.hypot(diff[0], diff[1])
+        return np.linalg.norm(diff)
