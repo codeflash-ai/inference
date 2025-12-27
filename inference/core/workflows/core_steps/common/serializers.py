@@ -61,6 +61,14 @@ from inference.core.workflows.execution_engine.entities.base import (
     WorkflowImageData,
 )
 
+_isinstance = isinstance
+
+_WorkflowImageData = WorkflowImageData
+
+_svDetections = sv.Detections
+
+_datetime = datetime
+
 MIN_SECRET_LENGTH_TO_REVEAL_PREFIX = 8
 MIN_POLYGON_POINT_COUNT = 3
 
@@ -309,16 +317,18 @@ def serialize_video_metadata_kind(video_metadata: VideoMetadata) -> dict:
 
 
 def serialize_wildcard_kind(value: Any) -> Any:
-    if isinstance(value, WorkflowImageData):
-        value = serialise_image(image=value)
-    elif isinstance(value, dict):
-        value = serialize_dict(elements=value)
-    elif isinstance(value, list):
-        value = serialize_list(elements=value)
-    elif isinstance(value, sv.Detections):
-        value = serialise_sv_detections(detections=value)
-    elif isinstance(value, datetime):
-        value = serialize_timestamp(timestamp=value)
+    # Order of checks: list > dict > WorkflowImageData > sv.Detections > datetime
+    # based on likely frequency and cheapness of type check
+    if _isinstance(value, list):
+        return serialize_list(elements=value)
+    if _isinstance(value, dict):
+        return serialize_dict(elements=value)
+    if _isinstance(value, _WorkflowImageData):
+        return serialise_image(image=value)
+    if _isinstance(value, _svDetections):
+        return serialise_sv_detections(detections=value)
+    if _isinstance(value, _datetime):
+        return serialize_timestamp(timestamp=value)
     return value
 
 
