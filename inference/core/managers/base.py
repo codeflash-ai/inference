@@ -41,10 +41,10 @@ class ModelManager:
 
     def __init__(self, model_registry: ModelRegistry, models: Optional[dict] = None):
         self.model_registry = model_registry
-        self._models: Dict[str, Model] = models if models is not None else {}
+        self._models = models if models is not None else {}
         self.pingback = None
         self._state_lock = Lock()
-        self._models_state_locks: Dict[str, Lock] = {}
+        self._models_state_locks = {}
 
     def init_pingback(self):
         """Initializes pingback mechanism."""
@@ -81,11 +81,16 @@ class ModelManager:
                 raise RoboflowAPINotAuthorizedError(
                     f"API key {api_key} does not have access to model {model_id}"
                 )
-
-        logger.debug(
-            f"ModelManager - Adding model with model_id={model_id}, model_id_alias={model_id_alias}"
-        )
         resolved_identifier = model_id if model_id_alias is None else model_id_alias
+
+        # Check if model is already loaded before acquiring the lock
+        existing_model = self._models.get(resolved_identifier, None)
+        if existing_model is not None:
+            logger.debug(
+                f"ModelManager - model with model_id={resolved_identifier} is already loaded."
+            )
+            return
+
         model_lock = self._get_lock_for_a_model(model_id=resolved_identifier)
         with acquire_with_timeout(lock=model_lock) as acquired:
             if not acquired:
