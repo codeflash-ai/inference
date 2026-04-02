@@ -17,15 +17,14 @@ def legacy_step_error_handler(step_name: str, error: Exception) -> None:
 
 
 def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
-    if isinstance(
-        error,
-        (
-            ModelManagerLockAcquisitionError,
-            InferenceModelNotFound,
-        ),
+    error_type = type(error)
+
+    if (
+        error_type is ModelManagerLockAcquisitionError
+        or error_type is InferenceModelNotFound
     ):
         raise error
-    if isinstance(error, InvalidModelIDError):
+    elif error_type is InvalidModelIDError:
         raise ClientCausedStepExecutionError(
             block_id=step_name,
             status_code=400,
@@ -33,7 +32,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
             context="workflow_execution | step_execution",
             inner_error=error,
         ) from error
-    if isinstance(error, RoboflowAPINotAuthorizedError):
+    elif error_type is RoboflowAPINotAuthorizedError:
         raise ClientCausedStepExecutionError(
             block_id=step_name,
             status_code=401,
@@ -42,7 +41,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
             context="workflow_execution | step_execution",
             inner_error=error,
         ) from error
-    if isinstance(error, RoboflowAPIForbiddenError):
+    elif error_type is RoboflowAPIForbiddenError:
         raise ClientCausedStepExecutionError(
             block_id=step_name,
             status_code=403,
@@ -51,7 +50,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
             context="workflow_execution | step_execution",
             inner_error=error,
         ) from error
-    if isinstance(error, RoboflowAPINotNotFoundError):
+    elif error_type is RoboflowAPINotNotFoundError:
         raise ClientCausedStepExecutionError(
             block_id=step_name,
             status_code=404,
@@ -60,7 +59,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
             context="workflow_execution | step_execution",
             inner_error=error,
         ) from error
-    if isinstance(error, HTTPCallErrorError):
+    elif error_type is HTTPCallErrorError:
         if error.status_code == 400:
             raise ClientCausedStepExecutionError(
                 block_id=step_name,
@@ -70,7 +69,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
                 context="workflow_execution | step_execution",
                 inner_error=error,
             ) from error
-        if error.status_code == 401:
+        elif error.status_code == 401:
             raise ClientCausedStepExecutionError(
                 block_id=step_name,
                 status_code=401,
@@ -79,7 +78,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
                 context="workflow_execution | step_execution",
                 inner_error=error,
             ) from error
-        if error.status_code == 403:
+        elif error.status_code == 403:
             raise ClientCausedStepExecutionError(
                 block_id=step_name,
                 status_code=403,
@@ -88,7 +87,7 @@ def extended_roboflow_errors_handler(step_name: str, error: Exception) -> None:
                 context="workflow_execution | step_execution",
                 inner_error=error,
             ) from error
-        if error.status_code == 404:
+        elif error.status_code == 404:
             raise ClientCausedStepExecutionError(
                 block_id=step_name,
                 status_code=404,
