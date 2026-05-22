@@ -118,7 +118,10 @@ def convert_inference_detections_batch_to_sv_detections(
             raw_predictions = filter_out_invalid_polygons(predictions=raw_predictions)
         parent_ids = [d.get(PARENT_ID_KEY, "") for d in raw_predictions]
         detection_ids = [
-            d.get(DETECTION_ID_KEY, str(uuid.uuid4())) for d in raw_predictions
+            d[DETECTION_ID_KEY]
+            if DETECTION_ID_KEY in d
+            else str(uuid.uuid4())
+            for d in raw_predictions
         ]
         detections[DETECTION_ID_KEY] = np.array(detection_ids)
         detections[PARENT_ID_KEY] = np.array(parent_ids)

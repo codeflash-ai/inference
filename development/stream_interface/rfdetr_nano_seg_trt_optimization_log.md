@@ -133,3 +133,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Command: benchmark command above.
 - Result on requested command: `frames=538 elapsed=5.85s fps=91.94`.
 - Learning: The accumulated committed changes now improve the original `72.23 fps` baseline by about `27%` on the exact benchmark command.
+
+### Avoid Eager Workflow Detection UUID Generation
+
+- Hypothesis: `convert_inference_detections_batch_to_sv_detections(...)` calls `str(uuid.uuid4())` as a `dict.get(...)` default, so UUIDs are generated for every detection even when local model responses already include `detection_id`.
+- Change: Generate a UUID only when `detection_id` is missing from a raw prediction, preserving present values including `None`.
+- Correctness: Smoke test patched `uuid.uuid4` to raise and converted a response containing `detection_id="known-id"`; conversion preserved the ID without calling UUID generation.
+- Result on requested command: `frames=538 elapsed=5.84s fps=92.12`.
+- Learning: This is a small but safe workflow-level CPU reduction; RFDETR local response objects already pay the necessary `detection_id` creation cost.
