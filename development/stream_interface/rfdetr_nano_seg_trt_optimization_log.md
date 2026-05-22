@@ -120,3 +120,16 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: No committed code change. Built RFDETR polygon response objects with `model_construct()` for all response models, and separately with only `Point.model_construct()`.
 - Result: Both variants were slower in the local response-construction harness. Full construct measured `0.76 ms/frame` vs `0.57 ms/frame` for normal constructors; point-only construct measured `0.64 ms/frame` vs `0.54 ms/frame` and emitted Pydantic serializer warnings for NumPy scalar values.
 - Learning: Pydantic construction is not the next profitable target in this form. Keep validated constructors and look elsewhere for workflow overhead.
+
+### Rejected: Workflow v3 RLE Response For Local Conversion
+
+- Hypothesis: Workflow v3 converts polygon predictions back into `sv.Detections` masks via `supervision.from_inference`; asking the local model response for RLE could avoid polygon rasterization in that conversion.
+- Change tested: Temporary workflow v3 local request change only; passed `response_mask_format="rle"` to `InstanceSegmentationInferenceRequest`.
+- Result on requested command: `frames=538 elapsed=6.25s fps=86.12`, slower than the dense polygon-response path.
+- Learning: For this RFDETR-nano segmentation workflow, model-side RLE encoding plus local conversion is still more expensive than the dense-to-polygon path. Keep polygon responses as the local workflow default unless the caller explicitly asks for RLE.
+
+### Current Exact Command Checkpoint
+
+- Command: benchmark command above.
+- Result on requested command: `frames=538 elapsed=5.85s fps=91.94`.
+- Learning: The accumulated committed changes now improve the original `72.23 fps` baseline by about `27%` on the exact benchmark command.
