@@ -435,6 +435,7 @@ def infer_from_trt_engine(
     outputs: List[str],
     stream: Optional[torch.cuda.Stream] = None,
     trt_cuda_graph_cache: Optional[TRTCudaGraphCache] = None,
+    synchronize: bool = True,
 ) -> List[torch.Tensor]:
     """Run inference using a TensorRT engine, optionally with CUDA graph acceleration.
 
@@ -571,7 +572,8 @@ def infer_from_trt_engine(
             outputs=outputs,
             trt_cuda_graph_cache=trt_cuda_graph_cache,
         )
-    stream.synchronize()
+    if synchronize:
+        stream.synchronize()
     return results
 
 
@@ -705,11 +707,13 @@ def _execute_trt_engine(
         else:
             trt_cuda_graph_state = trt_cuda_graph_cache[cache_key]
             stream = trt_cuda_graph_state.cuda_stream
+            caller_stream = torch.cuda.current_stream(device)
+            stream.wait_stream(caller_stream)
             with torch.cuda.stream(stream):
                 trt_cuda_graph_state.input_buffer.copy_(pre_processed_images)
                 trt_cuda_graph_state.cuda_graph.replay()
                 results = [buf.clone() for buf in trt_cuda_graph_state.output_buffers]
-            stream.synchronize()
+            caller_stream.wait_stream(stream)
             return results
 
     else:

@@ -175,6 +175,10 @@ class RFDetrForInstanceSegmentationTRT(
             default_cuda_graph_cache_size=default_trt_cuda_graph_cache_size,
             cuda_graph_cache=trt_cuda_graph_cache,
         )
+        if trt_cuda_graph_cache is None:
+            trt_cuda_graph_cache = TRTCudaGraphCache(
+                capacity=default_trt_cuda_graph_cache_size
+            )
         return cls(
             engine=engine,
             input_name=inputs[0],
@@ -247,7 +251,7 @@ class RFDetrForInstanceSegmentationTRT(
                 image_size_wh=image_size,
                 pre_processing_overrides=pre_processing_overrides,
             )
-        self._pre_process_stream.synchronize()
+        torch.cuda.current_stream(self._device).wait_stream(self._pre_process_stream)
         return pre_processed_images, pre_processing_meta
 
     def forward(
@@ -259,6 +263,7 @@ class RFDetrForInstanceSegmentationTRT(
         cache = self._trt_cuda_graph_cache if not disable_cuda_graphs else None
         with self._lock:
             with use_cuda_context(context=self._cuda_context):
+                self._inference_stream.wait_stream(self._pre_process_stream)
                 detections, labels, masks = infer_from_trt_engine(
                     pre_processed_images=pre_processed_images,
                     trt_config=self._trt_config,
@@ -269,6 +274,10 @@ class RFDetrForInstanceSegmentationTRT(
                     outputs=self._output_names,
                     stream=self._inference_stream,
                     trt_cuda_graph_cache=cache,
+                    synchronize=False,
+                )
+                torch.cuda.current_stream(self._device).wait_stream(
+                    self._inference_stream
                 )
                 return detections, labels, masks
 
@@ -296,6 +305,7 @@ class RFDetrForInstanceSegmentationTRT(
             default_confidence=INFERENCE_MODELS_RFDETR_DEFAULT_CONFIDENCE,
         )
         with torch.cuda.stream(self._post_process_stream):
+            self._post_process_stream.wait_stream(self._inference_stream)
             for result_element in model_results:
                 result_element.record_stream(self._post_process_stream)
             bboxes, logits, masks = model_results
@@ -319,7 +329,7 @@ class RFDetrForInstanceSegmentationTRT(
                     num_classes=len(self.class_names),
                     classes_re_mapping=self._classes_re_mapping,
                 )
-        self._post_process_stream.synchronize()
+        torch.cuda.current_stream(self._device).wait_stream(self._post_process_stream)
         return results
 
     @property
