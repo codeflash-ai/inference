@@ -113,3 +113,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result on requested command: `frames=538 elapsed=5.99s fps=89.84`.
 - Test note: Attempted `PYTHONPATH=/app/inference_models pytest -q inference_models/tests/unit_tests/models/common/test_rle_utils.py tests/inference/unit_tests/models/test_rfdetr.py`, but collection failed before running tests with `ModuleNotFoundError: No module named 'tests.conftest'`.
 - Learning: At high FPS, even small CPU mask scans are measurable; rely on the contour operation's empty output instead of scanning twice.
+
+### Rejected: Pydantic model_construct For Polygon Responses
+
+- Hypothesis: Bypassing Pydantic validation with `model_construct()` for instance segmentation response objects or polygon `Point` objects could reduce workflow response construction overhead.
+- Change tested: No committed code change. Built RFDETR polygon response objects with `model_construct()` for all response models, and separately with only `Point.model_construct()`.
+- Result: Both variants were slower in the local response-construction harness. Full construct measured `0.76 ms/frame` vs `0.57 ms/frame` for normal constructors; point-only construct measured `0.64 ms/frame` vs `0.54 ms/frame` and emitted Pydantic serializer warnings for NumPy scalar values.
+- Learning: Pydantic construction is not the next profitable target in this form. Keep validated constructors and look elsewhere for workflow overhead.
