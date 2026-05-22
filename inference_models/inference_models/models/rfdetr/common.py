@@ -12,9 +12,9 @@ from inference_models.models.common.roboflow.model_packages import (
 )
 from inference_models.models.common.roboflow.post_processing import (
     align_instance_segmentation_results,
-    align_instance_segmentation_results_to_rle_masks,
     rescale_image_detections,
 )
+from inference_models.models.common.rle_utils import torch_mask_to_coco_rle
 from inference_models.models.rfdetr.class_remapping import ClassesReMapping
 from inference_models.models.rfdetr.post_processor import select_topk_predictions
 from inference_models.utils.file_system import read_json
@@ -292,8 +292,7 @@ def post_process_instance_segmentation_results_to_rle_masks(
             image_meta.pad_bottom,
         )
         selected_boxes_xyxy = selected_boxes_xyxy_pct * denorm_size_whwh
-        aligned_boxes, rle_masks = [], []
-        for bbox, mask in align_instance_segmentation_results_to_rle_masks(
+        aligned_boxes, aligned_masks = align_instance_segmentation_results(
             image_bboxes=selected_boxes_xyxy,
             masks=selected_masks,
             padding=padding,
@@ -303,9 +302,8 @@ def post_process_instance_segmentation_results_to_rle_masks(
             size_after_pre_processing=image_meta.size_after_pre_processing,
             inference_size=denorm_size,
             static_crop_offset=image_meta.static_crop_offset,
-        ):
-            aligned_boxes.append(bbox)
-            rle_masks.append(mask)
+        )
+        rle_masks = [torch_mask_to_coco_rle(mask) for mask in aligned_masks]
         instances_masks = InstancesRLEMasks.from_coco_rle_masks(
             image_size=(
                 image_meta.original_size.height,
@@ -313,11 +311,10 @@ def post_process_instance_segmentation_results_to_rle_masks(
             ),
             masks=rle_masks,
         )
-        if len(aligned_boxes) > 0:
-            aligned_boxes_tensor = torch.stack(aligned_boxes, dim=0)
+        if aligned_boxes.shape[0] > 0:
             final_results.append(
                 InstanceDetections(
-                    xyxy=aligned_boxes_tensor.round().int(),
+                    xyxy=aligned_boxes.round().int(),
                     confidence=confidence,
                     class_id=top_classes.int(),
                     mask=instances_masks,
