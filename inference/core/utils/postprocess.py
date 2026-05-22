@@ -52,11 +52,6 @@ def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
                 m_bool = np.ascontiguousarray(m_bool)
             m_uint8 = m_bool.view(np.uint8)
 
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
-            segments.append(np.zeros((0, 2), dtype=np.float32))
-            continue
-
         segments.append(mask2poly(m_uint8))
     return segments
 
@@ -87,11 +82,6 @@ def masks2multipoly(masks: np.ndarray) -> List[np.ndarray]:
             if not m_bool.flags.c_contiguous:
                 m_bool = np.ascontiguousarray(m_bool)
             m_uint8 = m_bool.view(np.uint8)
-
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
-            segments.append([np.zeros((0, 2), dtype=np.float32)])
-            continue
 
         segments.append(mask2multipoly(m_uint8))
     return segments

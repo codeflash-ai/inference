@@ -103,3 +103,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Micro-result: isolated RFDETR preprocessing measured `2.16 ms/frame` over 240 frames after the change.
 - Result on requested command: `frames=538 elapsed=6.04s fps=89.04`.
 - Learning: Small host-side image copies are visible at this frame size. Exact channel-order transformations can be moved across per-channel PIL resize safely.
+
+### Avoid Redundant Empty-Mask Scan Before Polygon Contours
+
+- Hypothesis: `masks2poly()` and `masks2multipoly()` do an `np.any()` scan before `cv2.findContours()`, but OpenCV already returns no contours for empty masks. Removing the pre-scan should avoid a second full-mask traversal for non-empty masks.
+- Change: Removed the explicit `np.any()` empty-mask fast path and let `mask2poly()` / `mask2multipoly()` handle empty contours.
+- Correctness: Compared old and new polygon conversion on RFDETR dense masks from 40 frames; polygon arrays matched exactly. Empty-mask smoke check still returns `(0, 2)` `float32` polygon output.
+- Micro-result: RFDETR dense mask polygon conversion improved from `0.18 ms/frame` to `0.11 ms/frame` over 240 frames.
+- Result on requested command: `frames=538 elapsed=5.99s fps=89.84`.
+- Test note: Attempted `PYTHONPATH=/app/inference_models pytest -q inference_models/tests/unit_tests/models/common/test_rle_utils.py tests/inference/unit_tests/models/test_rfdetr.py`, but collection failed before running tests with `ModuleNotFoundError: No module named 'tests.conftest'`.
+- Learning: At high FPS, even small CPU mask scans are measurable; rely on the contour operation's empty output instead of scanning twice.
