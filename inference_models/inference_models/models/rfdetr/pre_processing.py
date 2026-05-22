@@ -145,6 +145,7 @@ def _pre_process_numpy(
     `training_input_size` (matching training's SquareResize). Otherwise we stretch
     directly in a single PIL F.resize step.
     """
+    swap_tensor_channels = False
     if _needs_two_step_resize(network_input):
         intermediate_image, meta = _dataset_version_resize_uint8(
             image=image,
@@ -171,7 +172,9 @@ def _pre_process_numpy(
             width=image.shape[1], height=image.shape[0]
         )
         if input_color_mode != network_input.color_mode:
-            image = image[:, :, ::-1]
+            swap_tensor_channels = True
+        else:
+            swap_tensor_channels = False
         pil = Image.fromarray(np.ascontiguousarray(image))
         meta = _build_metadata(
             original_size=original_size,
@@ -182,6 +185,8 @@ def _pre_process_numpy(
 
     resized = TF.resize(pil, (target_size.height, target_size.width), antialias=True)
     tensor = TF.to_tensor(resized)
+    if swap_tensor_channels and tensor.shape[0] == 3:
+        tensor = tensor[[2, 1, 0], :, :]
     tensor = _apply_normalization(tensor, network_input)
     return tensor, meta
 
