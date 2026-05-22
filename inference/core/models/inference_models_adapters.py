@@ -280,7 +280,10 @@ class InferenceModelsInstanceSegmentationAdapter(Model):
             disable_static_crop=kwargs.get("disable_preproc_static_crop", False),
         )
         kwargs["pre_processing_overrides"] = pre_processing_overrides
-        if "rle" in self._model.supported_mask_formats:
+        if (
+            kwargs.get("response_mask_format") == "rle"
+            and "rle" in self._model.supported_mask_formats
+        ):
             kwargs["mask_format"] = "rle"
         return kwargs
 
