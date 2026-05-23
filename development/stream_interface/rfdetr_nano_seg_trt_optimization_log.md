@@ -1617,3 +1617,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the warmed CUDA graph path against standard non-graph TensorRT execution on all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.19s fps=245.17` and repeat `frames=538 elapsed=2.20s fps=244.67`, above the prior accepted `64` warmup default band.
 - Learning: Keeping all first-result materialization after graph warmup gives a small but useful improvement without changing steady-state replay semantics. The path is still graph-bound and clock-regime sensitive.
+
+### Rejected: Remove Pre-Replay Capture Clone
+
+- Hypothesis: After moving the first returned result clone after the capture warmup replays, the earlier post-capture clone is overwritten and might be removable as startup-only work.
+- Change tested: Temporary code only; removed the first `results = [buf.clone() ...]` and synchronize immediately after CUDA graph capture, keeping only the post-warmup replay result clone. Pipeline depth remained fixed at `2`.
+- Correctness: The returned results still come from a replay of the same captured graph and input; prediction math is unchanged.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.59`, below the accepted clone-after-warmup best and not enough to justify removing the extra startup work.
+- Learning: The overwritten clone likely contributes a small amount of useful warmup before the measured interval. Keep the accepted capture sequence.
