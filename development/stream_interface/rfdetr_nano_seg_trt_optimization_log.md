@@ -2168,3 +2168,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under NCU overhead: `frames=538 elapsed=5.25s fps=102.51`, not comparable to normal benchmark FPS.
 - Findings: The sampled GEMM launches had grid sizes `36`, `54`, and `72` with block size `128`, `166` registers/thread, `16.38 KiB` dynamic shared memory per block, waves/SM `0.30-0.60`, theoretical occupancy `37.5%`, achieved occupancy `13.90-21.35%` (mean `17.71%`), achieved active warps/SM mean `5.67`, compute throughput mean `48.14%`, DRAM throughput mean `24.78%`, and duration mean `54.91 us` under NCU replay.
 - Learning: The top GEMM family is also small-grid and occupancy-limited, though less register-heavy than the MHA node. Along with the MHA snapshot, this points to TensorRT tactic/export structure as the remaining graph-body limiter; replacing a single postprocess-style kernel cannot address enough of the repeated GEMM/MHA body.
+
+### Rejected: Three Explicit TensorRT Aux Streams
+
+- Hypothesis: Prior tests rejected zero, one, two, and four explicit TensorRT auxiliary streams during CUDA graph capture. Since the graph-node trace shows six streams active during replay but low overlap, forcing exactly three persistent aux streams might produce a slightly better balance between TensorRT internal parallelism and scheduling overhead.
+- Change tested: Temporary code only; added three persistent `torch.cuda.Stream` objects to the TensorRT CUDA graph state, called `graph_context.set_aux_streams(...)` before the pre-capture warmup and CUDA graph capture, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed and the benchmark completed normally. The change only altered TensorRT auxiliary stream scheduling for the same captured engine and output tensors.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.73` and `frames=538 elapsed=2.21s fps=243.50`; after reverting to the accepted default aux-stream behavior, the same-session baseline measured `frames=538 elapsed=2.21s fps=243.71`.
+- Learning: Three explicit aux streams are just noise in the accepted warmed band, not a stable gain. Keep TensorRT's default auxiliary stream scheduling.
