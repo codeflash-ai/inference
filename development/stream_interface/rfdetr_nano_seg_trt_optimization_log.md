@@ -442,3 +442,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The `4x128` variant matched the non-fused PyTorch fallback on 120 frames: counts, classes, and boxes matched exactly.
 - Result on requested command: `4x128` measured `frames=538 elapsed=2.59s fps=207.68`; `2x128` measured `frames=538 elapsed=2.60s fps=207.12`, both below the current checkpoint.
 - Learning: The reduced program count does not compensate for the larger vector/register footprint on this T4 workload. The original one-detection, 256-pixel tile remains better.
+
+### Rejected: Packed RFDETR Metadata Copy
+
+- Hypothesis: Workflow conversion performs separate small D2H copies for count, boxes, confidence, class IDs, and masks. Packing boxes, confidence, and class IDs into one Triton-produced float32 metadata tensor could reduce tiny D2H calls and remove the deferred path's box round/int kernels.
+- Change tested: Temporary code only; `_select_topk_boxes_kernel` wrote a `(100, 6)` packed metadata tensor `[x1, y1, x2, y2, score, class_id]`, and the local workflow fast path copied that tensor once before slicing CPU arrays.
+- Correctness: Compared against the non-fused PyTorch fallback on 160 frames: counts and classes matched exactly, max box delta `0.5` px.
+- Result on requested command: depth `2` repeat runs measured `frames=538 elapsed=2.57s fps=209.35` and `frames=538 elapsed=2.57s fps=209.72`, close but still below the current `210.18` FPS checkpoint.
+- Learning: Reducing small D2H copies alone does not beat the added Triton stores and changed CPU formatting. Keep the simpler separate metadata tensors.
