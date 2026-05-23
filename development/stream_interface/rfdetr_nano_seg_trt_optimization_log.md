@@ -1080,3 +1080,17 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; after `cuda_graph.replay()`, made the caller stream wait on the graph stream, cloned `output_buffers` on the caller stream, and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.26s fps=237.82`, `frames=538 elapsed=2.29s fps=235.14`, and `frames=538 elapsed=2.29s fps=235.36`, which is not stable enough to keep over the accepted fixed-copy path.
 - Learning: The output clones remain on the critical ownership chain regardless of which stream performs them. Moving the clone stream only perturbs scheduling, so keep the established graph-stream clone path.
+
+### Nsight Compute Postprocess Kernel Snapshot
+
+- Request: Use a more focused profiler on the custom fused postprocess kernels instead of continuing blind one-kernel tweaks.
+- Profile: Nsight Compute report `/tmp/rfdetr_ncu_postprocess_basic_20260523_101558.ncu-rep`, collected with `--set basic`, `--kernel-name "regex:(_select_topk_boxes_kernel|_resize_selected_masks_kernel)"`, `--launch-skip 20`, and `--launch-count 4`.
+- Result: `_select_topk_boxes_kernel` launches as one 256-thread block with 128 registers/thread and about `24.5 us` duration under Nsight Compute instrumentation; NCU flags the grid as too small to fill the T4. `_resize_selected_masks_kernel` launches as `(7, 215, 1)x(128, 1, 1)`, uses 32 registers/thread, reaches about `81%` achieved occupancy, and measured about `14.8 us` under NCU instrumentation.
+- Learning: The mask resize kernel is already reasonably occupied for the fixed 7-row grid. The selector underutilizes the GPU, but parallelizing the global top-k would require extra coordination/launches, which is likely to lose given the current graph-to-graph gap is only around `40 us`.
+
+### Rejected: Sequential Background Remap Selector
+
+- Hypothesis: The benchmark RFDETR class remapping only removes class `0` as background, so the fused selector could compute `class_id = raw_class_id - 1` and skip the per-selected-candidate device `class_mapping` load.
+- Change tested: Temporary code only; detected the sequential background remap in the TRT model, threaded a `sequential_background_remap` flag into the fused instance selector, and added a Triton branch that keeps `raw_class_id > 0` and remaps by subtracting one. Pipeline depth remained fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.48`, `frames=538 elapsed=2.32s fps=232.11`, and `frames=538 elapsed=2.29s fps=234.43`, below the accepted fixed-copy band.
+- Learning: The scalar class-map load is not the selector limiter; the added branch/codegen and Python plumbing make the path slower. Keep the original generic mapping path.
