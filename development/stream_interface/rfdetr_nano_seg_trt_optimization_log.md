@@ -1260,3 +1260,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_SKIP_TRT_CALLER_STREAM_WAIT=1`, the TensorRT helper returned the graph execution stream and skipped `caller_stream.wait_stream(stream)`. RFDETR stored that stream in thread-local state and made postprocess wait on it instead of `_inference_stream`. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.33`, below the accepted fixed-copy band.
 - Learning: The caller-stream wait is part of the stable scheduling chain for the current depth-2 pipeline. Bypassing it perturbs overlap and slows the run even though the tensor dependencies are still ordered. Keep the accepted wait.
+
+### Rejected: High-Priority Postprocess Stream
+
+- Hypothesis: The postprocess stream runs the fixed selector, mask-resize, and prediction D2H copies in the roughly `40 us` graph-to-graph tail. Giving it higher priority might reduce scheduling latency and tighten the tail without changing TensorRT graph replay.
+- Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_POSTPROCESS=1`, created the RFDETR per-thread postprocess stream with priority `-1` instead of the default priority. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=234.32`, then `frames=538 elapsed=2.34s fps=229.94`, not a stable improvement over the accepted fixed-copy band.
+- Learning: Stream priority changes add variance and do not consistently improve the already short post-graph tail. Keep the default-priority postprocess stream.
