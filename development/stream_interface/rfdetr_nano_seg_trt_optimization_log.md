@@ -1023,3 +1023,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; added auxiliary CUDA streams to the graph state, called `IExecutionContext.set_aux_streams(...)` before the warmup and capture `execute_async_v3(...)` calls, and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.27s fps=237.02`, then `frames=538 elapsed=2.29s fps=234.91` and `frames=538 elapsed=2.29s fps=235.38`, which is not a stable improvement over the accepted fixed-copy band.
 - Learning: TensorRT's default stream behavior for this serialized engine is already good enough, or explicit aux-stream handles perturb capture/scheduling without reducing the real graph replay bottleneck. Keep the simpler existing CUDA graph capture path.
+
+### Current Clean Depth-2 Nsight Profile
+
+- Request: Generate another Nsight Systems capture on the current accepted path, keeping pipeline depth fixed at `2`.
+- Profile: Nsight Systems capture `/tmp/rfdetr_fixed7_depth2_clean_20260523_095302.nsys-rep` exported to `/tmp/rfdetr_fixed7_depth2_clean_20260523_095302.sqlite`; CSV summaries are `/tmp/rfdetr_fixed7_depth2_clean_20260523_095302_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_fixed7_depth2_clean_20260523_095302_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_fixed7_depth2_clean_20260523_095302_stats_cuda_api_sum.csv`.
+- Result under profiler: depth `2` measured `frames=538 elapsed=2.28s fps=235.96`.
+- Graph spacing: The capture includes `538` CUDA graph traces on stream `39`. After skipping the first 100 launches, CUDA graph duration was p50 `4012.688 us`, p90 `4070.684 us`, p95 `4074.743 us`, p99 `4081.137 us`; graph end-to-next-start gap was p50 `40.607 us`, p90 `41.855 us`, p95 `42.245 us`, p99 `42.781 us`, mean `40.599 us`. GPU work inside that gap covered p50 `35.231 us`, leaving p50 idle gap `5.216 us`.
+- Learning: The depth-2 accepted path is still shaped as intended: CPU work and prediction D2H copies are overlapped enough that there is only a few microseconds of idle time between CUDA graph replays. Remaining FPS is dominated by the TensorRT CUDA graph duration plus the small fixed postprocess kernels.
