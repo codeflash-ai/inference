@@ -617,3 +617,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared borrowed graph outputs against cloned graph outputs on 120 frames after slicing by the deferred valid count: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.62s fps=205.72` and `frames=538 elapsed=2.61s fps=206.36`, well below the current `218.97` FPS checkpoint.
 - Learning: Removing the D2D output clones is not enough to overcome the extra per-thread graph state and scheduling cost in this workload. Keep the existing cloned-output graph replay path.
+
+### Rejected: Fuse Box Rounding Into Triton Selector
+
+- Hypothesis: The deferred fused postprocess still launches PyTorch kernels for `selected_boxes.round().int()` after the Triton top-k selector. Writing rounded integer boxes directly from `_select_topk_boxes_kernel` could remove that post-selector work from the gap between CUDA graph launches.
+- Change tested: Temporary code only; made the selector allocate `boxes` as `int32`, stored clipped coordinates with `+0.5` for positive-coordinate rounding, and skipped the Python-side `round().int()` when fused boxes were already integer.
+- Correctness: Compared fused output against the unfused PyTorch fallback on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.19` and `frames=538 elapsed=2.48s fps=216.58`, not consistently above the current `218.97` FPS checkpoint.
+- Learning: The small box-conversion kernels are visible in Nsight Systems but are not throughput-limiting at depth `2`. Keep the simpler float-box selector plus existing PyTorch rounding.
