@@ -1873,3 +1873,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary env-gated code only; with `RFDETR_TRT_GRAPH_POOL_HANDLE=true`, `_capture_cuda_graph(...)` passed a fresh graph-pool handle to `torch.cuda.graph(...)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: `frames=538 elapsed=2.21s fps=243.58`, below the recent clean default baseline of `frames=538 elapsed=2.21s fps=243.99`.
 - Learning: The captured TensorRT graph body does not benefit from a PyTorch graph-pool handle. The graph contains TensorRT work, not PyTorch allocations that would use the pool. Keep the accepted `torch.cuda.graph(cuda_graph, stream=stream)` capture.
+
+### Profile: User-Requested Depth-2 Graph-Bound Refresh
+
+- Request: Capture a fresh Nsight Systems report for the current accepted implementation while keeping the workflow pipeline depth fixed at `2`.
+- Sanity run before profiling: the requested command measured `frames=538 elapsed=2.20s fps=244.55`.
+- Profile: `/tmp/rfdetr_depth2_user_refresh_20260523_173919.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_user_refresh_20260523_173919.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_user_refresh_20260523_173919_stats_cuda_gpu_kern_sum_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_user_refresh_20260523_173919_stats_cuda_gpu_mem_time_sum_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_user_refresh_20260523_173919_stats_cuda_api_sum_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.30s fps=234.31`.
+- Graph spacing: The capture includes `602` CUDA graph traces. After skipping the `64` capture warmups plus the next `100` frame launches, CUDA graph duration was p50 `4073.664 us`, p90 `4137.858 us`, p95 `4141.692 us`, p99 `4148.619 us`, mean `4080.681 us`; graph end-to-next-start gap was p50 `40.543 us`, p90 `41.920 us`, p95 `42.303 us`, p99 `42.866 us`, mean `40.656 us`.
+- Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `35.151 us`, mean `35.275 us`; idle inside the gap was p50 `5.296 us`, mean `5.425 us`. The largest gap occupants were the next-frame input D2D copy (`1168128B`, `13.149 us` avg overlap), TensorRT mask D2D clone (`2433600B`, `13.093 us`), sigmoid (`6.942 us`), fill-long (`2.832 us`), logits D2D clone (`36400B`, `2.114 us`), selector (`2.042 us`), boxes D2D clone (`1600B`, `1.997 us`), and fill-int (`1.906 us`).
+- Learning: The requested depth-2 run is already tightly graph-bound. The point where one TensorRT CUDA graph ends is about `40-43 us` from the next graph start, with only about `5 us` of idle bubble. Remaining FPS is dominated by the TensorRT graph body plus required input/output copies; depth `3` was not tested.
