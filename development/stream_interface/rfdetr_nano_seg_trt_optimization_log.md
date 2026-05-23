@@ -1401,3 +1401,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; replaced `int(count_buffer.item())` with `int(count_buffer.numpy()[0])`. Pipeline depth remained fixed at `2`.
 - Result on requested command: `frames=538 elapsed=2.31s fps=233.16`, not better than the accepted fixed-copy band.
 - Learning: Count scalar extraction is below the limiter. Keep the simpler `count_buffer.item()` path.
+
+### Rejected: Specialized 4x Mask Resize Kernel
+
+- Hypothesis: The benchmark always resizes RFDETR masks from `78x78` to `312x312`, so a Triton resize kernel specialized for the exact 4x mapping could remove per-pixel floor/divide arithmetic from the generic bilinear resize kernel.
+- Change tested: Temporary code only; dispatched to a separate `_resize_selected_masks_4x_kernel(...)` when `input_height * 4 == output_height` and `input_width * 4 == output_width`. Pipeline depth remained fixed at `2`.
+- Result on requested command: first run `frames=538 elapsed=2.29s fps=234.83`, repeat `frames=538 elapsed=2.31s fps=232.92`, not stable enough to keep over the accepted fixed-copy band.
+- Learning: The generic resize arithmetic is not the throughput limiter at depth `2`; graph spacing is dominated by TensorRT graph replay plus the required input/output copies and selector/sigmoid tail. Keep the generic resize kernel.
