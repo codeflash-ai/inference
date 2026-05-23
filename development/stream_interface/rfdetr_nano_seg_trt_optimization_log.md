@@ -1352,3 +1352,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_FP16_MASK_OUTPUT=1`, cloned the first two TensorRT outputs normally but copied the third output with `.to(dtype=torch.float16)` on the graph stream. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.54s fps=211.59`, far below the accepted fixed-copy band.
 - Learning: The FP32-to-FP16 cast kernel and scheduling cost dominate any D2D bandwidth reduction. Keep the plain FP32 mask clone.
+
+### Rejected: Capture Input Copy Inside Pointer-Keyed CUDA Graph
+
+- Hypothesis: The graph-to-graph gap still includes a separate `1.17 MB` D2D copy from the preprocessed CUDA tensor into the graph-owned TensorRT input buffer. Capturing that copy as the first node of the CUDA graph, keyed by the current preprocessed tensor pointer, could remove the standalone input-copy launch without retaining external input tensors.
+- Change tested: Temporary gated code only; with `RFDETR_CAPTURE_INPUT_COPY_IN_GRAPH=1`, included `input_buffer.copy_(pre_processed_images)` inside CUDA graph capture, skipped the cache-hit input copy, and extended the graph cache key with `pre_processed_images.data_ptr()`. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=3.53s fps=152.47`, far below the accepted fixed-copy band.
+- Learning: Pointer-keyed graph capture causes excessive graph-cache churn and capture overhead in the workflow pipeline. Keep the single shape-keyed graph and the small explicit D2D input copy.
