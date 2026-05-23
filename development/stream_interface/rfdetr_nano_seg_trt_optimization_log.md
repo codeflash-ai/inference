@@ -1866,3 +1866,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Graph spacing: The capture includes `602` CUDA graph traces. After skipping the `64` capture warmups plus the next `100` frame launches, CUDA graph duration was p50 `4068.479 us`, p90 `4134.321 us`, p95 `4139.256 us`, p99 `4145.568 us`, mean `4072.660 us`; graph end-to-next-start gap was p50 `40.448 us`, p90 `41.805 us`, p95 `42.207 us`, p99 `42.856 us`, mean `40.615 us`.
 - Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `35.136 us`, mean `35.363 us`; idle inside the gap was p50 `5.152 us`, mean `5.237 us`.
 - Learning: The current accepted depth-2 path is still effectively TensorRT CUDA-graph-body bound. The post-graph interval is low and consistent, and only about `5 us` of it is idle; further wins need a correctness-compatible TensorRT graph-duration reduction or a way to remove required input/output copy work without adding dependencies.
+
+### Rejected: Explicit PyTorch CUDA Graph Pool Handle
+
+- Hypothesis: Passing an explicit `torch.cuda.graph_pool_handle()` to the TensorRT CUDA graph capture might reduce graph memory-pool setup overhead or produce a slightly better replay object.
+- Change tested: Temporary env-gated code only; with `RFDETR_TRT_GRAPH_POOL_HANDLE=true`, `_capture_cuda_graph(...)` passed a fresh graph-pool handle to `torch.cuda.graph(...)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `frames=538 elapsed=2.21s fps=243.58`, below the recent clean default baseline of `frames=538 elapsed=2.21s fps=243.99`.
+- Learning: The captured TensorRT graph body does not benefit from a PyTorch graph-pool handle. The graph contains TensorRT work, not PyTorch allocations that would use the pool. Keep the accepted `torch.cuda.graph(cuda_graph, stream=stream)` capture.
