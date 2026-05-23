@@ -489,3 +489,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; replaced the per-call default override object with a module-level `_RFDETR_NO_PREPROCESSING_OVERRIDES = PreProcessingOverrides()`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.57s fps=208.98`, below the per-call override fast path.
 - Learning: This was either noise-sensitive or interacted poorly with the surrounding path; keep the simpler per-call object that produced the better repeated benchmark.
+
+### Rejected: Cache RFDETR Fast Path Model Reference
+
+- Hypothesis: Even after the pre-request fast path, `run_locally(...)` still calls `model_manager.add_model(...)` and `_try_run_rfdetr_trt_fast_path(...)` indexes the manager every frame. Caching the loaded RFDETR adapter on the workflow block could avoid model-manager cache refresh and lock overhead.
+- Change tested: Temporary code only; stored `_rfdetr_trt_fast_path_model` and `_rfdetr_trt_fast_path_model_id` after first lookup, skipped `add_model(...)` when the cached ID matched, and reused the cached adapter.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.55s fps=210.59`, below the simpler pre-request fast path.
+- Learning: The added per-frame Python attribute checks and branches outweigh the manager lookup savings in this benchmark. Keep the direct manager call.
