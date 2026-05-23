@@ -2260,3 +2260,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed. A deterministic local equivalence check over both channel orders and several uint8 sample images matched the original loop exactly with max diff `0`.
 - Result on requested command: unrolled depth-2 runs measured `frames=538 elapsed=2.20s fps=245.02` and `frames=538 elapsed=2.21s fps=243.87`; after reverting to the accepted loop, the immediate same-session baseline measured `frames=538 elapsed=2.21s fps=243.77`.
 - Learning: The first run was noise rather than a stable gain. Loop overhead in the normalization helper is not large enough to move the graph-bound steady state, so the simpler accepted loop remains.
+
+### Diagnostic: Accepted TensorRT Graph-Only Ceiling
+
+- Hypothesis: The accepted full workflow appears tightly graph-paced, so measuring the serialized TensorRT plan outside the Python workflow can bound the remaining useful optimization headroom.
+- Diagnostic: `trtexec` was not installed, so a TensorRT Python harness loaded `/tmp/cache/shared-blobs/bc173a2cfda9a10af2bc411885e9fec3`, created one execution context for static input shape `(1, 3, 312, 312)`, bound the three output tensors, warmed the context, then timed both direct `execute_async_v3(...)` and a CUDA graph containing only `execute_async_v3(...)`. This diagnostic excludes preprocessing, input D2D copy into the graph buffer, output clones, sigmoid/selector/mask resize, D2H prediction copies, and workflow CPU materialization. Pipeline depth was not varied; depth `3` was not tested.
+- Result: Direct `execute_async_v3(...)` measured `4.311606 ms` per enqueue (`231.93 fps`). CUDA graph replay-only measured `4.052506 ms` per replay (`246.76 fps`).
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.72` immediately after the diagnostic.
+- Learning: The current accepted workflow is within roughly `1.2%` of the pure TensorRT graph replay ceiling for this serialized plan on the observed T4. The remaining non-engine overhead is only a few dozen microseconds per frame, consistent with Nsight's roughly `40 us` graph-to-graph tail. Meaningful additional FPS now requires a faster correctness-equivalent TensorRT engine/tactic/export; Python, D2H, and postprocess micro-tweaks have very little headroom left.
