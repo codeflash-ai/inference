@@ -675,3 +675,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the guarded path against the previous always-call behavior on all 538 frames through `InferencePipeline`: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=217.59` and `frames=538 elapsed=2.49s fps=215.87`, below the current `219.03` FPS checkpoint.
 - Learning: The no-op helper call is too small to matter, and the extra branch may perturb the tight path. Keep the simpler existing call.
+
+### Rejected: Single-Lock TRT CUDA Graph Cache Lookup
+
+- Hypothesis: The TRT CUDA graph replay path checks `cache_key not in trt_cuda_graph_cache` and then indexes `trt_cuda_graph_cache[cache_key]`, acquiring the cache lock twice per frame on the steady path. A `get(...)` method that moves the key to the LRU tail under one lock could reduce Python/API overhead between graph launches.
+- Change tested: Temporary code only; added `TRTCudaGraphCache.get(...)` and used it in `_execute_trt_engine(...)` before deciding whether to capture or replay a graph.
+- Correctness: Compared standard TensorRT execution against CUDA graph execution on 120 frames after the cache change: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=219.26`, `frames=538 elapsed=2.46s fps=218.76`, then `frames=538 elapsed=2.48s fps=217.02`; not stable enough to checkpoint over the current `219.03` FPS best.
+- Learning: The double lock is not a reliable limiter, and the altered lookup path is noise-sensitive. Keep the existing cache API.
