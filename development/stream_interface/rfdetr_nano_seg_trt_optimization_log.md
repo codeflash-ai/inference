@@ -1253,3 +1253,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; changed `_get_rfdetr_conversion_buffers(...)` to rotate through four pinned host buffer slots and, with `RFDETR_PINNED_VIEW_NO_COPY=1`, returned NumPy views instead of owned `.copy()` arrays in `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)`. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.05`, below the accepted fixed-copy band.
 - Learning: The extra host-side NumPy copy is not limiting end-to-end FPS after depth-2 pipelining, and returning mutable pinned views weakens result ownership semantics. Keep the existing owned NumPy copies.
+
+### Rejected: Skip TensorRT Caller-Stream Wait
+
+- Hypothesis: The TensorRT CUDA graph helper waits the caller/inference stream on the graph replay stream after every cache hit. In the RFDETR deferred path, postprocess can wait directly on the graph result stream, so skipping the caller-stream wait might remove one event dependency from the graph-to-graph tail.
+- Change tested: Temporary gated code only; with `RFDETR_SKIP_TRT_CALLER_STREAM_WAIT=1`, the TensorRT helper returned the graph execution stream and skipped `caller_stream.wait_stream(stream)`. RFDETR stored that stream in thread-local state and made postprocess wait on it instead of `_inference_stream`. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.33`, below the accepted fixed-copy band.
+- Learning: The caller-stream wait is part of the stable scheduling chain for the current depth-2 pipeline. Bypassing it perturbs overlap and slows the run even though the tensor dependencies are still ordered. Keep the accepted wait.
