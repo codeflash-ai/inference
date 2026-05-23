@@ -1274,3 +1274,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_PREPROCESS=1`, created the RFDETR per-thread preprocessing stream with priority `-1` instead of default priority. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.52`, below the accepted fixed-copy band.
 - Learning: Preprocessing priority is not the limiter in the current depth-2 pipeline. Keep the default-priority preprocessing stream to avoid extra scheduling variance.
+
+### Rejected: High-Priority Inference Stream
+
+- Hypothesis: The RFDETR inference stream is the caller stream for TensorRT CUDA graph replay and owns the dependency chain from preprocessing into postprocess. Giving this stream higher priority might reduce event scheduling latency around graph replay and output clone handoff.
+- Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_INFERENCE=1`, created `_inference_stream` with priority `-1` instead of default priority. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.18`, below the accepted fixed-copy band.
+- Learning: Like graph/preprocess/postprocess stream priority changes, inference-stream priority perturbs scheduling without reducing the TensorRT graph-body limiter. Keep all RFDETR streams at default priority.
