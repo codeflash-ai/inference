@@ -1225,3 +1225,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; added a gated `RFDETR_TRT_POOLED_GRAPH_INPUT=1` path that copied preprocessing output into a two-slot model-owned CUDA buffer pool, keyed TensorRT CUDA graph cache entries by the stable external input pointer, and skipped `input_buffer.copy_(pre_processed_images)` on graph cache hits. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.43s fps=221.56`, far below the accepted fixed-copy band.
 - Learning: Even with stable input pointers, capturing and maintaining multiple input-bound graph states plus the extra preprocessing pool copy costs more than the current single graph-owned input copy. The existing graph-stream D2D copy is small and better scheduled than this explicit pooling scheme. Keep the accepted single graph input buffer and per-frame D2D copy.
+
+### Rejected: Alternate Prebuilt TensorRT Plan
+
+- Hypothesis: Another RFDETR segmentation TensorRT package already present on disk (`/tmp/rfdetr_trt_pkg_bbc2cc23adf6f5e71a9241956081da96/engine.plan`, `248 MB`, `num_aux_streams=3`) might use a different tactic set than the accepted cache engine (`/tmp/cache/shared-blobs/bc173a2cfda9a10af2bc411885e9fec3`, `188 MB`, `num_aux_streams=4`) and reduce the TensorRT CUDA graph body time.
+- Change tested: Temporary external-state test only; repointed both RFDETR cache `engine.plan` symlinks to the alternate plan, ran the requested workflow with pipeline depth fixed at `2`, then restored both symlinks to the accepted cache engine.
+- Result on requested command: `frames=538 elapsed=9.44s fps=56.97`, far below the accepted fixed-copy band.
+- Learning: The alternate prebuilt plan is not viable on this T4 runtime despite deserializing. Keep the accepted cached engine and do not use this package for further tuning.
