@@ -1458,3 +1458,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_BORROW_TRT_MASK_OUTPUT=1`, cache-hit replay cloned only the first two TensorRT outputs, returned the graph-owned mask tensor with graph-state metadata, recorded a release event after RFDETR postprocess, and waited on that event before the next graph replay could overwrite the mask buffer. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=231.40`, below the accepted fixed-copy band.
 - Learning: The large mask clone also decouples the next TensorRT graph replay from postprocess. Replacing it with an event dependency lengthens the critical path more than it saves in D2D copy time. Keep the full output clone path.
+
+### Rejected: Selected Low-Res Mask Copy Before Resize
+
+- Hypothesis: The borrowed-mask test waited for full postprocess before releasing the graph-owned TensorRT mask output. Copying only the selected low-res mask planes first, recording the release event immediately after that small copy, and resizing from the compact copy might remove the full `100x78x78` mask clone while allowing the next graph replay to start earlier than waiting for full mask resize.
+- Change tested: Temporary gated code only; with `RFDETR_SELECTED_MASK_COPY=1`, cache-hit replay cloned boxes/logits but borrowed the graph-owned mask output, RFDETR fused postprocess copied the first `deferred_mask_resize_detection_limit` selected `78x78` masks into a compact buffer, recorded the graph-output release event, then resized compact rows with a no-query-index Triton kernel. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.85`, below the accepted fixed-copy band.
+- Learning: The added selected-copy kernel, compact-resize variant, and release-event dependency still cost more than the full mask clone's buffering benefit. Keep the accepted full TensorRT output clone path.
