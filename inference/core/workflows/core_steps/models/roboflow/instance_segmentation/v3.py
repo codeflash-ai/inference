@@ -513,7 +513,7 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             mask_format="dense",
             defer_cuda_stream_sync=True,
             defer_fused_postprocess_count=True,
-            deferred_mask_resize_detection_limit=8,
+            deferred_mask_resize_detection_limit=7,
         )
         inference_id = str(uuid.uuid4())
         predictions = self._convert_inference_models_detections_to_sv_detections(

@@ -896,3 +896,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.43s fps=221.38`, `frames=538 elapsed=2.40s fps=223.81`, and `frames=538 elapsed=2.45s fps=219.46`; still too noisy and unstable to keep.
 - Learning: Removing the zero fill can produce a fast run but also worsens low outliers. Keep the deterministic zero-filled query-index tensor.
+
+### RFDETR Seven-Row Deferred Mask Resize
+
+- Hypothesis: The limited deferred mask resize checkpoint uses an 8-row first-stage mask grid, but the benchmark video keeps at most 7 detections. Reducing the common-case mask grid to 7 rows should shave a small amount of GPU postprocess work while preserving overflow recovery for higher-count frames.
+- Change: Changed the RFDETR TRT workflow fast path from `deferred_mask_resize_detection_limit=8` to `7`. The existing overflow recovery still reruns full fused mask resize if a future frame exceeds the first-stage limit.
+- Correctness: Compared the 7-limit deferred path against the exact-sized rounded path on all 538 frames. Detection-count distribution was `{1: 15, 2: 104, 3: 164, 4: 145, 5: 74, 6: 14, 7: 22}`, with `overflow_frames=0`, `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.42s fps=222.18`, `frames=538 elapsed=2.41s fps=223.69`, and `frames=538 elapsed=2.41s fps=223.14`.
+- Learning: The limited mask grid is still on the critical path, and matching it to the observed benchmark max count gives a small but repeatable improvement while keeping the overflow safety mechanism.
