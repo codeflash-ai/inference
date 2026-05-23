@@ -2590,3 +2590,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `15.17-15.87 us` under NCU replay. Compute throughput was about `30.16-30.48%`, memory throughput about `22.39-22.70%`, DRAM throughput about `9.73-11.18%`, and L2 throughput about `5.17-5.62%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.00` after the profile.
 - Learning: This fused Myelin tail is not the same kind of severe small-grid problem as the GEMM tail. It is a short TensorRT-internal fused op with moderate occupancy and modest memory pressure; replacing it outside the TensorRT graph is unlikely to produce a meaningful end-to-end gain.
+
+### Profile: TensorRT H1688 TN GEMM Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `trt_turing_h1688gemm_128x128_ldg8_tn_v1` as a single graph node around `33 us/replay`. Profiling it can show whether the tail H1688 TN tactic behaves like the previously profiled H1688 ReLU NN family or like the smallest GEMM tail.
+- Profile: `/tmp/rfdetr_trt_h1688_tn_graphnode_basic_ncu_20260523_230657.ncu-rep`, details text `/tmp/rfdetr_trt_h1688_tn_graphnode_basic_ncu_20260523_230657_details.txt`, raw CSV `/tmp/rfdetr_trt_h1688_tn_graphnode_basic_ncu_20260523_230657_raw.csv`. The NCU command used graph profiling mode `node`, matched `regex:trt_turing_h1688gemm_128x128_ldg8_tn_v1`, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.10s fps=38.14`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `36`, block size `128`, `190` registers/thread, `32.768 KiB` static shared memory per block, and `0.45` waves/SM. Achieved occupancy is about `12.57-12.61%`, with active warps/SM about `4.02-4.03`.
+- Throughput: Duration was about `58.62-58.66 us` under NCU replay. Compute throughput was about `44.31-44.61%`, memory throughput about `27.36-27.53%`, DRAM throughput about `25.95-26.19%`, and L2 throughput about `20.95-20.97%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.54` after the profile.
+- Learning: This tail H1688 GEMM is also limited by high register/shared-memory usage and a small fixed grid. It matches the broader TensorRT-forward diagnosis: the remaining large opportunity is a different correct engine/tactic mix, not local postprocess or CPU pipeline work.
