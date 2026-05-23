@@ -2460,3 +2460,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `26.66-27.17 us` under NCU replay. Compute throughput was about `22.74-23.29%`, memory and DRAM throughput about `27.03-27.19%`, L1/TEX throughput about `47.04-48.20%`, and L2 throughput about `17.02-17.36%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.02` after the profile.
 - Learning: The 64x64 TN GEMM still launches fewer CTAs than the T4 has SMs and reaches only about `13.4%` achieved occupancy. This is consistent with the other TensorRT transformer GEMM profiles: the remaining model-forward bubbles are caused by many small serialized TensorRT tactics, not by CPU pacing or the fused GPU postprocess.
+
+### Rejected: TensorRT Persistent Cache Limit On T4
+
+- Hypothesis: `IExecutionContext.persistent_cache_limit` might let TensorRT use persisting L2 activation cache for the repeated RFDETR graph replay and reduce the CUDA graph body without changing model outputs or pipeline scheduling.
+- Diagnostic: Temporary graph-only harness only; captured a fresh TensorRT `execute_async_v3(...)` CUDA graph for each requested cache limit and timed five batches of `1000` graph replays. Tested limits were `0`, `262144`, `1048576`, `4194304`, `8388608`, and `16777216` bytes. Pipeline depth was not varied and depth `3` was not tested.
+- Result: The T4 reports `cudaDeviceProp.persistingL2CacheMaxSize(0 bytes)`, so every nonzero limit emitted a TensorRT API usage error and the context's actual `persistent_cache_limit` remained `0`. The valid zero-limit baseline measured `4.089558 ms` graph-only mean (`244.53 fps`) in this session; nonzero attempted settings measured slower while still reporting `actual=0`, consistent with session drift and error overhead rather than a usable cache effect.
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.22s fps=242.29` after the diagnostic in the same drifted session.
+- Learning: Persistent L2 caching is not available on this T4 path, so `persistent_cache_limit` cannot reduce the RFDETR TensorRT graph body. Keep the execution context cache limit at the TensorRT default and do not add this knob to the runtime helper.
