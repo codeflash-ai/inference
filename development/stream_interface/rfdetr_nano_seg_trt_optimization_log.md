@@ -1800,3 +1800,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This changes only how many already-resized selected rows are copied to CPU, not model math.
 - Result on requested command: `frames=538 elapsed=2.80s fps=192.39`, then `frames=538 elapsed=2.82s fps=190.70`.
 - Learning: The extra count synchronization is far more expensive than the saved mask-copy bytes. Keep the accepted single synchronization that copies the fixed 7-row pinned buffers.
+
+### Rejected: Concurrent TensorRT CUDA Graph Replay Pool
+
+- Hypothesis: The accepted TRT forward path serializes graph replay with a Python model lock. Since NCU showed many small register/shared-memory-limited TensorRT kernels, allowing two depth-2 workers to submit independent CUDA graph states on separate streams might overlap low-occupancy kernels and improve hardware utilization.
+- Change tested: Temporary env-gated code only; with `RFDETR_TRT_CONCURRENT_GRAPHS=True`, first tried per-thread graph caches without the model lock, which failed because concurrent CUDA graph capture is not permitted. Then serialized capture and tested a shared two-cache graph pool with thread-local caller streams and lock-free round-robin replay. Pipeline depth remained fixed at `2`.
+- Result on requested command: Concurrent capture failed before frames with `operation not permitted when stream is capturing`. The serialized-capture per-thread version completed but measured `220.23` FPS. The shared two-cache replay pool completed but measured `219.47` FPS.
+- Learning: Concurrent graph submission does not help this TensorRT plan on T4. The required extra streams/contexts/capture and postprocess handoff cost more than any possible overlap among small TensorRT kernels. Keep the accepted single serialized graph replay path.
