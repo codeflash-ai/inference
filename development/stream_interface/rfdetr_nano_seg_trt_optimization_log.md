@@ -466,3 +466,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This change runs after tensor-to-NumPy conversion and does not affect model classes or boxes.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.59s fps=207.76`, below the current checkpoint.
 - Learning: The generic metadata helpers are not the current limiter; inlining their work added enough Python/object overhead to hurt throughput.
+
+### Rejected: Pinned Host Workflow Prediction Copy
+
+- Hypothesis: Workflow conversion copies mask tensors and small metadata tensors from GPU to CPU synchronously with `.cpu().numpy()`. Staging RFDETR deferred outputs through reusable pinned CPU tensors on a copy stream could reduce D2H blocking and create room to overlap CPU metadata work.
+- Change tested: Temporary code only; allocated thread-local pinned CPU buffers for `xyxy`, confidence, class IDs, and dense masks, copied with `non_blocking=True` on a thread-local CUDA stream, then synchronized once before constructing `sv.Detections`.
+- Correctness: The change only affects CPU materialization; no model classes or boxes are changed.
+- Result on requested command: depth `2` measured `frames=538 elapsed=3.50s fps=153.82`.
+- Learning: Pinned staging at the workflow boundary is much slower than PyTorch's direct `.cpu().numpy()` path here. The explicit stream synchronization and large pinned mask buffer mechanics dominate any potential overlap benefit.
