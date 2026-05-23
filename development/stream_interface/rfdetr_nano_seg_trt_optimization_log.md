@@ -1136,3 +1136,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; guarded the helper call with `if class_filter:` in `_try_run_rfdetr_trt_fast_path(...)` and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.32s fps=231.76`, `frames=538 elapsed=2.29s fps=234.92`, and `frames=538 elapsed=2.33s fps=231.34`, not better than the accepted fixed-copy path.
 - Learning: The empty class-filter helper is below the limiter. Keep the normal helper chain for predictable scheduling and consistent behavior.
+
+### Depth-2 Current Nsight Systems Graph-Gap Profile
+
+- Request: Collect a fresh Nsight Systems profile for the current accepted implementation while keeping the pipeline fixed at depth `2`.
+- Profile: `/tmp/rfdetr_depth2_graphgap_current_20260523_104339.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_graphgap_current_20260523_104339.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_graphgap_current_20260523_104339_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_graphgap_current_20260523_104339_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_graphgap_current_20260523_104339_stats_cuda_api_sum.csv`.
+- Profiled result: `frames=538 elapsed=2.32s fps=232.24` under Nsight Systems overhead.
+- Graph spacing after skipping the first 100 graph launches: CUDA graph duration p50 `4066.430 us`, p90 `4129.114 us`, p95 `4135.536 us`, p99 `4142.649 us`, mean `4060.011 us`; graph end-to-next-start gap p50 `40.575 us`, p90 `41.836 us`, p95 `42.189 us`, p99 `42.708 us`, mean `40.683 us`.
+- Gap decomposition after skipping the first 100 graph launches: busy work inside the gap p50 `35.072 us`, p90 `36.447 us`, p95 `36.966 us`, p99 `37.683 us`, mean `35.265 us`; idle time inside the gap p50 `5.376 us`, p90 `6.048 us`, p95 `6.182 us`, p99 `6.356 us`, mean `5.418 us`.
+- Learning: With depth `2`, the current pipeline is already graph-replay bottlenecked in steady state. The next TensorRT CUDA graph starts roughly `40 us` after the previous graph ends, and most of that tail is real postprocess/copy work rather than host-side idle. Do not test depth `3`; further gains need to reduce the TensorRT graph itself or remove work from the small post-graph tail.
