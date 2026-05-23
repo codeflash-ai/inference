@@ -520,3 +520,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared exact-sized postprocess against deferred fused postprocess on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `212.27 fps`, `214.53 fps`, `211.70 fps`, and `211.77 fps`. The high run beat the checkpoint, but the repeated runs did not consistently clear the current `213.23` FPS best.
 - Learning: The query-before-sync guard is too noise-sensitive here and likely adds API overhead on the common completed-event path. Keep the simpler unconditional event synchronize.
+
+### Single-Step Workflow Runner Fast Path
+
+- Hypothesis: The benchmark workflow is a single image input, one instance-segmentation model step, and one output selecting `$steps.segmentation.predictions`. Even after RFDETR model fast paths, each frame still pays generic workflow runtime assembly, validation, execution-data-manager/coordinator setup, step scheduling, and output construction before the next CUDA graph can be launched. A guarded direct runner for this exact one-step shape should reduce CPU bubbles without changing model execution.
+- Change: `WorkflowRunner` now caches a fast path for workflows with exactly one `roboflow_core/roboflow_instance_segmentation_model@v3` step, one image input, no input substitutions, no serialization/preview mode, and one `predictions` output. The fast path constructs `WorkflowImageData` directly from `VideoFrame`, calls the initialized block with static manifest parameters, and returns the same output field shape. Other workflows fall back to the generic execution engine.
+- Correctness: Compared the generic execution engine against the fast runner on all 538 frames from `vehicles_312px.mp4`; counts and class IDs matched exactly and max box delta was `0` px.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=216.19` and `frames=538 elapsed=2.46s fps=218.97`, improving the previous `213.23` FPS checkpoint.
+- Learning: The remaining graph gaps were partly generic workflow orchestration overhead. The most valuable CPU work now is removing frame-level workflow machinery around the already-optimized RFDETR block while preserving the normal workflow path for non-trivial graphs.
