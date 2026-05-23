@@ -1177,3 +1177,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Direct full-video comparison against the normal cloned-output CUDA graph path over all 538 frames matched exactly: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.26`, `frames=538 elapsed=2.32s fps=232.04`, and `frames=538 elapsed=2.33s fps=230.70`, below the accepted fixed-copy band.
 - Learning: Moving output copies into the CUDA graph lengthens the effective graph bottleneck more than it helps the already tiny post-graph gap. Keep output clones outside the captured TensorRT graph.
+
+### Rejected: Two-Stage Top-2-Per-Query Selector
+
+- Hypothesis: The current Triton selector repeatedly scans the full `100x91` query-class score matrix for global maxima. If each query contributes at most two classes above threshold, a first kernel can compute the top two valid classes per query in parallel, and a second kernel can globally rank only 200 candidates. This could fill the GPU better than the one-block selector flagged by Nsight Compute as under-occupied.
+- Change tested: Temporary code only; added a top-2-per-query candidate kernel plus a 200-candidate global selector kernel and enabled it only in the RFDETR TRT workflow fast path. Pipeline depth remained fixed at `2`.
+- Correctness: The existing selector had duplicate query detections on only 3 of 538 frames, with maximum query multiplicity `2`. The top-2-per-query selector matched the existing selector exactly over all 538 frames: `bad=0`, `max_float_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.73`, `frames=538 elapsed=2.32s fps=231.40`, and `frames=538 elapsed=2.29s fps=234.73`, below the accepted fixed-copy band.
+- Learning: The extra kernel launch and candidate-buffer traffic cost more than the added selector parallelism. Keep the single-kernel global selector despite its low occupancy.
