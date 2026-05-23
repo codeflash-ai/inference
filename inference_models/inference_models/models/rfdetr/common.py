@@ -299,7 +299,7 @@ def _try_fused_instance_segmentation_post_process(
                 }
             )
         return InstanceDetections(
-            xyxy=selected_boxes.round().int(),
+            xyxy=selected_boxes,
             confidence=confidence,
             class_id=top_classes.int(),
             mask=aligned_masks,
