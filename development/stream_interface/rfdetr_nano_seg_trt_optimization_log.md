@@ -1822,3 +1822,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Evidence: The runtime inspection showed `num_optimization_profiles=1` and `active_optimization_profile=0` before the change, so this was expected to be low probability.
 - Result on requested command: Accepted baseline in the same session measured `frames=538 elapsed=2.22s fps=242.41`; the explicit-profile gate measured `frames=538 elapsed=2.22s fps=242.52` and repeat `frames=538 elapsed=2.21s fps=243.16`.
 - Learning: Explicit profile selection is a no-op for this already-active single-profile engine and does not move the depth-2 ceiling. Keep the simpler accepted graph-capture path.
+
+### Rejected: Int32 RFDETR Class Mapping Tensor
+
+- Hypothesis: `prepare_class_remapping(...)` stores the RFDETR class mapping table as `int64`, but the fused Triton selector stores output class IDs as `int32`. Building the mapping tensor as `int32` could reduce selector load width/codegen without changing class IDs.
+- Change tested: Temporary code only; changed `ClassesReMapping.class_mapping` from `torch.int64` to `torch.int32` while keeping `remaining_class_ids` as `int64`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: The first pass measured `frames=538 elapsed=2.31s fps=232.91`, and a warmed repeat measured `frames=538 elapsed=2.21s fps=243.11`, below the clean accepted sanity run in the same session at `frames=538 elapsed=2.21s fps=243.49`.
+- Learning: Class-map load width is not a limiter for the fused selector. The original `int64` mapping is safer for the generic PyTorch fallback paths and remains at least as fast end to end.
