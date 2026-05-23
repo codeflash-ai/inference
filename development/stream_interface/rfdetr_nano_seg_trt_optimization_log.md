@@ -504,3 +504,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; collected completed ordered results in `ready_to_emit`, submitted the current frame as soon as the pending count dropped below the worker limit, and emitted the collected results afterward.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.55s fps=210.92` and `frames=538 elapsed=2.54s fps=211.51`, below the current `213.23` FPS checkpoint.
 - Learning: Sink emission is not the source of the remaining graph bubbles for this benchmark. Keep the original simpler ordered scheduler and continue focusing on model/postprocess conversion costs.
+
+### Rejected: Keep Deferred RFDETR Query Indices Int32
+
+- Hypothesis: The deferred fused postprocess path zero-fills `query_indices` and converts it from int32 to int64 before the Triton mask resize kernel, even though the Triton kernel only needs int32 indices. Using an uninitialized int32 tensor for the deferred path could remove a fill kernel and an int32-to-int64 copy kernel.
+- Change tested: Temporary code only; changed `query_indices` from `torch.zeros(...)` to `torch.empty(...)` and skipped `.to(dtype=torch.long)` when `return_cpu_count=False`.
+- Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.56s fps=209.81`, below the current checkpoint.
+- Learning: The removed kernels are not on the critical path enough to offset allocator or scheduling side effects. Keep the existing zeroed int32 tensor and long conversion.
