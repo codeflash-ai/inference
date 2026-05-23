@@ -2285,3 +2285,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: Baseline graph replay measured `4.055898 ms` (`246.55 fps`), `infer_shapes()` measured `4.075415 ms` (`245.37 fps`), and `infer_shapes()` plus stride inspection measured `4.087416 ms` (`244.65 fps`).
 - Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.05` after the diagnostic.
 - Learning: TensorRT already has the static shape state it needs before capture. Explicit shape inference does not improve the captured graph and slightly regresses the graph-only ceiling, so no runtime change was kept.
+
+### Diagnostic: TensorRT Helper Operation Ceiling
+
+- Hypothesis: The accepted workflow is close to TensorRT graph-only speed because depth-2 scheduling overlaps part of the helper/postprocess tail. Measuring graph replay with the helper's input D2D copy and output clone operations in isolation can bound how much benefit remains from further clone/copy tuning.
+- Diagnostic: Used the accepted engine and one captured `execute_async_v3(...)` CUDA graph. Timed four single-stream modes with CUDA events: graph replay only, input-buffer D2D copy plus graph replay, graph replay plus three output clones, and input-buffer D2D copy plus graph replay plus three output clones. This diagnostic excludes preprocessing, postprocess kernels, D2H prediction copies, and workflow CPU materialization; pipeline depth was not varied and depth `3` was not tested.
+- Result: graph only measured `4.050621 ms` (`246.88 fps`), input copy plus graph measured `4.081056 ms` (`245.03 fps`), graph plus output clones measured `4.103890 ms` (`243.67 fps`), and input copy plus graph plus output clones measured `4.129317 ms` (`242.17 fps`).
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.10` after the diagnostic.
+- Learning: Input copy and output clones are real costs, but the accepted two-frame schedule overlaps enough surrounding work that the full workflow can run slightly faster than a single-stream serialized helper loop. Prior clone/borrow/copy rewrites lost this overlap. Further copy/clone tuning is unlikely to beat the current schedule unless it preserves the same decoupling while reducing the TensorRT graph body or replacing the serialized plan.
