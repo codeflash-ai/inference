@@ -1008,3 +1008,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared raw-logit fused postprocess against the PyTorch fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=1.1920928955078125e-07`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.26` and `frames=538 elapsed=2.29s fps=234.68`, below the accepted fixed-copy checkpoint.
 - Learning: Removing the global sigmoid kernel is still not worth the extra selector complexity and selected-score `exp` work. Keep the standalone PyTorch sigmoid plus simpler selector.
+
+### Rejected: Early Return Empty Mask Resize Rows
+
+- Hypothesis: The fixed 7-row deferred mask resize grid still launches pixel programs for rows above the valid detection count. A runtime early return when `det_index >= count` inside `_resize_selected_masks_kernel` could avoid work for empty rows without reading the count on CPU.
+- Change tested: Temporary code only; added a Triton runtime branch before pixel coordinate math and removed the now-redundant `det_index < count` masks for valid rows. Pipeline depth remained fixed at `2`.
+- Correctness: Compared deferred fused postprocess against the PyTorch fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=234.23`, below the accepted fixed-copy checkpoint.
+- Learning: The runtime branch/predication costs more than the skipped empty-row arithmetic for this small fixed grid. Keep the mask-based kernel.
