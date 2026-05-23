@@ -699,3 +699,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared in-place sigmoid against the default out-of-place sigmoid on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.36` and `frames=538 elapsed=2.48s fps=216.73`, below the current `219.03` FPS checkpoint.
 - Learning: The standalone sigmoid allocation is not the bottleneck; in-place mutation likely changes scheduling or allocator behavior enough to lose. Keep the out-of-place PyTorch sigmoid.
+
+### Rejected: Fuse RFDETR Sigmoid Into Triton Selector
+
+- Hypothesis: The dense-mask RFDETR fused postprocess path still runs a PyTorch sigmoid over logits before the Triton selector. Letting `_select_topk_boxes_kernel` load raw logits and apply sigmoid internally could remove a kernel launch and temporary tensor between CUDA graph replay and postprocess.
+- Change tested: Temporary code only; added an `apply_sigmoid` constexpr to the Triton selector, lazily skipped the global PyTorch sigmoid when the fused path handled a frame, and kept the original sigmoid fallback for unsupported metadata.
+- Correctness: Compared fused selector output against the PyTorch fallback on 120 frames including masks: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=1.1920928955078125e-07`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.53` and `frames=538 elapsed=2.49s fps=215.82`, below the current `219.03` FPS checkpoint.
+- Learning: The selector is already doing enough reduction work that adding sigmoid math slows it down more than the separate PyTorch sigmoid costs. Keep sigmoid outside the selector.
