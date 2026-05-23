@@ -1723,3 +1723,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Follow-up: Built `/tmp/rfdetr_trt_rebuild_t4_fp32_opt3_vc/engine.plan` with the same settings but without FP16. Build completed in `24.18s` and produced a `248,398,812` byte plan. It also failed correctness against the accepted plan: `bad_counts=7`, `bad_classes=8`, `bad_masks=329`, `bad_boxes_gt5=19`, `max_box_delta=251.0`, `max_conf_delta=0.10576367378234863`.
 - Metadata check: Roboflow package metadata lists six public packages for `rfdetr-seg-nano` / `coco-dataset-vdnr1/41`: L4 FP32 TRT, L4 FP16 TRT, T4 FP32 TRT, T4 FP16 TRT, ONNX FP32, and Torch FP32. The only T4 FP16 package is the accepted `c70f32369a54d61e06ef4e6b56c82524`; the public ONNX package does not rebuild into behavior-equivalent T4 TRT plans in this runtime.
 - Learning: Local TensorRT rebuilds from the available ONNX are not safe optimization candidates because both FP16 and FP32 version-compatible builds change predictions substantially. Keep the accepted official T4 FP16 engine; engine-level gains would require an ONNX/export source that is known to match the accepted TRT plan or a new official model package, not ad hoc local rebuilds from this ONNX artifact.
+
+### Rejected: PyTorch cudaMallocAsync Allocator Backend
+
+- Hypothesis: The accepted depth-2 path still performs per-frame PyTorch CUDA allocations around TensorRT output clones, sigmoid, selector outputs, and resized mask tensors. Switching PyTorch to the CUDA async allocator with `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` might reduce allocator synchronization or fragmentation without changing model math.
+- Change tested: External process environment only; launched the requested benchmark with `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync`, `PYTHONPATH=/app/inference_models`, and pipeline depth fixed at `2`.
+- Correctness: This does not change computation or tensor values, only allocator backend behavior.
+- Result on requested command: `frames=538 elapsed=2.20s fps=245.00`, then `frames=538 elapsed=2.21s fps=243.47`, then `frames=538 elapsed=2.20s fps=244.54`.
+- Learning: The async allocator can land inside the accepted warmed band, but it is not a stable improvement over the default allocator. Keep the default PyTorch CUDA allocator and do not require an external allocator environment variable for the benchmark.
