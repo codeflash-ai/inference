@@ -363,3 +363,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared double-buffered preprocessing against the prior single-buffer formula on all 538 frames: max tensor diff `0.0000000000`.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.60s fps=206.93` and `frames=538 elapsed=2.60s fps=206.71`, below the single-buffer cached path.
 - Learning: The extra buffer/event bookkeeping outweighed any overlap benefit. The single reusable pinned buffer remains better for the current two-frame pipeline.
+
+### Rejected: RFDETR No-Op Preprocessing Bypass
+
+- Hypothesis: The benchmark model has no static crop, grayscale, or contrast preprocessing configured, but RFDETR still calls the generic numpy preprocessing helper. Bypassing that helper in the no-op case could remove branch overhead and default crop metadata construction.
+- Change tested: Temporary code only; skipped `apply_pre_processing_to_numpy_image(...)` when preprocessing overrides were absent and static crop/grayscale/contrast configs were all `None`, constructing the default `StaticCropOffset` directly.
+- Correctness: Compared against the previous preprocessing path on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.60s fps=207.17` and `frames=538 elapsed=2.62s fps=205.04`, below the cached-normalization checkpoint.
+- Learning: The generic no-op helper is not a meaningful limiter; keeping the established shared helper is better than adding a special branch here.
