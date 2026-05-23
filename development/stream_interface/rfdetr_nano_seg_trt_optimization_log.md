@@ -1239,3 +1239,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed `_select_topk_boxes_kernel` from `num_warps=8` to `4`, benchmarked, then changed it to `16` and benchmarked. Pipeline depth remained fixed at `2`.
 - Result on requested command: `num_warps=4` measured `frames=538 elapsed=2.32s fps=232.18`; `num_warps=16` measured `frames=538 elapsed=2.34s fps=230.37`, both below the accepted fixed-copy band.
 - Learning: The current `num_warps=8` is the best of these simple selector launch configurations. The selector remains small relative to the TensorRT CUDA graph body, and launch-shape tuning does not move the full-pipeline limiter.
+
+### Rejected: Triton Mask Resize Block Size
+
+- Hypothesis: `_resize_selected_masks_kernel` is the other stable post-graph Triton kernel. Changing the per-program pixel block size from `256` could improve occupancy or memory coalescing for the `7 x 312 x 312` bounded resize work.
+- Change tested: Temporary code only; changed `fused_resize_selected_masks(...)` block size from `256` to `512`, benchmarked, then changed it to `128` and benchmarked. Pipeline depth remained fixed at `2`.
+- Result on requested command: `block_size=512` measured `frames=538 elapsed=2.31s fps=232.65`; `block_size=128` measured `frames=538 elapsed=2.33s fps=231.06`, both below the accepted fixed-copy band.
+- Learning: The accepted `block_size=256` remains the best of the simple mask-resize launch configurations. The mask kernel is too small relative to the TensorRT graph body for this tuning to move end-to-end FPS.
