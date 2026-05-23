@@ -527,4 +527,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change: `WorkflowRunner` now caches a fast path for workflows with exactly one `roboflow_core/roboflow_instance_segmentation_model@v3` step, one image input, no input substitutions, no serialization/preview mode, and one `predictions` output. The fast path constructs `WorkflowImageData` directly from `VideoFrame`, calls the initialized block with static manifest parameters, and returns the same output field shape. Other workflows fall back to the generic execution engine.
 - Correctness: Compared the generic execution engine against the fast runner on all 538 frames from `vehicles_312px.mp4`; counts and class IDs matched exactly and max box delta was `0` px.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=216.19` and `frames=538 elapsed=2.46s fps=218.97`, improving the previous `213.23` FPS checkpoint.
+- Profile: Nsight Systems capture `/tmp/rfdetr_single_step_fast_20260523_043134.nsys-rep` exported to `/tmp/rfdetr_single_step_fast_20260523_043134.sqlite`. Under profiler, depth `2` measured `frames=538 elapsed=2.54s fps=212.13`. After skipping the first 100 graph launches, CUDA graph duration was p50 `3811.684 us`; graph end-to-next-start gap was p50 `738.036 us`, p90 `792.180 us`, p95 `817.677 us`, p99 `921.074 us`, down from the prior p50 `1116.078 us`, p90 `3721.247 us`, p95 `4175.294 us`.
 - Learning: The remaining graph gaps were partly generic workflow orchestration overhead. The most valuable CPU work now is removing frame-level workflow machinery around the already-optimized RFDETR block while preserving the normal workflow path for non-trivial graphs.
+
+### Rejected: Omit Video Metadata In Single-Step Workflow Fast Path
+
+- Hypothesis: The single model/output fast path does not consume `WorkflowImageData.video_metadata`, so skipping per-frame `VideoMetadata` construction might reduce CPU work between graph launches.
+- Change tested: Temporary code only; omitted `VideoMetadata(...)` construction and passed no `video_metadata` into the fast path's `WorkflowImageData`.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=217.60` and `frames=538 elapsed=2.50s fps=215.45`, below the current `218.97` FPS checkpoint.
+- Learning: This object construction is not a reliable bottleneck, and omitting the metadata may perturb surrounding scheduling without improving throughput. Keep the fast path semantically closer to the generic runner.
