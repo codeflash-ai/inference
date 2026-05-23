@@ -748,3 +748,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared deferred fused postprocess with reused buffers against exact-sized postprocess on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.45`, then `frames=538 elapsed=2.49s fps=216.02`; not stable enough to keep over the pinned-conversion checkpoint.
 - Learning: PyTorch's caching allocator already handles these fixed shapes well enough. Thread-local reuse changes object lifetime/stream behavior and can degrade scheduling, so keep per-frame tensor creation.
+
+### Rejected: Direct-Owned CPU Detection Tensors
+
+- Hypothesis: The pinned conversion checkpoint copies GPU outputs into reusable pinned CPU tensors, synchronizes once, then copies those pinned NumPy views into independent arrays for queue safety. Allocating fresh CPU tensors per frame and returning NumPy views directly could remove the extra host copy while preserving result ownership.
+- Change tested: Temporary code only; replaced the reusable pinned buffers with fresh CPU tensors for boxes, confidences, classes, and masks, copied CUDA tensors into them synchronously, and returned `.numpy()` views without `.copy()`.
+- Correctness: Compared direct-owned CPU conversion against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.52s fps=213.17`, well below the pinned-conversion checkpoint.
+- Learning: Per-frame CPU tensor allocation and blocking D2H copies cost much more than the extra host copy from reusable pinned buffers. Keep pinned staging plus independent NumPy copies.
