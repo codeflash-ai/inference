@@ -1232,3 +1232,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary external-state test only; repointed both RFDETR cache `engine.plan` symlinks to the alternate plan, ran the requested workflow with pipeline depth fixed at `2`, then restored both symlinks to the accepted cache engine.
 - Result on requested command: `frames=538 elapsed=9.44s fps=56.97`, far below the accepted fixed-copy band.
 - Learning: The alternate prebuilt plan is not viable on this T4 runtime despite deserializing. Keep the accepted cached engine and do not use this package for further tuning.
+
+### Rejected: Triton Selector Warp Count
+
+- Hypothesis: The single-block `_select_topk_boxes_kernel` is one of the only visible post-graph kernels. Changing the Triton reduction launch from `num_warps=8` might reduce selector latency: fewer warps could lower scheduling/register pressure, while more warps could speed the large `100x91` score reduction.
+- Change tested: Temporary code only; changed `_select_topk_boxes_kernel` from `num_warps=8` to `4`, benchmarked, then changed it to `16` and benchmarked. Pipeline depth remained fixed at `2`.
+- Result on requested command: `num_warps=4` measured `frames=538 elapsed=2.32s fps=232.18`; `num_warps=16` measured `frames=538 elapsed=2.34s fps=230.37`, both below the accepted fixed-copy band.
+- Learning: The current `num_warps=8` is the best of these simple selector launch configurations. The selector remains small relative to the TensorRT CUDA graph body, and launch-shape tuning does not move the full-pipeline limiter.
