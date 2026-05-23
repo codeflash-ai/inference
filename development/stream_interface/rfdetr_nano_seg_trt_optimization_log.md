@@ -278,3 +278,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Pipeline tuning: Depth `2` measured `frames=538 elapsed=2.78s fps=193.48`; depth `3` measured `frames=538 elapsed=2.97s fps=181.10`, so depth `2` remains best.
 - Result on requested command: best isolated run `frames=538 elapsed=2.78s fps=193.48`; repeat isolated run measured `frames=538 elapsed=2.82s fps=190.99`.
 - Learning: Removing the torchvision wrapper is a small, exact CPU-side cleanup. The end-to-end gain is near run-to-run noise, but the highest isolated benchmark moved slightly upward and the change is byte-equivalent for the model input.
+
+### Rejected: Workflow Fast Path Inference Mode Wrapper
+
+- Hypothesis: The direct local workflow fast path executes RFDETR TRT preprocess, predict, and postprocess without needing autograd. Wrapping that section in `torch.inference_mode()` could reduce PyTorch dispatch overhead around tensor copies and postprocess kernels.
+- Change tested: Temporary code only; added `with torch.inference_mode():` around `model.preprocess(...)`, `model.predict(...)`, and fused `model._model.post_process(...)` in the instance segmentation workflow fast path.
+- Correctness: Compared model execution outside vs inside `torch.inference_mode()` on all 538 frames: class IDs exact and max box delta `0` px.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.80s fps=191.83` and `frames=538 elapsed=2.81s fps=191.27`.
+- Learning: The TRT path already produces tensors with no autograd work worth removing; the wrapper is neutral within noise and does not justify extra workflow code.
