@@ -854,3 +854,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the 8-limit deferred path against the exact-sized path on all 538 frames: `max_count=7`, `limited_mask_shape=(8, 176, 312)`, `normal_bad_counts/classes/masks=[0, 0, 0]`, `max_box_delta=0.0`, `max_conf_delta=0.0`. Forced overflow recovery with limit `1` still recovered 523 overflow frames with `overflow_bad=[0, 0, 0]`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.42s fps=221.88`, `frames=538 elapsed=2.43s fps=221.04`, and `frames=538 elapsed=2.43s fps=221.40`; not an improvement over the existing limited-resize checkpoint.
 - Learning: The launch grid reduction matters; shrinking the cached output allocation does not reliably improve FPS. Keep the fixed output shape to avoid an extra shape variant in downstream code.
+
+### Rejected: Selector Kernel Four-Warp Launch
+
+- Hypothesis: After limiting mask resize work, `_select_topk_boxes_kernel` became the largest custom postprocess kernel. Reducing the Triton selector launch from `num_warps=8` to `num_warps=4` could reduce overhead if the 100x91 reduction was over-provisioned.
+- Change tested: Temporary code only; changed `_select_topk_boxes_kernel` launch in `fused_select_topk_boxes(...)` from `num_warps=8` to `num_warps=4`.
+- Correctness: Compared the limited deferred path against the exact-sized path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.52`, `frames=538 elapsed=2.42s fps=221.86`, and `frames=538 elapsed=2.44s fps=220.50`; not an improvement over the existing limited-resize checkpoint.
+- Learning: The selector's 9100-score reduction still benefits from the 8-warp configuration, or the launch is not the steady limiter. Keep the existing selector launch.
