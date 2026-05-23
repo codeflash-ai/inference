@@ -1038,3 +1038,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; used in-place sigmoid in RFDETR instance segmentation postprocess and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.26s fps=237.80`, then `frames=538 elapsed=2.30s fps=233.80` and `frames=538 elapsed=2.30s fps=234.08`, below the accepted fixed-copy stability band.
 - Learning: This remains a scheduling/noise-level optimization. Even if the tensor math is equivalent on cloned outputs, the in-place form does not reliably reduce the critical graph-to-graph interval, so keep the out-of-place sigmoid.
+
+### Rejected: TensorRT Persistent Cache Limit On T4
+
+- Hypothesis: Setting `IExecutionContext.persistent_cache_limit` on the CUDA graph execution context might reduce TensorRT graph replay time by allowing activation reuse through persistent L2 cache.
+- Change tested: Temporary code only; set `persistent_cache_limit = 4 MiB` immediately after creating the graph execution context and kept pipeline depth fixed at `2`.
+- Result: TensorRT rejected the setting on this Tesla T4 with `persistingL2CacheMaxSize(0 bytes)`, so the device/runtime does not support a nonzero persistent cache limit for this path. The measured runs (`237.38`, `237.56`, `234.01` FPS) are not considered a valid optimization because the runtime emitted an API usage error each time.
+- Learning: Persistent L2 activation caching is not available on this hardware. Do not keep this context setting for the T4 benchmark.
