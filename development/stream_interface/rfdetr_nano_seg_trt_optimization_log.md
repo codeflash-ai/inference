@@ -220,3 +220,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames matched detection counts, class IDs, boxes, and dense masks exactly.
 - Result on requested command: `frames=538 elapsed=3.16s fps=170.11`, slower than the committed mask kernel.
 - Learning: The runtime branch/control-flow cost and changed Triton code generation outweighed the skipped masked arithmetic on T4. Keep the straight-line mask kernel for now.
+
+### Rejected: GPU Normalize After Uint8 Preprocess Transfer
+
+- Hypothesis: Instead of transferring the normalized float32 RFDETR input, keep the PIL resize on CPU for pixel compatibility, transfer the resized uint8 image to GPU, and perform channel reorder plus normalization on GPU. This should reduce H2D bytes by roughly 4x.
+- Change tested: Temporary `pre_processing.py` path that converted the PIL-resized image to a uint8 tensor on CUDA, then did CHW conversion and normalization on GPU.
+- Correctness: Compared the previous CPU-normalized tensor path against the GPU-normalized path on all 538 frames: max tensor diff rounded to `0.00000000`, detection counts matched, class IDs matched exactly, and max box delta was `0` px.
+- Result on requested command: depth `2` measured `frames=538 elapsed=3.15s fps=170.80`; retuning depth `3` measured `frames=538 elapsed=3.43s fps=157.08`.
+- Learning: The smaller H2D copy did not compensate for the additional GPU conversion/normalization kernels and stream contention. Any useful version likely needs a single fused conversion kernel and careful scheduling, or reusable CPU-side normalized transfer remains better.
