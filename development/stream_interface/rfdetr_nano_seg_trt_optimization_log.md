@@ -1857,3 +1857,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External interpreter setting only; ran the requested benchmark with `PYTHONOPTIMIZE=1` and pipeline depth fixed at `2`.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.26`, then `frames=538 elapsed=2.21s fps=243.36`, compared with the same-session default baseline of `frames=538 elapsed=2.21s fps=243.99`.
 - Learning: Python optimize mode is normal warmed-path noise and not a stable throughput lever. Keep the default interpreter mode.
+
+### Profile: Clean Depth-2 Graph Gap After Runtime Cleanup
+
+- Request: Refresh Nsight Systems evidence for the current accepted implementation after removing stale CUDA processes and rejecting the recent runtime scheduling probes. Pipeline depth remained fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_clean_after_cleanup_20260523_173101.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_clean_after_cleanup_20260523_173101.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_clean_after_cleanup_20260523_173101_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_clean_after_cleanup_20260523_173101_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_clean_after_cleanup_20260523_173101_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.28s fps=235.45`.
+- Graph spacing: The capture includes `602` CUDA graph traces. After skipping the `64` capture warmups plus the next `100` frame launches, CUDA graph duration was p50 `4068.479 us`, p90 `4134.321 us`, p95 `4139.256 us`, p99 `4145.568 us`, mean `4072.660 us`; graph end-to-next-start gap was p50 `40.448 us`, p90 `41.805 us`, p95 `42.207 us`, p99 `42.856 us`, mean `40.615 us`.
+- Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `35.136 us`, mean `35.363 us`; idle inside the gap was p50 `5.152 us`, mean `5.237 us`.
+- Learning: The current accepted depth-2 path is still effectively TensorRT CUDA-graph-body bound. The post-graph interval is low and consistent, and only about `5 us` of it is idle; further wins need a correctness-compatible TensorRT graph-duration reduction or a way to remove required input/output copy work without adding dependencies.
