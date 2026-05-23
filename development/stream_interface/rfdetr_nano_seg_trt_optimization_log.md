@@ -1989,3 +1989,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; added an early single-image branch in `post_process_instance_segmentation_results(...)` that called `_try_fused_instance_segmentation_post_process(...)` with `torch.sigmoid(logits[0])` and returned `[fused_result]` when supported. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.43` and `frames=538 elapsed=2.21s fps=243.63`, below the accepted warmed ceiling.
 - Learning: The generic batch wrapper and loop are not limiting the current depth-2 run. The added branch changes bytecode/scheduling enough to add variance without reducing the TensorRT graph-body bottleneck. Reverted to the generic postprocess flow.
+
+### Rejected: Combined Small TensorRT Output Copy
+
+- Hypothesis: The accepted TensorRT CUDA graph path clones the small boxes and logits outputs separately before cloning the large mask tensor. Allocating one small flat device tensor, copying boxes and logits into views, and returning those views could reduce small-output allocation overhead without borrowing graph-owned outputs or changing the large mask clone.
+- Change tested: Temporary code only; in the CUDA graph cache-hit path, when three same-dtype outputs were present, allocated one flat tensor for the first two outputs, copied the graph-owned first and second output buffers into shaped views, and cloned the third output normally. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.97` and `frames=538 elapsed=2.20s fps=244.21`, not a stable improvement over the accepted warmed ceiling.
+- Learning: The two small output clones are below the limiter, and replacing them with manual view copies changes allocation/scheduling enough to add variance. Keep the simpler per-output clone path.
