@@ -1185,3 +1185,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The existing selector had duplicate query detections on only 3 of 538 frames, with maximum query multiplicity `2`. The top-2-per-query selector matched the existing selector exactly over all 538 frames: `bad=0`, `max_float_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.73`, `frames=538 elapsed=2.32s fps=231.40`, and `frames=538 elapsed=2.29s fps=234.73`, below the accepted fixed-copy band.
 - Learning: The extra kernel launch and candidate-buffer traffic cost more than the added selector parallelism. Keep the single-kernel global selector despite its low occupancy.
+
+### Rejected: Disable TensorRT Graph Context NVTX Verbosity
+
+- Hypothesis: The accepted engine was built with layer-name profiling verbosity, and TensorRT graph execution contexts expose `nvtx_verbosity`. Setting the CUDA graph execution context to `ProfilingVerbosity.NONE` during capture might remove NVTX/profiling bookkeeping from graph replay without changing kernels.
+- Change tested: Temporary code only; set `graph_context.nvtx_verbosity = trt.ProfilingVerbosity.NONE` immediately after creating the TensorRT CUDA graph execution context. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction math and graph topology are unchanged; this only changes TensorRT execution-context metadata verbosity.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.62`, `frames=538 elapsed=2.30s fps=234.00`, and `frames=538 elapsed=2.32s fps=231.96`, below the accepted fixed-copy band.
+- Learning: Runtime NVTX verbosity is not the TensorRT graph replay limiter in this no-profiler benchmark. Keep the default context verbosity.
