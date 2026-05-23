@@ -585,3 +585,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `219.52 fps`, then `218.91 fps`, then `215.93 fps`; not stable enough to checkpoint over the current `218.97` FPS best.
 - Learning: The larger tile can occasionally win but is too variable on this T4 workload. Keep the original `256` pixel tile.
+
+### Rejected: Skip Per-Frame Status Update Without Handlers
+
+- Hypothesis: `_emit_inference_result(...)` builds a DEBUG status payload with frame IDs, timestamps, and source IDs for every frame, even when no `status_update_handlers` are configured. Guarding that call could reduce CPU work in the inference thread before submitting the next frame.
+- Change tested: Temporary code only; wrapped the hot per-frame `send_inference_pipeline_status_update(...)` call in `if self._status_update_handlers`.
+- Correctness: The change does not affect model execution or prediction contents; it only skips status-update allocation when no handlers exist.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=216.14`, below the current checkpoint.
+- Learning: This status payload is not the current bottleneck, or the branch perturbs the tight loop. Keep the existing status update behavior.
