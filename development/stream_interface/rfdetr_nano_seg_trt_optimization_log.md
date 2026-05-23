@@ -2020,3 +2020,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Request: Re-check official Roboflow package metadata through the local `inference_models` provider path before spending more time on engine-body tuning.
 - Result: The provider resolves `rfdetr-seg-nano` to `coco-dataset-vdnr1/41` and still returns six public packages: L4 TRT FP32 `3e3ddd85586b43e4fac6d319fb2927fd`, ONNX FP32 `5362b72bfb9f01d2e0b8cba2048d932c`, L4 TRT FP16 `89d1f41e2af4f4f3ffcdfb77e774d26a`, Torch FP32 `8b8da2fe824240522a39f3cde41aafae`, T4 TRT FP32 `bbc2cc23adf6f5e71a9241956081da96`, and T4 TRT FP16 `c70f32369a54d61e06ef4e6b56c82524`.
 - Learning: There is no new official T4-compatible TensorRT package available through the current metadata. The accepted T4 FP16 package remains the only official package that has passed the benchmark correctness gate; further graph-body improvements still require a behavior-equivalent export source or a new official T4 package.
+
+### Rejected: Static Batch TensorRT Wrapper Shortcut
+
+- Hypothesis: RFDETR TRT uses a static batch size of `1`, and the benchmark always sends exactly one frame. Short-circuiting `_infer_from_trt_engine_with_batch_size_boundaries(...)` directly into `_execute_trt_engine(...)` for the exact static-batch case could remove small Python branch/reminder overhead before graph replay.
+- Change tested: Temporary code only; added an early return when `min_batch_size == max_batch_size == pre_processed_images.shape[0]`, preserving the same tensor and the same `_execute_trt_engine(...)` call. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: This does not change model inputs, TensorRT execution, postprocess, or predictions; it only bypasses generic padding bookkeeping when no padding is needed.
+- Result on requested command: same-session clean baseline measured `frames=538 elapsed=2.21s fps=243.90`; shortcut runs measured `frames=538 elapsed=2.21s fps=243.91` and `frames=538 elapsed=2.21s fps=243.00`.
+- Learning: Generic static-batch bookkeeping is below the current limiter. The accepted helper structure remains clearer and at least as fast in the graph-bound depth-2 run.
