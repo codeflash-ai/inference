@@ -1517,3 +1517,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_ON_PROFILE_CHANGE_CONTEXT=true`, `_capture_cuda_graph(...)` created the graph execution context with `engine.create_execution_context(trt.ExecutionContextAllocationStrategy.ON_PROFILE_CHANGE)`. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.16`, `frames=538 elapsed=2.28s fps=235.96`, and `frames=538 elapsed=2.31s fps=232.94`, not stable enough to keep over the accepted fixed-copy band.
 - Learning: The alternate allocation strategy does not reduce the TensorRT CUDA graph bottleneck. Keep the default static execution-context allocation.
+
+### Rejected: Producer Runtime And Queue Tuning
+
+- Hypothesis: Once graph-to-graph gaps are about `40 us`, small CPU producer/dispatcher settings might still perturb depth-2 balance: limiting CPU thread pools, disabling Python GC, changing video decode buffer size, or replacing the bounded predictions `Queue` with `SimpleQueue`.
+- Change tested: External/runtime probes plus temporary gated code only. Ran the accepted path with `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 TORCH_NUM_THREADS=1`; ran the benchmark with `gc.disable()` via `runpy`; tried `VIDEO_SOURCE_BUFFER_SIZE=8` and `128`; and tested `INFERENCE_PIPELINE_SIMPLE_PREDICTIONS_QUEUE=true` using a temporary `SimpleQueue` dispatch path. Pipeline depth remained fixed at `2`.
+- Result on requested command: limited CPU threads measured `frames=538 elapsed=2.29s fps=234.87`; disabled GC measured `frames=538 elapsed=2.30s fps=234.18`; video buffer `8` measured `frames=538 elapsed=2.32s fps=231.46`; video buffer `128` measured `frames=538 elapsed=2.33s fps=231.38`; simple predictions queue measured `frames=538 elapsed=2.30s fps=233.62`.
+- Learning: The current run is not meaningfully limited by Python GC, CPU thread oversubscription, video decode buffer size, or bounded queue bookkeeping. Keep the accepted runtime settings and standard `Queue` implementation.
