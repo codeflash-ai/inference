@@ -732,3 +732,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared fixed-capacity pinned conversion against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=219.73`, `frames=538 elapsed=2.44s fps=220.67`, then `frames=538 elapsed=2.48s fps=216.81`; not stable enough to keep over the dynamic-capacity pinned conversion checkpoint.
 - Learning: The larger pinned allocation changes memory behavior enough to introduce variance, and avoiding a few growth allocations does not reliably improve steady-state throughput. Keep the dynamic grow-to-needed-count buffers.
+
+### Rejected: Fold RFDETR Workflow Metadata Attachment
+
+- Hypothesis: After pinned D2H conversion, the RFDETR workflow fast path still makes separate Python passes for prediction type attachment, no-op class filtering, and parent-coordinate metadata. Folding prediction type and parent metadata into one RFDETR-specific helper and skipping the empty class filter could reduce CPU materialization work.
+- Change tested: Temporary code only; added `_attach_rfdetr_fast_path_metadata(...)` to attach prediction type plus root/parent IDs, coordinates, and dimensions in a single pass, and used it only in `_try_run_rfdetr_trt_fast_path(...)`.
+- Correctness: Compared folded metadata against the previous helper chain on all 538 frames, ignoring random detection IDs: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes=0`, `bad_data=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.02` and `frames=538 elapsed=2.45s fps=219.31`, below the pinned-conversion checkpoint.
+- Learning: The helper calls are not the limiter, and folding them changes enough Python allocation/order behavior to lose throughput. Keep the established helper chain.
