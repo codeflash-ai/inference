@@ -1968,3 +1968,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Local tensor checks confirmed both normal and pinned CHW tensors remain contiguous after `unsqueeze(0)` with expected NCHW strides; no model math or preprocessing pixels change.
 - Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.37` and `frames=538 elapsed=2.20s fps=244.05`, below the latest clean accepted sanity run of `frames=538 elapsed=2.20s fps=244.65`.
 - Learning: The extra `.contiguous()` is effectively a no-op in this path and is not the current producer limiter. Removing it did not improve throughput, so the accepted explicit contiguous call remains.
+
+### Rejected: Yield Before RFDETR Postprocess
+
+- Hypothesis: In the RFDETR TRT workflow fast path, the same worker thread calls `forward(...)` and immediately launches deferred GPU postprocess. With pipeline depth fixed at `2`, yielding once after `forward(...)` might let the other worker acquire the model lock and enqueue the next TensorRT CUDA graph before selector/resize work, reducing the already-small graph-to-graph tail.
+- Change tested: Temporary code only; inserted `time.sleep(0)` between `model._model.forward(...)` and `model._model.post_process(...)` in the RFDETR TRT workflow fast path. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.43` and `frames=538 elapsed=2.21s fps=243.90`, within noise but below the accepted warmed ceiling.
+- Learning: Python scheduler yielding does not improve the depth-2 balance. The current path already hands off quickly enough, and explicit yielding adds variance without reducing the TensorRT graph-body bottleneck. Reverted to the accepted immediate postprocess launch.
