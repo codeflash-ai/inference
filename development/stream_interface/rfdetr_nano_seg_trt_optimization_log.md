@@ -295,3 +295,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Micro-result: Preprocess-only loop over 128 frames measured `1.980 ms/frame`; the isolated conversion prototype measured `0.605 ms/frame` vs `0.622 ms/frame` for the prior conversion helper.
 - Pipeline tuning: Depth `2` measured `frames=538 elapsed=2.80s fps=192.42` and `frames=538 elapsed=2.79s fps=193.16`; depth `3` measured `frames=538 elapsed=3.10s fps=173.33`.
 - Learning: This is an exact, small allocation cleanup. It does not materially shift the bottleneck or pipeline depth, but it keeps the preprocessing path leaner without changing model inputs.
+
+### Rejected: Keep Deferred Query Indices As Int32
+
+- Hypothesis: Nsight Systems still showed a tiny PyTorch copy/cast kernel after fused selection. The deferred mask resize kernel can read int32 query indices directly, so skipping `query_indices.to(dtype=torch.long)` in the GPU-deferred path could remove one kernel launch and D2D copy per frame.
+- Change tested: Temporary code only; when `return_cpu_count=False`, `fused_select_topk_boxes(...)` returned int32 query indices instead of casting them to int64.
+- Correctness: Deferred workflow postprocess vs exact-sized postprocess on all 538 frames matched class IDs, boxes, and dense masks exactly; max box delta `0` px.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.80s fps=192.18` and `frames=538 elapsed=2.83s fps=189.79`, below the current checkpoint band.
+- Learning: Removing this small cast does not improve end-to-end throughput; the scheduling and pipeline balance dominate over this tiny kernel.
