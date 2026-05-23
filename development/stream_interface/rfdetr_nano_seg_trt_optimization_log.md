@@ -1952,3 +1952,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The masked `tl.load(..., other=-inf)` already produces the same value for invalid offsets, so this cleanup is semantically equivalent for the selector.
 - Result on requested command: first compile-cold run measured `frames=538 elapsed=2.29s fps=234.72`; warmed repeats measured `frames=538 elapsed=2.21s fps=243.89` and `frames=538 elapsed=2.21s fps=243.60`, below the immediately prior clean sanity run of `frames=538 elapsed=2.20s fps=244.65`.
 - Learning: This codegen simplification does not improve the graph-bound depth-2 run. The selector is too small relative to TensorRT replay and required copy traffic, and small Triton schedule changes can land below the accepted warmed band. Reverted to the accepted selector implementation.
+
+### Rejected: X-Axis Specialized Mask Resize
+
+- Hypothesis: The benchmark resizes RFDETR masks from `78` columns to `312` columns, so the x-axis scale is exactly `4x` even though the original frame height is `176`. The prior fully-4x resize specialization did not match this video because the y-axis is not 4x. Specializing only x-coordinate interpolation could reduce arithmetic in `_resize_selected_masks_kernel(...)`.
+- Change tested: Temporary code only; added `_resize_selected_masks_x4_kernel(...)` that replaces x-axis floor/divide work with a `out_x % 4` mapping while keeping the generic y-axis bilinear math. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: CUDA smoke check compared generic and x-specialized kernels on random `(100, 78, 78)` masks resized to `(176, 312)` for seven selected detections: `equal=True`, `diff=0`.
+- Result on requested command: warmed depth-2 runs measured `frames=538 elapsed=2.20s fps=244.48`, then `frames=538 elapsed=2.21s fps=243.91`, then `frames=538 elapsed=2.21s fps=243.37`, below the latest clean accepted sanity run of `frames=538 elapsed=2.20s fps=244.65`.
+- Learning: The x-axis arithmetic is not the limiter for the current graph-bound run. The extra Triton variant and changed codegen do not produce a stable end-to-end improvement, so the generic resize kernel remains the accepted path.
