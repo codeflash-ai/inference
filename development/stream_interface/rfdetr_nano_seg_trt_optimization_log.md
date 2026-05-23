@@ -1975,3 +1975,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; inserted `time.sleep(0)` between `model._model.forward(...)` and `model._model.post_process(...)` in the RFDETR TRT workflow fast path. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.43` and `frames=538 elapsed=2.21s fps=243.90`, within noise but below the accepted warmed ceiling.
 - Learning: Python scheduler yielding does not improve the depth-2 balance. The current path already hands off quickly enough, and explicit yielding adds variance without reducing the TensorRT graph-body bottleneck. Reverted to the accepted immediate postprocess launch.
+
+### Rejected: Triton Selector Max Return Indices
+
+- Hypothesis: `_select_topk_boxes_kernel` computes the top offset with an equality mask plus `tl.min(...)` after `tl.max(scores, axis=0)`. Triton's `tl.max(..., return_indices=True, return_indices_tie_break_left=True)` can return the max value and lane index together, potentially reducing selector reduction work.
+- Change tested: Temporary code only; replaced the selector loop's `tl.max` plus equality-mask tie-break with `tl.max(..., return_indices=True, return_indices_tie_break_left=True)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: the first compile-cold run measured `frames=538 elapsed=2.29s fps=235.06`; warmed repeat measured `frames=538 elapsed=2.21s fps=243.95`, below the accepted warmed ceiling.
+- Learning: Triton's max-with-index codegen is not better for this single-block selector on T4. The existing explicit equality-mask/tie-break sequence remains the faster full-pipeline path.
