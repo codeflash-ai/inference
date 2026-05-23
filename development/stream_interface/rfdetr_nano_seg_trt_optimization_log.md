@@ -1663,3 +1663,24 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime setting only; attempted `nvidia-smi -lmc 5001,5001`, then locked graphics clocks with `nvidia-smi -lgc 1590,1590`, ran the benchmark with pipeline depth fixed at `2`, and reset clock locks afterward.
 - Result: The T4 runtime reported locked memory clocks are not supported. The run executed at `P0`, `1590 MHz` graphics clock, and `5000 MHz` memory clock, measuring `frames=538 elapsed=2.21s fps=243.26`, matching the earlier graphics-clock-only result. After reset and idle, the GPU returned to `P8`, `300 MHz` graphics, `405 MHz` memory.
 - Learning: There is no separate memory-clock lock knob available in this environment, and graphics-clock lock remains only an external deployment/runtime tuning option. It does not change the accepted library code path.
+
+### TensorRT Accepted Engine Inspection
+
+- Request: Inspect the current accepted TensorRT plan directly before attempting more graph-body changes.
+- Evidence: Engine inspector dump saved to `/tmp/rfdetr_accepted_engine_inspector.json` for the accepted shared blob `/tmp/cache/shared-blobs/bc173a2cfda9a10af2bc411885e9fec3`.
+- Result: The accepted engine is `187,947,996` bytes, has `4` I/O tensors, `261` layers, `4` auxiliary streams, `18,289,152` bytes device memory, `ProfilingVerbosity.LAYER_NAMES_ONLY`, and tactic source mask `8`. Tensors are `input` float32 `(1,3,312,312)`, `dets` float32 `(1,100,4)`, `labels` float32 `(1,100,91)`, and mask output `4186` float32 `(1,100,78,78)`. Coarse layer-name counts from the inspector are `95` matmul/GEMM-like layers, `78` fused/cast layers, `14` conv layers, and `1` resize layer.
+- Learning: The engine metadata matches the Nsight kernel evidence: remaining runtime is dominated by TensorRT GEMM/MHA-style graph body work. The plan is only layer-name verbose, so tactic-level detail is not available from the serialized engine inspector in this environment.
+
+### External Runtime Probe: Persistence Mode
+
+- Hypothesis: Enabling GPU persistence mode might reduce clock/context ramp effects for the warmed graph-bound benchmark.
+- Change tested: External runtime setting only. Persistence mode was already enabled before the probe, so the benchmark effectively re-ran the accepted path under the existing setting. Pipeline depth remained fixed at `2`, and persistence mode was restored to the original enabled state afterward.
+- Result on requested command: `frames=538 elapsed=2.19s fps=245.29`, within the accepted warmed band.
+- Learning: Persistence mode was already active and is not a new optimization knob. The accepted code path remains responsible for the current measured throughput.
+
+### External Runtime Probe: Application Clocks
+
+- Hypothesis: `nvidia-smi -ac 5001,1590` might enforce the high memory and graphics application-clock targets more cleanly than graphics-only lock or unsupported memory lock commands.
+- Change tested: External runtime setting only; set application clocks to `(MEM 5001, SM 1590)`, ran the accepted benchmark with pipeline depth fixed at `2`, then reset application clocks with `nvidia-smi -rac`.
+- Result on requested command: `frames=538 elapsed=2.18s fps=246.36`, matching the current accepted warmed band rather than improving it. After reset and idle, the GPU returned to persistence enabled, `P8`, `300 MHz` graphics, `405 MHz` memory, with default application clocks `(MEM 5001, SM 585)`.
+- Learning: Application clocks do not improve beyond the accepted warmed path in this environment. Keep clock tuning as an external diagnostic only, not a code or default runtime requirement.
