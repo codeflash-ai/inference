@@ -1569,3 +1569,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime setting only; ran `nvidia-smi -lgc 1590,1590`, confirmed `P0` and `1590 MHz` graphics/SM clocks, ran the accepted benchmark with pipeline depth fixed at `2`, then reset the lock with `nvidia-smi -rgc`.
 - Result on requested command: `frames=538 elapsed=2.21s fps=243.54`, with progress already near steady state by frame `50` (`254.93` FPS at frame 50, settling to `243.54` FPS overall).
 - Learning: The code path is effectively at the graph-bound ceiling when the T4 is held at max clocks. This is an external deployment/runtime tuning knob, not a library code change; future code changes should be compared under the same clock policy if the goal is absolute max FPS rather than default cloud/runtime behavior.
+
+### External Runtime Probe: Max Clocks Plus CUDA Connections
+
+- Hypothesis: With T4 clocks locked to maximum, `CUDA_DEVICE_MAX_CONNECTIONS=2` might combine with the accepted depth-2 stream layout to reduce scheduling overhead further than max clocks alone.
+- Change tested: External runtime setting only; ran `nvidia-smi -lgc 1590,1590`, then launched the accepted benchmark with `CUDA_DEVICE_MAX_CONNECTIONS=2` and pipeline depth fixed at `2`, then reset graphics clocks with `nvidia-smi -rgc`.
+- Result on requested command: `frames=538 elapsed=2.21s fps=243.26`, effectively the same as the prior max-clock-only `243.54` FPS result.
+- Learning: Once clocks are held at maximum, the connection-count scheduler knob does not move the ceiling. The remaining limiter is the TensorRT CUDA graph body.
