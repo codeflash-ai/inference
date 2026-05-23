@@ -1592,3 +1592,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Warmup tuning: Temporary env-gated probes showed `16` extra replay warmups was too short (`frames=538 elapsed=2.31s fps=233.37`), `32` reached the max-clock band (`frames=538 elapsed=2.21s fps=243.71`), and `64` was the strongest (`frames=538 elapsed=2.20s fps=244.95`, repeat `frames=538 elapsed=2.19s fps=245.15`).
 - Result on requested command after wiring the RFDETR default: depth `2` measured `frames=538 elapsed=2.21s fps=243.86` and repeat `frames=538 elapsed=2.20s fps=244.16`, with no extra environment variable or external clock lock.
 - Learning: This does not shorten the TensorRT graph body; it moves the run into the steady graph-bound clock regime before the benchmark's measured interval. The tradeoff is extra first-frame/model-warmup latency, which is acceptable for this throughput-oriented RFDETR TRT path and keeps the measured pipeline close to the observed `~243-245` FPS max-clock ceiling.
+
+### Rejected: Higher RFDETR TensorRT Graph Replay Warmup Counts
+
+- Hypothesis: The accepted `64` replay warmup may still under-warm the T4 for the measured interval; increasing capture-time graph replays to `96` or `128` could raise the steady benchmark closer to the best observed warmup run.
+- Change tested: Temporary code only; changed `RFDetrForInstanceSegmentationTRT.forward(...)` from `cuda_graph_replay_warmup_count=64` to `128`, then to `96`. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction math and graph topology are unchanged; only extra pre-measurement replays of the already captured TensorRT graph are added.
+- Result on requested command: `128` measured `frames=538 elapsed=2.20s fps=244.73` and repeat `frames=538 elapsed=2.20s fps=244.12`; `96` measured `frames=538 elapsed=2.20s fps=244.64`. These are within the accepted `64`-warmup band and do not justify the extra startup latency.
+- Learning: `64` replay warmups are enough to reach the steady graph-bound clock regime. Keep the accepted `64` setting.
