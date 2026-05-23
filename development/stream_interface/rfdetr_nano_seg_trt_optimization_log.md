@@ -1338,3 +1338,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; first gated `RFDETR_SELECTOR_INT64_QUERIES=1` to allocate query indices as `torch.int64` and skip the `.to(dtype=torch.long)` call, then tested the actual candidate as an unconditional `int64` query-index output. Pipeline depth remained fixed at `2`.
 - Result on requested command: the gated probe measured `234.01` and `234.61` FPS, but the unconditional candidate measured `frames=538 elapsed=2.32s fps=232.35`, below the accepted fixed-copy band.
 - Learning: Removing the query-index cast is not enough to improve the full pipeline, and the `int64` selector output shifts scheduling or memory behavior unfavorably. Keep the accepted `int32` selector output plus explicit cast.
+
+### Rejected: Precomputed Mask Resize Maps
+
+- Hypothesis: The deferred mask resize always upsamples `78x78` masks to `312x312` in this benchmark. Caching the bilinear `x0/x1/y0/y1/wx/wy` coordinate maps on GPU could remove per-pixel floor, clamp, and weight arithmetic from `_resize_selected_masks_kernel`.
+- Change tested: Temporary gated code only; with `RFDETR_PRECOMPUTED_RESIZE_MAPS=1`, cached resize maps per thread/device/shape and launched a variant Triton mask-resize kernel that loads coordinates and weights from those maps. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.97`, below the accepted fixed-copy band.
+- Learning: The extra global map loads are more expensive than recomputing the simple bilinear coordinates in registers for this fixed small resize. Keep the arithmetic-only resize kernel.
