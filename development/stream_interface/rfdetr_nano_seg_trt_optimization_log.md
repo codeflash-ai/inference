@@ -1503,3 +1503,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; when `return_cpu_count=False`, `fused_select_topk_boxes(...)` returned the int32 `query_indices` tensor directly. The non-deferred indexing path still used the existing int64 conversion. Pipeline depth remained fixed at `2`.
 - Result on requested command: first run `frames=538 elapsed=2.31s fps=232.65`, repeat `frames=538 elapsed=2.32s fps=231.65`, not better than the accepted fixed-copy band.
 - Learning: Removing this tiny cast is below end-to-end noise because the run is dominated by TensorRT graph replay and required copies. Keep the existing int64 return type for consistency with the non-deferred path.
+
+### Rejected: Disable TensorRT Enqueue Profiling Emission
+
+- Hypothesis: The TensorRT CUDA graph execution context defaults `enqueue_emits_profile=True` even though no profiler is attached. Disabling that flag before warmup and graph capture might remove bookkeeping from TensorRT enqueue or graph replay.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_DISABLE_ENQUEUE_PROFILE=true`, `_capture_cuda_graph(...)` set `graph_context.enqueue_emits_profile = False` immediately after creating the graph execution context. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.45`, repeat `frames=538 elapsed=2.33s fps=231.01`, not a stable improvement over the accepted fixed-copy band.
+- Learning: TensorRT enqueue profiling emission is not a meaningful limiter for the captured RFDETR graph path. Keep the default execution-context setting.
