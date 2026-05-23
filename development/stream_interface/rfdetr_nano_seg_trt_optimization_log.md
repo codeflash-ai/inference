@@ -212,3 +212,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary `pre_processing.py` helper that called `tensor.pin_memory().to(device, non_blocking=True)` for CPU tensors moving to CUDA.
 - Result on requested command: `frames=538 elapsed=3.19s fps=168.61`, slower than the committed pageable transfer path.
 - Learning: Per-frame pinning overhead outweighed any asynchronous-copy benefit for this 312x312 tensor. A useful transfer optimization likely needs reusable pinned buffers or moving normalization/conversion to GPU from a smaller uint8 transfer, not pinning after CPU float normalization.
+
+### Rejected: Sparse Early Return In Triton Mask Resize
+
+- Hypothesis: The benchmark has only 1-7 detections per frame, while the fused mask resize kernel is launched over 100 possible detection slots. Returning immediately for detection slots greater than the GPU-side selected count could reduce unnecessary bilinear math.
+- Change tested: Temporary code only; added a runtime `if det_index >= count: return` branch in `_resize_selected_masks_kernel`.
+- Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames matched detection counts, class IDs, boxes, and dense masks exactly.
+- Result on requested command: `frames=538 elapsed=3.16s fps=170.11`, slower than the committed mask kernel.
+- Learning: The runtime branch/control-flow cost and changed Triton code generation outweighed the skipped masked arithmetic on T4. Keep the straight-line mask kernel for now.
