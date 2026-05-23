@@ -1359,3 +1359,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_CAPTURE_INPUT_COPY_IN_GRAPH=1`, included `input_buffer.copy_(pre_processed_images)` inside CUDA graph capture, skipped the cache-hit input copy, and extended the graph cache key with `pre_processed_images.data_ptr()`. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=3.53s fps=152.47`, far below the accepted fixed-copy band.
 - Learning: Pointer-keyed graph capture causes excessive graph-cache churn and capture overhead in the workflow pipeline. Keep the single shape-keyed graph and the small explicit D2D input copy.
+
+### Rejected: Reuse Fused Postprocess GPU Buffers
+
+- Hypothesis: The fused postprocess path allocates selector output tensors and a full-capacity mask-resize output tensor every frame. Reusing thread-local GPU buffers could reduce allocator overhead and remove the accepted path's query-index zero-fill while preserving the fixed-count CPU slicing behavior.
+- Change tested: Temporary gated code only; with `RFDETR_REUSE_FUSED_POSTPROCESS_BUFFERS=1`, reused thread-local `scores`, `classes`, `boxes`, `query_indices`, `count`, and mask-resize output tensors. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.67`, not a clear improvement over the accepted fixed-copy band.
+- Learning: PyTorch's cached allocation path is not the limiter here, and avoiding the query fill this way does not improve the graph-to-graph interval. Keep fresh tensor allocation and deterministic zero-filled query indices.
