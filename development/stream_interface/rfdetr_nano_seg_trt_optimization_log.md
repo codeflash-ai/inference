@@ -2036,3 +2036,19 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiling: `frames=538 elapsed=2.20s fps=244.61`, inside the accepted warmed band.
 - Findings: Standard `cProfile` mostly captured startup/import and the main result-dispatch queue, not the worker-thread CUDA hot path. The main-thread sink itself was negligible (`538` calls, about `0.005 s` cumulative), and the top cumulative runtime after import was queue waiting in `_dispatch_inference_results`.
 - Learning: The remaining limiter is not main-thread result sink work. This profile is consistent with the Nsight Systems evidence that the run is constrained by the TensorRT CUDA graph body plus the short GPU copy/postprocess tail; worker-thread CPU hot-path work is already mostly hidden by the depth-2 pipeline.
+
+### Profile: All-Thread Yappi CPU/Wall Refresh
+
+- Request: Refresh all-thread CPU-side evidence for the accepted path after the main-thread-only `cProfile` run. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Profiles: `/tmp/rfdetr_depth2_yappi_wall_20260523_1902.pstat`, `/tmp/rfdetr_depth2_yappi_wall_20260523_1902.callgrind`, `/tmp/rfdetr_depth2_yappi_cpu_20260523_1906.pstat`, and `/tmp/rfdetr_depth2_yappi_cpu_20260523_1906.callgrind`.
+- Result under profiler: Yappi wall-clock profiling measured `frames=538 elapsed=2.22s fps=242.75`. Yappi CPU-clock profiling is much higher overhead for this workload and measured `frames=538 elapsed=3.10s fps=173.75`; use it only for relative CPU attribution.
+- Findings: Worker wall time remains dominated by CUDA waits: RFDETR fast path wall time was about `8.92 s` across both workers, while true CPU-time attribution in the same area was much smaller. The largest local true CPU self-time left was preprocessing normalization (`_pil_image_to_normalized_tensor(...)` around `0.300 s` under the CPU profiler), followed by fixed pinned conversion bookkeeping (`_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` around `0.071 s` self-time). Fused selector/postprocess wall time is mostly GPU wait, not Python.
+- Learning: The all-thread CPU evidence agrees with Nsight Systems: the depth-2 pipeline hides worker CPU well enough that the remaining FPS ceiling is TensorRT graph replay and required GPU copy/postprocess work. Any CPU micro-optimization must be very low-risk and measured end-to-end, because true Python self-time is now a small fraction of frame time.
+
+### Rejected: Broadcast RFDETR Normalization
+
+- Hypothesis: The current RFDETR PIL preprocessing writes normalized CHW channels with three separate NumPy multiply/add loops. A single broadcasted NumPy multiply over a channel-reordered CHW source could reduce preprocessing CPU self-time, which the Yappi CPU profile identified as the largest remaining local CPU function.
+- Change tested: Temporary code only; replaced the per-channel loop in `_pil_image_to_normalized_tensor(...)` with `np.moveaxis(image_array[:, :, channel_order], 2, 0)`, one broadcasted `np.multiply(..., out=normalized)`, and one broadcasted bias add. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: A local micro-check on resized uint8 inputs showed exact normalized tensor equality versus the accepted per-channel loop (`max diff 0.0`) for the benchmark channel-swap case.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.21s fps=243.84` and `frames=538 elapsed=2.20s fps=244.57`, inside noise but not a stable improvement over accepted warmed runs.
+- Learning: The broadcast form is only marginally faster in isolation and adds a per-frame channel-reorder temporary. In the full depth-2 pipeline, it does not improve throughput. Keep the accepted direct per-channel writes into the pinned CHW buffer.
