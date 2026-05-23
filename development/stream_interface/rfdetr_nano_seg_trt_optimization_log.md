@@ -913,3 +913,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed the RFDETR TRT workflow fast path from `deferred_mask_resize_detection_limit=7` to `6`. Pipeline depth remained fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.42s fps=222.76`, `frames=538 elapsed=2.45s fps=220.00`, and `frames=538 elapsed=2.42s fps=222.66`, below the accepted 7-row best band.
 - Learning: The full-resize overflow fallback on 7-detection frames costs more than the one-row saving on the other frames. Keep the 7-row limit for this stream.
+
+### Rejected: Prefilter Invalid Classes In Selector
+
+- Hypothesis: `_select_topk_boxes_kernel` lets invalid/no-object class scores participate in the top-score loop and discards them one at a time. Masking those lanes to `-inf` before the loop could reduce selector iterations and shrink the postprocess gap.
+- Change tested: Temporary code only; computed each lane's raw class index at the start of the Triton selector, loaded `class_mapping`, and set scores with mapped class `< 0` to `-inf` before entering the top-k loop. Pipeline depth remained fixed at `2`.
+- Correctness: Compared the modified deferred fused path against the exact PyTorch postprocess on all 538 frames: count distribution `{1: 15, 2: 104, 3: 164, 4: 145, 5: 74, 6: 14, 7: 22}`, `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.42s fps=222.75`, `frames=538 elapsed=2.45s fps=219.78`, and `frames=538 elapsed=2.42s fps=222.13`, below the accepted 7-row best band.
+- Learning: The extra vectorized class-map load and mask computation are not worth the shorter top-k loop for this tensor shape. Keep the simpler selector.
