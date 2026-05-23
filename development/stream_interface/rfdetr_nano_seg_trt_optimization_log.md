@@ -1982,3 +1982,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; replaced the selector loop's `tl.max` plus equality-mask tie-break with `tl.max(..., return_indices=True, return_indices_tie_break_left=True)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: the first compile-cold run measured `frames=538 elapsed=2.29s fps=235.06`; warmed repeat measured `frames=538 elapsed=2.21s fps=243.95`, below the accepted warmed ceiling.
 - Learning: Triton's max-with-index codegen is not better for this single-block selector on T4. The existing explicit equality-mask/tie-break sequence remains the faster full-pipeline path.
+
+### Rejected: Single-Image Deferred Fused Postprocess Shortcut
+
+- Hypothesis: The benchmark always calls RFDETR dense postprocess with batch size `1` and `defer_fused_postprocess_count=True`. Trying the fused postprocess directly on `logits[0]` before the generic batch sigmoid/loop could remove small Python and tensor-wrapper overhead while preserving the same fused selector and mask resize behavior.
+- Change tested: Temporary code only; added an early single-image branch in `post_process_instance_segmentation_results(...)` that called `_try_fused_instance_segmentation_post_process(...)` with `torch.sigmoid(logits[0])` and returned `[fused_result]` when supported. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.43` and `frames=538 elapsed=2.21s fps=243.63`, below the accepted warmed ceiling.
+- Learning: The generic batch wrapper and loop are not limiting the current depth-2 run. The added branch changes bytecode/scheduling enough to add variance without reducing the TensorRT graph-body bottleneck. Reverted to the generic postprocess flow.
