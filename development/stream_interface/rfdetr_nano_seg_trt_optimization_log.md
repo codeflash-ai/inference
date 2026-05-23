@@ -353,7 +353,7 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Hypothesis: `_pil_image_to_normalized_tensor(...)` rebuilds NumPy mean/std arrays and a float32 scale scalar every frame. Caching these immutable normalization constants per thread should remove small repeated allocations from the producer path.
 - Change: Added a thread-local normalization constants cache keyed by the configured mean/std values, reusing the float32 mean array, std array, and `1/255` scale across frames.
 - Correctness: Compared cached-constant preprocessing against the prior ufunc-fill formula on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
-- Result on requested command: isolated depth `2` runs measured `frames=538 elapsed=2.58s fps=208.14` and `frames=538 elapsed=2.58s fps=208.26`.
+- Pipeline tuning: Depth `2` runs measured `frames=538 elapsed=2.58s fps=208.14` and `frames=538 elapsed=2.58s fps=208.26`; depth `3` measured `frames=538 elapsed=3.07s fps=175.07`.
 - Learning: At this point, even small per-frame Python/NumPy allocations are visible in the two-frame pipeline balance.
 
 ### Rejected: Double-Buffered Pinned Preprocess Buffers
