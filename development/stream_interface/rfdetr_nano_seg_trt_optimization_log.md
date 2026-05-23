@@ -1366,3 +1366,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_REUSE_FUSED_POSTPROCESS_BUFFERS=1`, reused thread-local `scores`, `classes`, `boxes`, `query_indices`, `count`, and mask-resize output tensors. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.67`, not a clear improvement over the accepted fixed-copy band.
 - Learning: PyTorch's cached allocation path is not the limiter here, and avoiding the query fill this way does not improve the graph-to-graph interval. Keep fresh tensor allocation and deterministic zero-filled query indices.
+
+### Rejected: Explicit Empty-Like TensorRT Output Copies
+
+- Hypothesis: The accepted TensorRT CUDA graph path uses `buf.clone()` for each output. Replacing clone with `torch.empty_like(buf)` plus `copy_(..., non_blocking=True)` could preserve the same output ownership while avoiding any clone-specific format or autograd handling.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_EMPTY_COPY_OUTPUTS=1`, copied each graph output into an explicit `empty_like` tensor on the graph stream. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=234.10`, not a clear improvement over the accepted fixed-copy band.
+- Learning: PyTorch `clone()` is already as efficient as the explicit empty-and-copy form for these graph outputs. Keep the simpler clone path.
