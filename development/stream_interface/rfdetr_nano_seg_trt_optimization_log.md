@@ -1960,3 +1960,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: CUDA smoke check compared generic and x-specialized kernels on random `(100, 78, 78)` masks resized to `(176, 312)` for seven selected detections: `equal=True`, `diff=0`.
 - Result on requested command: warmed depth-2 runs measured `frames=538 elapsed=2.20s fps=244.48`, then `frames=538 elapsed=2.21s fps=243.91`, then `frames=538 elapsed=2.21s fps=243.37`, below the latest clean accepted sanity run of `frames=538 elapsed=2.20s fps=244.65`.
 - Learning: The x-axis arithmetic is not the limiter for the current graph-bound run. The extra Triton variant and changed codegen do not produce a stable end-to-end improvement, so the generic resize kernel remains the accepted path.
+
+### Rejected: Skip Single-Image Batch Contiguous Call
+
+- Hypothesis: In RFDETR preprocessing, `tensors[0].unsqueeze(0)` is already contiguous for the accepted single-image CHW tensor. Removing the following `.contiguous()` could avoid a tiny PyTorch dispatch in the CPU producer path without changing the TensorRT input.
+- Change tested: Temporary code only; changed the single-image branch in `pre_process_network_input(...)` from `tensors[0].unsqueeze(0).contiguous()` to `tensors[0].unsqueeze(0)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: Local tensor checks confirmed both normal and pinned CHW tensors remain contiguous after `unsqueeze(0)` with expected NCHW strides; no model math or preprocessing pixels change.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.37` and `frames=538 elapsed=2.20s fps=244.05`, below the latest clean accepted sanity run of `frames=538 elapsed=2.20s fps=244.65`.
+- Learning: The extra `.contiguous()` is effectively a no-op in this path and is not the current producer limiter. Removing it did not improve throughput, so the accepted explicit contiguous call remains.
