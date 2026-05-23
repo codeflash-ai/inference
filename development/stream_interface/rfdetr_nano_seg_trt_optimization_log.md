@@ -1316,3 +1316,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_ZERO_AUX_STREAMS=1`, called `graph_context.set_aux_streams([])` before graph capture. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.41`, below the accepted fixed-copy band.
 - Learning: Disabling TensorRT auxiliary streams during graph capture slows the forward pass on this engine/runtime. Keep TensorRT's default aux-stream scheduling.
+
+### Rejected: TensorRT Graph Replay On Caller Stream
+
+- Hypothesis: The accepted CUDA graph path captures and replays TensorRT on a graph-owned stream, then uses event waits to hand off from the RFDETR inference stream and back. Capturing the graph on the caller inference stream itself could remove those event edges and tighten the graph-to-graph tail.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_CALLER_GRAPH_STREAM=true`, captured the TensorRT CUDA graph on `torch.cuda.current_stream(device)` and skipped the wait edges when the cached graph stream matched the caller stream. Pipeline depth remained fixed at `2`. A first run with `RFDETR_TRT_CALLER_GRAPH_STREAM=1` failed before processing frames because this repo's env parser accepts `true`/`false`, not `1`/`0`, and was discarded.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.32s fps=231.91`, below the accepted fixed-copy band.
+- Learning: The separate graph stream plus explicit handoff remains the better schedule for this depth-2 pipeline. The extra event edges are not the limiter, and folding graph replay onto the caller stream slows the full run.
