@@ -2091,3 +2091,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External process environment only; ran the requested benchmark with `MALLOC_ARENA_MAX=1`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: same-session default baseline measured `frames=538 elapsed=2.21s fps=243.57`; `MALLOC_ARENA_MAX=1` measured `frames=538 elapsed=2.20s fps=244.77`, then repeated at `frames=538 elapsed=2.21s fps=243.95`; default rerun measured `frames=538 elapsed=2.20s fps=244.01`.
 - Learning: The first arena-limited run was noise rather than a stable allocator improvement. Host allocator tuning does not move the current graph-bound ceiling, and the target command should not require an external glibc allocator environment variable.
+
+### Rejected: OpenCV Single Thread Runtime Probe
+
+- Hypothesis: The benchmark source is an OpenCV-decoded video and the process default reports `cv2.getNumThreads() == 8`. Restricting OpenCV to one thread might reduce CPU scheduling contention between video decode and the two depth-2 workflow workers.
+- Change tested: Temporary launcher only; called `cv2.setNumThreads(1)` before executing `development/stream_interface/rfdetr_nano_seg_trt_workflow.py` via `runpy`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `cv2.setNumThreads(1)` measured `frames=538 elapsed=2.20s fps=244.91`; immediate default rerun measured `frames=538 elapsed=2.20s fps=245.00`.
+- Learning: OpenCV thread-pool size is not a limiter in the accepted graph-bound run. Keep the normal OpenCV default rather than adding benchmark-specific thread configuration.
