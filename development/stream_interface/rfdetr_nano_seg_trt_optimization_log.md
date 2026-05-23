@@ -593,3 +593,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The change does not affect model execution or prediction contents; it only skips status-update allocation when no handlers exist.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=216.14`, below the current checkpoint.
 - Learning: This status payload is not the current bottleneck, or the branch perturbs the tight loop. Keep the existing status update behavior.
+
+### Rejected: Prebind Single-Step Workflow Manifest Values
+
+- Hypothesis: The single-step workflow runner fast path still reads manifest attributes and `step.run` from closure objects every frame. Capturing the static values once when the fast path is built could reduce Python attribute lookup overhead.
+- Change tested: Temporary code only; captured `step.run` and all static manifest parameters into local closure variables, then used those locals for the per-frame model block call.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.09`, below the current checkpoint.
+- Learning: Attribute lookup in this closure is not the limiting cost. Keep the clearer manifest-based call.
