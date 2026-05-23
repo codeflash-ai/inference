@@ -496,3 +496,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; stored `_rfdetr_trt_fast_path_model` and `_rfdetr_trt_fast_path_model_id` after first lookup, skipped `add_model(...)` when the cached ID matched, and reused the cached adapter.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.55s fps=210.59`, below the simpler pre-request fast path.
 - Learning: The added per-frame Python attribute checks and branches outweigh the manager lookup savings in this benchmark. Keep the direct manager call.
+
+### Rejected: Submit Next Workflow Batch Before Sink Emit
+
+- Profile: Captured the current pre-request fast path with Nsight Systems at `/tmp/rfdetr_request_bypass_20260523_041056.nsys-rep` and exported `/tmp/rfdetr_request_bypass_20260523_041056.sqlite`. Under profiler, depth `2` measured `frames=538 elapsed=3.01s fps=178.65`. After skipping the first 100 graph launches, CUDA graph duration was stable at p50 `3590.535 us`, while graph end-to-next-start gap was p50 `1116.078 us`, p90 `3721.247 us`, p95 `4175.294 us`, p99 `5359.476 us`.
+- Hypothesis: In the multi-worker `InferencePipeline` loop, emitting a completed ordered result before submitting the next batch may leave a worker slot idle and widen the graph replay gap. Submitting the next batch immediately after a slot frees, then emitting the ordered sink result, could reduce CPU-side bubbles while preserving `max_inflight_workflow_batches=2`.
+- Change tested: Temporary code only; collected completed ordered results in `ready_to_emit`, submitted the current frame as soon as the pending count dropped below the worker limit, and emitted the collected results afterward.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.55s fps=210.92` and `frames=538 elapsed=2.54s fps=211.51`, below the current `213.23` FPS checkpoint.
+- Learning: Sink emission is not the source of the remaining graph bubbles for this benchmark. Keep the original simpler ordered scheduler and continue focusing on model/postprocess conversion costs.
