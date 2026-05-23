@@ -173,3 +173,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; created thread-local inference streams and one-entry `TRTCudaGraphCache` instances, using the model lock only when a thread-local graph cache was empty.
 - Result: Severe regression. The requested command only reached `[progress] frames=50 fps=2.09` during graph capture/warmup, so the run was stopped and the patch reverted.
 - Learning: Per-worker CUDA graph capture/context setup is far too expensive for this path, and concurrent graph replay needs a pre-warmed context/graph pool rather than lazy per-thread capture in the hot pipeline.
+
+### Rejected: Guarded Threshold-First RFDETR Instance Postprocess
+
+- Hypothesis: The benchmark confidence threshold is high enough that only a few RFDETR query/class scores survive, so selecting scores above threshold first could avoid the global top-k/radix-sort work visible in Nsight Systems.
+- Change tested: Temporary `common.py` helper for dense/RLE instance segmentation that selected candidates above the minimum threshold, used that path only when the candidate count was no larger than `num_queries`, sorted survivors by confidence, and otherwise fell back to the existing `select_topk_predictions(...)` semantics.
+- Correctness: Compared the temporary selector against the previous top-k selector on raw TRT outputs for all 538 frames from `vehicles_312px.mp4`: detection counts matched, class IDs matched exactly, max box delta was `0` px, confidences matched exactly, and dense masks matched exactly.
+- Result on requested command: Two exact passes measured `frames=538 elapsed=3.49s fps=154.33` and `frames=538 elapsed=3.49s fps=153.98`, below the current best committed path.
+- Learning: Even with exact outputs, the extra CUDA `nonzero`/candidate-selection work and synchronization risk do not beat PyTorch's current global top-k path end-to-end. A profitable version likely needs a fused CUDA/Triton kernel that thresholds, remaps, compacts, and gathers boxes/masks in one pass without host-visible candidate counting.
