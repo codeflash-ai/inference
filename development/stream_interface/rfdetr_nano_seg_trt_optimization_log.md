@@ -2106,3 +2106,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This changed only stream placement for the same TensorRT graph capture/replay, input copy, and output clones. `py_compile` passed before the benchmark, and the run completed normally.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.33`, below the immediate accepted default run of `frames=538 elapsed=2.20s fps=245.00`.
 - Learning: The dedicated TensorRT graph stream is part of the stable overlap schedule. Collapsing graph replay onto the caller inference stream does not reduce the graph-bound tail and slightly underperforms, so the accepted dedicated graph stream remains.
+
+### Rejected: Python Malloc Runtime Knob
+
+- Hypothesis: Prediction materialization still creates many small Python objects and NumPy arrays. Running the process with `PYTHONMALLOC=malloc` might reduce small-object allocator contention or interact better with glibc under the two-worker depth-2 pipeline.
+- Change tested: External process environment only; ran the requested benchmark with `PYTHONMALLOC=malloc`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `PYTHONMALLOC=malloc` first measured `frames=538 elapsed=2.19s fps=245.44`, but repeated at `frames=538 elapsed=2.21s fps=243.90`; immediate default rerun measured `frames=538 elapsed=2.21s fps=243.77`.
+- Learning: The first allocator result was not repeatable and stays inside normal run-to-run variance. Python allocator selection is not a stable improvement, and the target command should keep the default allocator.
