@@ -1101,3 +1101,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; set `graph_context.enqueue_emits_profile = False` immediately after creating the TensorRT graph execution context and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.89`, `frames=538 elapsed=2.33s fps=230.91`, and `frames=538 elapsed=2.34s fps=230.12`, below the accepted fixed-copy band.
 - Learning: The flag is not useful for this no-profiler replay path and appears to perturb TensorRT execution or capture behavior negatively. Keep the default context setting.
+
+### Rejected: Local T4 FP16 TensorRT Opt2 Rebuild
+
+- Hypothesis: The remaining bottleneck is TensorRT graph replay, so a medium-optimization local T4 FP16 rebuild from the available ONNX package might produce a faster correct engine without the long opt5 build time.
+- Change tested: Built `/tmp/rfdetr_trt_rebuild_t4_fp16_opt2/engine.plan` from `/tmp/rfdetr_onnx_pkg_5362b72bfb9f01d2e0b8cba2048d932c/weights.onnx` with TensorRT `10.12.0.36`, static shape `1x3x312x312`, FP16 enabled, workspace `4 GiB`, and `builder_optimization_level=2`. Build completed in `90.58s` and produced a `66,959,004` byte plan.
+- Correctness: Direct comparison against the accepted cached T4 FP16 engine over all 538 frames failed: `bad_counts=8`, `bad_classes=15`, `bad_masks=345`, `bad_boxes_gt5=23`, `max_box_delta=251.0`, `max_conf_delta=0.10609796643257141`; first failure was frame `0` with accepted count `4` vs candidate count `5`.
+- Result: Not benchmarked further because it violates the explicit class/mask/box correctness gate.
+- Learning: Like the previous opt0/opt1 rebuilds, the available ONNX package is not a safe source for a drop-in engine compatible with the accepted packaged T4 FP16 plan. Further engine replacement needs the exact source/export settings for the accepted plan or a correctness-preserving engine package.
