@@ -601,3 +601,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.09`, below the current checkpoint.
 - Learning: Attribute lookup in this closure is not the limiting cost. Keep the clearer manifest-based call.
+
+### Rejected: Torch Inference Mode Around RFDETR Fast Path
+
+- Hypothesis: The RFDETR workflow fast path enters PyTorch/TensorRT preprocessing, forward, postprocess, and tensor-to-NumPy conversion without an explicit `torch.inference_mode()` guard. Adding it could reduce autograd/version-counter overhead around the CUDA graph and fused kernels.
+- Change tested: Temporary code only; imported `torch` in the workflow block and wrapped the RFDETR TRT fast path pre-process, forward, post-process, and conversion in `with torch.inference_mode():`.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.70`, below the current checkpoint.
+- Learning: The per-frame inference-mode context or its interaction with graph-replayed tensors costs more than any autograd savings. Keep the existing fast path without an extra context manager.
