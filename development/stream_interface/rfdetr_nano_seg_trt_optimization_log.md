@@ -1423,3 +1423,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_PREWARMED_TRT_GRAPH_POOL=1`, the RFDETR TRT model created two one-entry graph caches and two inference streams on the first forward pass, captured both graphs before the first result, then assigned stable slots to worker threads. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.65s fps=202.96`, far below the accepted fixed-copy band.
 - Learning: The TensorRT graph body already saturates the relevant T4 resources, or concurrent graph/context scheduling interferes with TensorRT's own auxiliary streams. Keep the single serialized TensorRT CUDA graph path with depth-2 CPU/GPU pipelining.
+
+### Rejected: TensorRT External Context Device Memory
+
+- Hypothesis: Creating the CUDA graph execution context with `create_execution_context_without_device_memory()`, allocating the activation memory explicitly as a long-lived Torch CUDA tensor, and binding it with `set_device_memory(...)` might improve graph replay stability or memory placement versus TensorRT's internal context allocation.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_EXTERNAL_DEVICE_MEMORY=1`, `_capture_cuda_graph(...)` used an external device-memory allocation sized from `update_device_memory_size_for_shapes()` and `engine.device_memory_size_v2`, kept alive on the graph state. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: first run `frames=538 elapsed=2.29s fps=234.64`, repeat `frames=538 elapsed=2.33s fps=230.51`, not stable enough to keep over the accepted fixed-copy band.
+- Learning: TensorRT's internal context memory allocation is not the graph replay limiter for this static RFDETR engine. Keep the simpler default execution-context allocation.
