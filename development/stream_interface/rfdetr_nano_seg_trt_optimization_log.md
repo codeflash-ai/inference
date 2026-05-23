@@ -880,3 +880,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.41s fps=223.26`, `frames=538 elapsed=2.45s fps=219.47`, and `frames=538 elapsed=2.42s fps=222.56`; the low outlier makes it less stable than the committed float-box checkpoint.
 - Learning: The query-index cast remains schedule-sensitive even after removing box rounding. Keep the int64 conversion and preserve the more stable float-box checkpoint.
+
+### Rejected: Fuse Sigmoid Into Selector After Mask Limit
+
+- Hypothesis: After limiting mask resize work and skipping deferred box rounding, the PyTorch sigmoid over logits is one of the larger remaining postprocess kernels. Fusing sigmoid into `_select_topk_boxes_kernel` could remove that kernel in the current regime, even though it lost before the mask-grid optimization.
+- Change tested: Temporary code only; added an `apply_sigmoid` constexpr to `_select_topk_boxes_kernel`, passed raw logits into the fused selector, and computed `1 / (1 + exp(-logit))` inside Triton before top-k selection. The fallback path lazily computed PyTorch sigmoid only when fused postprocess was unavailable.
+- Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.31` and `frames=538 elapsed=2.44s fps=220.10`, below the committed float-box checkpoint.
+- Learning: The extra `exp` work inside the selector is still more expensive than the standalone PyTorch sigmoid kernel in the full pipeline. Keep sigmoid outside the selector.
