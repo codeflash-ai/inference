@@ -186,7 +186,10 @@ def _pre_process_numpy(
             static_crop_offset=static_crop_offset,
         )
 
-    resized = TF.resize(pil, (target_size.height, target_size.width), antialias=True)
+    resized = pil.resize(
+        (target_size.width, target_size.height),
+        resample=Image.Resampling.BILINEAR,
+    )
     tensor = _pil_image_to_normalized_tensor(
         image=resized,
         network_input=network_input,

@@ -253,3 +253,28 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Pipeline tuning: Default depth `2` measured `frames=538 elapsed=2.81s fps=191.24`; serial depth `3` measured `frames=538 elapsed=2.94s fps=182.96`, so depth `2` remains best.
 - Result on requested command: `frames=538 elapsed=2.81s fps=191.24`.
 - Learning: Keeping the PIL resize source-of-truth while reducing conversion overhead gives a real pipeline gain; after postprocess fusion, small CPU preprocessing savings matter because they improve producer/consumer balance at depth `2`.
+
+### Rejected: Exact-Capacity Fused Mask Resize
+
+- Hypothesis: The benchmark emits only 1-7 detections per frame, but the deferred fused workflow path launches `_resize_selected_masks_kernel` over the full 100-detection capacity. Synchronizing the selected count before mask resize, allocating exactly that many mask planes, and launching only those programs could reduce the dominant custom kernel time.
+- Change tested: Temporary code only; in deferred fused postprocess, copied the selected count to CPU before mask resize, sliced detection tensors immediately, and passed an exact `output_capacity` to `fused_resize_selected_masks(...)`.
+- Correctness: Compared non-deferred exact-sized postprocess against the exact-capacity deferred path on all 538 frames: max selected count `7`, class IDs exact, max box delta `0` px, confidences exact, and dense masks exact.
+- Pipeline tuning: Depth `2` measured `frames=538 elapsed=3.27s fps=164.47`; depth `3` measured `frames=538 elapsed=3.12s fps=172.18`.
+- Learning: The earlier CPU count synchronization breaks the useful overlap from the deferred path. Even though it reduces mask resize work, preserving the GPU-side count until workflow conversion is faster overall.
+
+### Rejected: OpenCV RFDETR Resize Fast Path
+
+- Hypothesis: Replacing PIL resize with OpenCV bilinear resize in RFDETR preprocessing could reduce CPU producer time while preserving class IDs and keeping boxes within 5 px.
+- Change tested: Temporary script-only prototype; resized the `312x176` video frames to the `312x312` TRT input with `cv2.resize`, then applied the same BGR-to-RGB swap and normalization.
+- Correctness: Compared against the current PIL path on all 538 frames. Counts differed on 7 frames, class IDs differed on 14 frames, and max box delta reached `183` px.
+- Micro-result: Prototype preprocessing measured `2.969 ms/frame` vs current `2.013 ms/frame` over 128 frames.
+- Learning: PIL interpolation is part of the effective RFDETR input contract for this checkpoint. OpenCV is both slower here and not prediction-compatible.
+
+### Direct PIL RFDETR Resize
+
+- Hypothesis: The torchvision `TF.resize(...)` PIL wrapper adds Python overhead around a PIL bilinear resize. Calling `PIL.Image.resize(...)` directly should preserve pixels while shaving preprocessing overhead.
+- Change: In the RFDETR numpy preprocessing branch, replaced `TF.resize(pil, ...)` with direct `pil.resize((width, height), Image.Resampling.BILINEAR)` before the existing NumPy normalize/CHW conversion.
+- Correctness: Reproduced the old `TF.resize(..., antialias=True)` path over all 538 frames and compared tensors against the patched model preprocessing: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Pipeline tuning: Depth `2` measured `frames=538 elapsed=2.78s fps=193.48`; depth `3` measured `frames=538 elapsed=2.97s fps=181.10`, so depth `2` remains best.
+- Result on requested command: best isolated run `frames=538 elapsed=2.78s fps=193.48`; repeat isolated run measured `frames=538 elapsed=2.82s fps=190.99`.
+- Learning: Removing the torchvision wrapper is a small, exact CPU-side cleanup. The end-to-end gain is near run-to-run noise, but the highest isolated benchmark moved slightly upward and the change is byte-equivalent for the model input.
