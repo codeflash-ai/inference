@@ -1496,3 +1496,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: `frames=538 elapsed=2.33s fps=230.87`.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4070.910 us`, p90 `4133.057 us`, p95 `4136.255 us`, p99 `4141.648 us`, mean `4065.406 us`; graph end-to-next-start gap was p50 `40.480 us`, p90 `41.888 us`, p95 `42.374 us`, p99 `42.952 us`, mean `40.920 us`. Busy work inside the gap was p50 `35.072 us`, mean `35.486 us`; idle inside the gap was p50 `5.312 us`, mean `5.434 us`.
 - Learning: The restored accepted path is already graph-bound at depth `2`: graph replay takes roughly `4.07 ms`, while the post-graph tail is roughly `40 us` with only about `5 us` idle. The remaining gap is mostly required input copy, output clones, sigmoid/selector setup, and small postprocess kernels rather than CPU bubbles.
+
+### Rejected: Keep Deferred Query Indices Int32
+
+- Hypothesis: The deferred fused mask-resize path does not need `query_indices` as `int64`; returning the selector's native `int32` query-index tensor could remove the int32-to-int64 cast kernel from the post-graph tail.
+- Change tested: Temporary code only; when `return_cpu_count=False`, `fused_select_topk_boxes(...)` returned the int32 `query_indices` tensor directly. The non-deferred indexing path still used the existing int64 conversion. Pipeline depth remained fixed at `2`.
+- Result on requested command: first run `frames=538 elapsed=2.31s fps=232.65`, repeat `frames=538 elapsed=2.32s fps=231.65`, not better than the accepted fixed-copy band.
+- Learning: Removing this tiny cast is below end-to-end noise because the run is dominated by TensorRT graph replay and required copies. Keep the existing int64 return type for consistency with the non-deferred path.
