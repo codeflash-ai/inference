@@ -2061,3 +2061,18 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Graph spacing: The capture includes `602` CUDA graph traces: `64` capture warmup replays plus `538` frame replays. After skipping the `64` warmups plus the next `100` frame launches, CUDA graph duration was p50 `4068.463 us`, p90 `4132.048 us`, p95 `4135.371 us`, p99 `4140.723 us`, mean `4069.635 us`; graph end-to-next-start gap was p50 `40.544 us`, p90 `41.996 us`, p95 `42.374 us`, p99 `43.007 us`, mean `40.722 us`.
 - Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `35.200 us`, mean `35.294 us`; idle inside the gap was p50 `5.328 us`, mean `5.381 us`. The largest gap occupants were next-frame input D2D copy (`1168128B`, `13.133 us` avg overlap), TensorRT mask D2D clone (`2433600B`, `13.133 us`), sigmoid (`6.933 us`), fill-long (`2.846 us`), logits D2D clone (`36400B`, `2.110 us`), boxes D2D clone (`1600B`, `1.995 us`), fill-int (`1.947 us`), and selector (`1.804 us`).
 - Learning: The refreshed depth-2 profile matches the accepted graphbound shape. The graph-to-graph gap remains about `1%` of the TensorRT graph body, with roughly `5 us` median idle after required ownership copies and fused postprocess work. The practical limiter is still the TensorRT CUDA graph forward pass plus the narrow GPU copy/postprocess tail, not pipeline depth.
+
+### Rejected: CUDA Device Max Connections Runtime Knob
+
+- Hypothesis: The accepted depth-2 path uses separate CUDA streams for preprocessing, TensorRT graph replay, postprocess, and D2H conversion. Changing `CUDA_DEVICE_MAX_CONNECTIONS` before process startup might alter stream work-queue scheduling enough to tighten the graph-to-graph cadence.
+- Change tested: External process environment only; ran the requested benchmark with `CUDA_DEVICE_MAX_CONNECTIONS=1`, then with `CUDA_DEVICE_MAX_CONNECTIONS=32`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: same-session default baseline measured `frames=538 elapsed=2.20s fps=244.42`; `CUDA_DEVICE_MAX_CONNECTIONS=1` measured `frames=538 elapsed=2.36s fps=227.71`; `CUDA_DEVICE_MAX_CONNECTIONS=32` measured `frames=538 elapsed=2.21s fps=243.16`.
+- Learning: Reducing the number of device work queues is actively harmful for this overlapped depth-2 schedule, and increasing it does not improve the accepted graph-bound cadence. Keep the default CUDA connection setting.
+
+### Rejected: Skip No-Op RFDETR Numpy Preprocessing Helper
+
+- Hypothesis: The accepted RFDETR package has no static crop, grayscale, contrast, or two-step resize, so `_pre_process_numpy(...)` calls `apply_pre_processing_to_numpy_image(...)` only to return the same image and a zero static-crop offset. A guarded fast path for this no-op case could reduce CPU preprocessing overhead without changing pixels or metadata.
+- Change tested: Temporary code only; added `_can_skip_numpy_pre_processing(...)` in `rfdetr/pre_processing.py` and bypassed the generic helper when all numpy preprocessing operations were inactive after overrides. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: Compared the fast path against the generic helper on `16` frames from `vehicles_312px.mp4`; normalized tensor max diff was `0.0` and preprocessing metadata matched exactly.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.21s fps=243.65` and `frames=538 elapsed=2.21s fps=243.64`, below the same-session default baseline of `frames=538 elapsed=2.20s fps=244.42`.
+- Learning: This helper call is not a measurable limiter in the current graph-bound run. The added branch slightly worsens scheduling/noise, so the generic helper remains the accepted path.
