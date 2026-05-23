@@ -1890,3 +1890,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed the four bbox coordinate loads inside `_select_topk_boxes_kernel` to `tl.load(..., mask=keep, other=0.0)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: first run after the Triton codegen change measured `frames=538 elapsed=2.30s fps=234.07`; warmed repeat measured `frames=538 elapsed=2.21s fps=243.99`, below the same-session clean run of `frames=538 elapsed=2.20s fps=244.55`.
 - Learning: Predicating these scalar bbox loads does not improve the depth-2 graph-bound path. Any saved load work is below noise or offset by changed Triton codegen. Reverted to the simpler unconditional bbox loads.
+
+### Rejected: NVIDIA TF32 Override Runtime Knob
+
+- Hypothesis: The remaining TensorRT CUDA graph body includes FP32/Tensor-Core kernels. Setting `NVIDIA_TF32_OVERRIDE` before process startup might alter TF32 dispatch and improve the graph-bound ceiling without code changes.
+- Change tested: External process environment only; ran the requested benchmark with `NVIDIA_TF32_OVERRIDE=0`, then with `NVIDIA_TF32_OVERRIDE=1`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result: Same-session default baseline measured `frames=538 elapsed=2.19s fps=245.20`. Both override runs failed before processing frames: TensorRT/Myelin reported `Inconsistent setting of NVIDIA_TF32_OVERRIDE env var at build -1 and at execution 0` for `0`, and the same build/execution mismatch plus `NVIDIA_TF32_OVERRIDE set to unrecognized value: "1"` for `1`.
+- Learning: The accepted serialized T4 FP16 engine must run with the build-time/default TF32 override state. This is not a viable runtime tuning knob for the packaged engine.
