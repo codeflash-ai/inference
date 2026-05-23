@@ -2098,3 +2098,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary launcher only; called `cv2.setNumThreads(1)` before executing `development/stream_interface/rfdetr_nano_seg_trt_workflow.py` via `runpy`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: `cv2.setNumThreads(1)` measured `frames=538 elapsed=2.20s fps=244.91`; immediate default rerun measured `frames=538 elapsed=2.20s fps=245.00`.
 - Learning: OpenCV thread-pool size is not a limiter in the accepted graph-bound run. Keep the normal OpenCV default rather than adding benchmark-specific thread configuration.
+
+### Rejected: Capture TensorRT Graph On Caller Stream
+
+- Hypothesis: The TensorRT CUDA graph cache creates a dedicated graph stream, then each RFDETR cache hit waits that graph stream on the model inference stream and waits the inference stream back on the graph stream. Capturing and replaying the graph on the current inference stream could turn those into self-waits in the RFDETR path and remove small event edges without changing graph outputs.
+- Change tested: Temporary code only; changed `_capture_cuda_graph(...)` to use `torch.cuda.current_stream(device)` instead of creating a new `torch.cuda.Stream(device=device)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: This changed only stream placement for the same TensorRT graph capture/replay, input copy, and output clones. `py_compile` passed before the benchmark, and the run completed normally.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.33`, below the immediate accepted default run of `frames=538 elapsed=2.20s fps=245.00`.
+- Learning: The dedicated TensorRT graph stream is part of the stable overlap schedule. Collapsing graph replay onto the caller inference stream does not reduce the graph-bound tail and slightly underperforms, so the accepted dedicated graph stream remains.
