@@ -1052,3 +1052,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed the `query_indices` allocation in `fused_select_topk_boxes(...)` from `torch.zeros(...)` to `torch.empty(...)` and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.59`, `frames=538 elapsed=2.30s fps=234.09`, and `frames=538 elapsed=2.27s fps=236.77`, not a stable improvement over the accepted fixed-copy band.
 - Learning: Removing the fill does not reliably tighten the graph-to-graph interval in the current fixed-copy path. Keep the deterministic zero-filled buffer.
+
+### Rejected: Limited Mask Allocation Retest After Fixed Copy
+
+- Hypothesis: With the fixed 7-row prediction copy, the deferred mask resize output only needs the first `detection_limit` rows on the normal path. Allocating `(detection_limit, H, W)` instead of `(100, H, W)` could reduce allocator/cache pressure without changing copied predictions.
+- Change tested: Temporary code only; moved detection-limit clamping before the output allocation in `fused_resize_selected_masks(...)`, allocated only the limited row count, and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.93`, `frames=538 elapsed=2.26s fps=237.60`, and `frames=538 elapsed=2.31s fps=232.63`, not a stable improvement over the accepted fixed-copy band.
+- Learning: The fixed full-capacity allocation remains more stable in the two-frame pipeline despite unused rows. Keep the current output shape and rely on the limited launch grid for the actual kernel work reduction.
