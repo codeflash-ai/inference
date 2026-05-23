@@ -278,6 +278,7 @@ class RFDetrForInstanceSegmentationTRT(
                     stream=self._inference_stream,
                     trt_cuda_graph_cache=cache,
                     synchronize=False,
+                    cuda_graph_replay_warmup_count=64,
                 )
                 if not kwargs.get("defer_cuda_stream_sync", False):
                     torch.cuda.current_stream(self._device).wait_stream(

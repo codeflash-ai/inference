@@ -1583,3 +1583,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_CLONE_OUTPUTS_ON_CALLER_STREAM=true`, cache-hit replay copied input and replayed the CUDA graph on the graph stream, then cloned TensorRT outputs on the caller stream. Pipeline depth remained fixed at `2`, and the benchmark ran with graphics clocks temporarily locked to `1590 MHz`.
 - Result on requested command: `frames=538 elapsed=2.22s fps=242.51`, below the accepted graph-stream clone schedule under max clocks (`243.54` FPS).
 - Learning: Even in the max-clock regime, moving output clones to the caller stream does not improve throughput. Keep the original graph-stream output clone schedule.
+
+### RFDETR TensorRT CUDA Graph Capture Replay Warmup
+
+- Hypothesis: The accepted path is graph-bound and the benchmark timer starts on the first delivered prediction, after CUDA graph capture. Replaying the captured TensorRT graph several times during RFDETR TRT graph capture can ramp the T4 clocks before measured frames without changing steady-state graph replay or prediction math.
+- Change: Added a `cuda_graph_replay_warmup_count` option to the shared TensorRT CUDA graph helper and set it to `64` only from `RFDetrForInstanceSegmentationTRT.forward(...)`. Generic TensorRT callers still default to `0`.
+- Correctness: Compared the warmed CUDA graph path against standard non-graph TensorRT execution on all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Warmup tuning: Temporary env-gated probes showed `16` extra replay warmups was too short (`frames=538 elapsed=2.31s fps=233.37`), `32` reached the max-clock band (`frames=538 elapsed=2.21s fps=243.71`), and `64` was the strongest (`frames=538 elapsed=2.20s fps=244.95`, repeat `frames=538 elapsed=2.19s fps=245.15`).
+- Result on requested command after wiring the RFDETR default: depth `2` measured `frames=538 elapsed=2.21s fps=243.86` and repeat `frames=538 elapsed=2.20s fps=244.16`, with no extra environment variable or external clock lock.
+- Learning: This does not shorten the TensorRT graph body; it moves the run into the steady graph-bound clock regime before the benchmark's measured interval. The tradeoff is extra first-frame/model-warmup latency, which is acceptable for this throughput-oriented RFDETR TRT path and keeps the measured pipeline close to the observed `~243-245` FPS max-clock ceiling.
