@@ -992,3 +992,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared packed metadata conversion against the original direct tensor-copy conversion on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.11` and `frames=538 elapsed=2.29s fps=234.62`, below the accepted fixed-copy checkpoint.
 - Learning: The extra Triton launch costs more than the saved small D2H submissions. The existing fixed-copy path is already balanced enough that reducing copy count this way loses throughput.
+
+### Rejected: Skip Output Record Stream After Fixed Copy
+
+- Hypothesis: After fixed-limit prediction copy collapsed the graph-to-graph gap, the `record_stream(...)` calls on TensorRT output clones might be unnecessary in the RFDETR workflow fast path because postprocess explicitly waits on the inference stream before CPU conversion.
+- Change tested: Temporary code only; skipped `result_element.record_stream(self._post_process_stream)` when `defer_cuda_stream_sync=True` in `RFDetrForInstanceSegmentationTRT.post_process(...)`. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction tensors and kernels were unchanged; the experiment only changed allocator stream-lifetime bookkeeping for the output clone tensors.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=235.14` and `frames=538 elapsed=2.31s fps=233.07`, below the accepted fixed-copy checkpoint.
+- Learning: `record_stream(...)` is not the remaining limiter, and skipping it still perturbs scheduling enough to lose low-end stability. Keep the original stream lifetime bookkeeping.
