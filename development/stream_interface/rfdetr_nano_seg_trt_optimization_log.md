@@ -1473,3 +1473,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared gated postprocess against accepted postprocess on all `538` frames. Caps `16`, `8`, and `7` all matched exactly: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: cap `16` measured `frames=538 elapsed=2.30s fps=233.68`; cap `8` measured `frames=538 elapsed=2.31s fps=233.31`; cap `7` measured `frames=538 elapsed=2.31s fps=233.37`, not better than the accepted fixed-copy band.
 - Learning: Even when the selector does fewer loop iterations, the end-to-end run remains constrained by the TensorRT CUDA graph and output-copy scheduling. Keep the original conservative `100`-iteration selector bound for general correctness.
+
+### Profile: Current Accepted Depth-2 Graph Gap
+
+- Request: Refresh Nsight Systems evidence for the current accepted implementation after the recent rejected output-copy and selector-cap experiments, keeping pipeline depth fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_134108.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_134108.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_134108_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_134108_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_134108_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.30s fps=234.29`.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4102.607 us`, p90 `4117.545 us`, p95 `4121.161 us`, p99 `4127.790 us`, mean `4070.076 us`; graph end-to-next-start gap was p50 `40.479 us`, p90 `41.913 us`, p95 `42.303 us`, p99 `43.076 us`, mean `40.907 us`. Busy work inside the gap was p50 `35.072 us`, mean `35.500 us`; idle inside the gap was p50 `5.247 us`, mean `5.407 us`.
+- Learning: The current accepted path is still bottlenecked by the TensorRT CUDA graph body. The post-graph tail remains about `40 us` and only about `5 us` of that is idle, so further end-to-end wins need to reduce TensorRT graph duration or remove required input/output copies without adding synchronization.
