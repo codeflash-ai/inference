@@ -2028,3 +2028,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This does not change model inputs, TensorRT execution, postprocess, or predictions; it only bypasses generic padding bookkeeping when no padding is needed.
 - Result on requested command: same-session clean baseline measured `frames=538 elapsed=2.21s fps=243.90`; shortcut runs measured `frames=538 elapsed=2.21s fps=243.91` and `frames=538 elapsed=2.21s fps=243.00`.
 - Learning: Generic static-batch bookkeeping is below the current limiter. The accepted helper structure remains clearer and at least as fast in the graph-bound depth-2 run.
+
+### Profile: Main-Thread CPU Refresh
+
+- Request: Refresh CPU-side evidence for the current accepted implementation while keeping workflow pipeline depth fixed at `2`. Depth `3` was not tested.
+- Profile: `/tmp/rfdetr_depth2_current_20260523_1856.prof`, captured with Python `cProfile` around the requested benchmark command.
+- Result under profiling: `frames=538 elapsed=2.20s fps=244.61`, inside the accepted warmed band.
+- Findings: Standard `cProfile` mostly captured startup/import and the main result-dispatch queue, not the worker-thread CUDA hot path. The main-thread sink itself was negligible (`538` calls, about `0.005 s` cumulative), and the top cumulative runtime after import was queue waiting in `_dispatch_inference_results`.
+- Learning: The remaining limiter is not main-thread result sink work. This profile is consistent with the Nsight Systems evidence that the run is constrained by the TensorRT CUDA graph body plus the short GPU copy/postprocess tail; worker-thread CPU hot-path work is already mostly hidden by the depth-2 pipeline.
