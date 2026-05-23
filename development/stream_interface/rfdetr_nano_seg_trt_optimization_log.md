@@ -1016,3 +1016,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared deferred fused postprocess against the PyTorch fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=234.23`, below the accepted fixed-copy checkpoint.
 - Learning: The runtime branch/predication costs more than the skipped empty-row arithmetic for this small fixed grid. Keep the mask-based kernel.
+
+### Rejected: Explicit TensorRT Aux Streams During CUDA Graph Capture
+
+- Hypothesis: The packaged RFDETR TensorRT engine reports `num_aux_streams=4`; explicitly providing persistent non-default auxiliary streams during CUDA graph capture might shorten the TensorRT graph replay duration, which is now the dominant bottleneck.
+- Change tested: Temporary code only; added auxiliary CUDA streams to the graph state, called `IExecutionContext.set_aux_streams(...)` before the warmup and capture `execute_async_v3(...)` calls, and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.27s fps=237.02`, then `frames=538 elapsed=2.29s fps=234.91` and `frames=538 elapsed=2.29s fps=235.38`, which is not a stable improvement over the accepted fixed-copy band.
+- Learning: TensorRT's default stream behavior for this serialized engine is already good enough, or explicit aux-stream handles perturb capture/scheduling without reducing the real graph replay bottleneck. Keep the simpler existing CUDA graph capture path.
