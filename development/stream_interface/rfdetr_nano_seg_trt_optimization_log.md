@@ -303,3 +303,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Deferred workflow postprocess vs exact-sized postprocess on all 538 frames matched class IDs, boxes, and dense masks exactly; max box delta `0` px.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.80s fps=192.18` and `frames=538 elapsed=2.83s fps=189.79`, below the current checkpoint band.
 - Learning: Removing this small cast does not improve end-to-end throughput; the scheduling and pipeline balance dominate over this tiny kernel.
+
+### Rejected: Deterministic Local Workflow Detection IDs
+
+- Hypothesis: The direct local workflow fast path still creates a UUID per detection. Reusing the request inference ID plus a detection index would reduce Python UUID work during CPU-side `sv.Detections` construction.
+- Change tested: Temporary code only; when `inference_id` was present, generated detection IDs as `"{inference_id}-{index}"` in the local instance segmentation workflow fast path.
+- Correctness: The change runs after tensor-to-NumPy conversion and does not affect model classes or boxes.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.79s fps=193.07` and `frames=538 elapsed=2.83s fps=189.99`, not a clear improvement.
+- Learning: UUID generation is not a measurable limiter after the fused/deferred path; keep the existing identifier behavior.
