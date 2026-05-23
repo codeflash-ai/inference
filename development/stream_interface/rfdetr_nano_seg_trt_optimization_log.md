@@ -1691,3 +1691,17 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary env-gated code only; with `RFDETR_CAPTURE_DEFERRED_POSTPROCESS_GRAPH=True`, TensorRT cache-hit replay copied graph outputs into per-thread reusable buffers, and RFDETR deferred postprocess attempted to capture the sigmoid, fused selector, and fused mask resize operations keyed by those stable input pointers. The first attempt failed before any frames due concurrent depth-2 worker graph captures tripping PyTorch's CUDA caching allocator assertion; a second attempt serialized first-time captures with a global lock.
 - Result on requested command after serializing capture: `frames=538 elapsed=2.29s fps=235.36`, far below the accepted warmed band.
 - Learning: Capturing postprocess launch work adds too much startup/scheduling complexity and requires static output-buffer choreography that perturbs the current well-balanced depth-2 pipeline. Keep the accepted simple postprocess launch sequence and cloned TensorRT output tensors.
+
+### Nsight Compute TensorRT Top-Kernel Snapshot
+
+- Request: Use Nsight Compute on the dominant TensorRT graph kernels now that Nsight Systems shows the run is graph-body bound.
+- Profile: `/tmp/rfdetr_ncu_trt_top_20260523_153512.ncu-rep`, exported text `/tmp/rfdetr_ncu_trt_top_20260523_153512_details.txt`, and raw CSV `/tmp/rfdetr_ncu_trt_top_20260523_153512_raw.csv`. Capture used `--set basic`, a regex for the top XMMA/GEMM/MHA TensorRT kernels, `--launch-skip 200`, and `--launch-count 6`.
+- Result under NCU instrumentation: `frames=538 elapsed=5.49s fps=97.98`. The sampled top kernels are small-grid TensorRT kernels: representative `sm75_xmma_gemm_f16f16_f16f32...128x128x32` launches had grid size `72`, `240` registers/thread, `25%` theoretical occupancy, about `21.7%` achieved occupancy, `48%` SM throughput, and `15%` DRAM throughput; `_gemm_mha_v2...` had grid size `66`, `245` registers/thread, `25%` theoretical occupancy, `20.6%` achieved occupancy, `36%` SM throughput, and `6.5%` DRAM throughput.
+- Learning: The remaining TensorRT graph body is dominated by many small, register/shared-memory-limited GEMM/MHA kernels. This points toward engine/tactic/export changes as the only likely large lever; custom postprocess and stream scheduling changes are now below the dominant cost.
+
+### Rejected: CUDA Module Loading Mode
+
+- Hypothesis: Changing `CUDA_MODULE_LOADING` before process startup might alter TensorRT module initialization/capture behavior and improve the warmed graph-bound run without changing outputs.
+- Change tested: External process environment only; ran the accepted benchmark with `CUDA_MODULE_LOADING=EAGER`, then with `CUDA_MODULE_LOADING=LAZY`, keeping pipeline depth fixed at `2`.
+- Result on requested command: `EAGER` measured `frames=538 elapsed=2.20s fps=245.08`; `LAZY` measured `frames=538 elapsed=2.20s fps=244.42`, both below the best accepted warmed band.
+- Learning: CUDA module-loading mode is not a useful runtime knob for this already-warmed graph path. Keep the default environment.
