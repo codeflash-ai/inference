@@ -2507,3 +2507,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `25.50-25.98 us` under NCU replay. Compute throughput was about `24.90-25.65%`, memory throughput about `22.73-23.42%`, DRAM throughput about `20.78-20.91%`, and L2 throughput about `13.86-14.12%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.60` after the profile.
 - Learning: This GEMM is another underfilled TensorRT tactic, with only `32` CTAs for `40` T4 SMs and about `13.8%` achieved occupancy. It further narrows the remaining opportunity to TensorRT tactic/export structure rather than postprocess, CPU scheduling, or pipeline depth.
+
+### Profile: TensorRT Indexed Fprop Implicit GEMM Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `sm75_xmma_fprop_implicit_gemm_indexed_wo_smem_f16f16_f16f16_f16_nhwckrsc_nhwc_tilesize128x32x64_stage1_warpsize4x1x1_g1_tensor16x8x8_alignc8_execute_kernel_trt` as a single TensorRT graph node around `48 us/replay`. Profiling it can show whether this indexed convolution tactic is occupancy-limited like the other TensorRT GEMMs or limited by indexed memory access.
+- Profile: `/tmp/rfdetr_trt_indexed_fprop_graphnode_basic_ncu_20260523_223528.ncu-rep`, details text `/tmp/rfdetr_trt_indexed_fprop_graphnode_basic_ncu_20260523_223528_details.txt`, raw CSV `/tmp/rfdetr_trt_indexed_fprop_graphnode_basic_ncu_20260523_223528_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact kernel name, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.12s fps=38.11`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `72`, block size `128`, `126` registers/thread, `4.096 KiB` dynamic shared memory per block, and `0.45` waves/SM. Achieved occupancy is about `22.60-22.81%`, with active warps/SM about `7.23-7.30`.
+- Throughput: Duration was about `83.30-83.49 us` under NCU replay. Compute throughput was about `36.28-36.48%`, memory throughput about `40.33-40.58%`, DRAM throughput about `16.66-16.72%`, and L2 throughput about `33.66-33.73%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.00` after the profile.
+- Learning: The indexed fprop node has more CTAs than the smallest GEMMs but is still low-occupancy and moderately memory/L2 pressured. It remains a TensorRT-forward tactic issue; the surrounding pipeline is already keeping the CPU and postprocess off the critical path.
