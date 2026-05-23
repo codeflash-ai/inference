@@ -1897,3 +1897,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External process environment only; ran the requested benchmark with `NVIDIA_TF32_OVERRIDE=0`, then with `NVIDIA_TF32_OVERRIDE=1`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result: Same-session default baseline measured `frames=538 elapsed=2.19s fps=245.20`. Both override runs failed before processing frames: TensorRT/Myelin reported `Inconsistent setting of NVIDIA_TF32_OVERRIDE env var at build -1 and at execution 0` for `0`, and the same build/execution mismatch plus `NVIDIA_TF32_OVERRIDE set to unrecognized value: "1"` for `1`.
 - Learning: The accepted serialized T4 FP16 engine must run with the build-time/default TF32 override state. This is not a viable runtime tuning knob for the packaged engine.
+
+### Rejected: CUDA Cache Disable Runtime Knob
+
+- Hypothesis: The accepted TensorRT graph body may depend on CUDA/Myelin module-cache behavior. Launching with `CUDA_CACHE_DISABLE=1` could expose whether the CUDA code cache is adding runtime overhead or changing warmed graph scheduling.
+- Change tested: External process environment only; ran the requested benchmark with `CUDA_CACHE_DISABLE=1`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.53`, compared with the same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
+- Learning: Disabling the CUDA cache is not useful for the accepted warmed graph path. The serialized engine already reaches the same graph-bound steady-state behavior with the default cache policy.
