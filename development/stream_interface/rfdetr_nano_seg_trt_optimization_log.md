@@ -1209,3 +1209,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Prediction math and copy ordering are unchanged; the experiment only moved the explicit synchronization point from the current stream to the producer stream used for postprocess and D2H copy.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.72` and `frames=538 elapsed=2.32s fps=232.03`, below the accepted fixed-copy band. A mistakenly launched pair of concurrent benchmark repeats was killed and ignored.
 - Learning: The current-stream wait is not the limiter. The existing handoff keeps scheduling stable enough, and moving the D2H copies onto the postprocess stream does not reduce the already small graph-to-graph tail. Keep the accepted current-stream wait and fixed-copy path.
+
+### Depth-2 Accepted Nsight Systems Graph-Gap Profile
+
+- Request: Collect another Nsight Systems profile for the current accepted implementation while keeping the pipeline fixed at depth `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_113302.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_113302.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_113302_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_113302_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_113302_stats_cuda_api_sum.csv`.
+- Profiled result: `frames=538 elapsed=2.32s fps=231.77` under Nsight Systems overhead.
+- Graph spacing after skipping the first 100 graph launches: CUDA graph duration p50 `4064.720 us`, p90 `4128.916 us`, p95 `4133.955 us`, p99 `4139.214 us`, mean `4049.406 us`; graph end-to-next-start gap p50 `40.512 us`, p90 `41.951 us`, p95 `42.437 us`, p99 `43.231 us`, mean `40.661 us`.
+- Gap decomposition after skipping the first 100 graph launches: busy work inside the gap p50 `35.104 us`, p90 `36.441 us`, p95 `37.062 us`, p99 `37.981 us`, mean `35.267 us`; idle time inside the gap p50 `5.280 us`, p90 `6.016 us`, p95 `6.176 us`, p99 `6.377 us`, mean `5.393 us`.
+- Learning: The current depth-2 path remains constrained by the TensorRT CUDA graph body, not CPU bubbles. The post-graph tail is short and stable; most of the roughly `40 us` graph-to-graph interval is real GPU work rather than idle.
