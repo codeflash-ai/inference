@@ -2487,3 +2487,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Inspector output: The inspector exports layer names such as backbone attention MatMul/MHA and Myelin fused layers, but it does not include tactic IDs, tactic parameters, or enough per-layer implementation detail to drive tactic-level patching from the packaged plan alone.
 - Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.93` after the diagnostic.
 - Learning: The packaged engine confirms the structural source of the observed graph-body kernels, but it was not built with detailed profiling verbosity. Further TensorRT-forward gains likely require a correctness-equivalent ONNX/export plus a fresh verbose engine build/tactic search, not a local runtime tweak to the existing plan.
+
+### Profile: TensorRT Myelin Transpose/LayerNorm Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_TranCastMeanSubMulMeanAddSqrtDivMulCastMulAdd_*` at about `85 us/replay` aggregated across four graph nodes. Profiling it can distinguish high-occupancy memory-bound Myelin work from the repeated small-grid GEMM/MHA tactics.
+- Profile: `/tmp/rfdetr_trt_myelin_trancast_layernorm_graphnode_basic_ncu_20260523_223005.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_trancast_layernorm_graphnode_basic_ncu_20260523_223005_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_trancast_layernorm_graphnode_basic_ncu_20260523_223005_raw.csv`. The NCU command used graph profiling mode `node`, matched `regex:__myl_TranCastMeanSubMulMeanAddSqrtDivMulCastMulAdd_.*`, skipped `600` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.34s fps=37.51`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `1521`, block size `(32, 4, 1)`, `26` registers/thread, `128 B` dynamic shared memory per block, and `4.75` waves/SM. Achieved occupancy is about `91.29-92.44%`, with active warps/SM about `29.21-29.58`.
+- Throughput: Duration was about `27.10-27.20 us` under NCU replay. Compute throughput was about `44.63-44.93%`, memory and DRAM throughput about `73.35-73.72%`, and L2 throughput about `26.52-26.60%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.22s fps=242.48` after the profile.
+- Learning: This Myelin family fills the GPU well and is memory-bandwidth pressured, unlike the small TensorRT GEMM/MHA families. Replacing it outside the TensorRT graph is unlikely to help unless a rebuilt export can remove or fuse the memory traffic with adjacent graph operations.
