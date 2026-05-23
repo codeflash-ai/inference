@@ -2276,3 +2276,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: `max_threads=1` measured `4.054766 ms` (`246.62 fps`), `2` measured `4.076955 ms` (`245.28 fps`), `4` measured `4.087345 ms` (`244.66 fps`), `8` measured `4.094583 ms` (`244.23 fps`), and `16` measured `4.104315 ms` (`243.65 fps`). The default runtime value is already `1`.
 - Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.73` after the diagnostic.
 - Learning: TensorRT runtime thread count is not an optimization lever for this accepted plan. The default is already the fastest measured setting for the graph-only ceiling, and larger values regress slightly. No code change was kept.
+
+### Rejected: Explicit TensorRT Shape Inference Before Graph Capture
+
+- Hypothesis: Calling `IExecutionContext.infer_shapes()` after setting the static input shape and tensor addresses, before the warmup enqueue and CUDA graph capture, might finalize TensorRT shape state earlier and produce a slightly faster captured graph.
+- Diagnostic: Used the accepted-engine graph-only harness with three modes: baseline, `infer_shapes()`, and `infer_shapes()` plus `get_tensor_strides(...)` inspection for all I/O tensors. This measured only CUDA graph replay of `execute_async_v3(...)`; pipeline depth was not varied and depth `3` was not tested.
+- Correctness: `infer_shapes()` returned an empty list of missing tensors, and tensor strides matched the accepted static layout: input `(292032, 97344, 312, 1)`, boxes `(400, 4, 1)`, logits `(9100, 91, 1)`, masks `(608400, 6084, 78, 1)`.
+- Result: Baseline graph replay measured `4.055898 ms` (`246.55 fps`), `infer_shapes()` measured `4.075415 ms` (`245.37 fps`), and `infer_shapes()` plus stride inspection measured `4.087416 ms` (`244.65 fps`).
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.05` after the diagnostic.
+- Learning: TensorRT already has the static shape state it needs before capture. Explicit shape inference does not improve the captured graph and slightly regresses the graph-only ceiling, so no runtime change was kept.
