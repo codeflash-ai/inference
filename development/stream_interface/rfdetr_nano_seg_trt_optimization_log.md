@@ -512,3 +512,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.56s fps=209.81`, below the current checkpoint.
 - Learning: The removed kernels are not on the critical path enough to offset allocator or scheduling side effects. Keep the existing zeroed int32 tensor and long conversion.
+
+### Rejected: Query Pinned Preprocess Copy Event Before Synchronize
+
+- Hypothesis: The reusable pinned preprocessing buffer synchronizes its previous H2D copy before every reuse. With pipeline depth `2`, the previous copy for that thread should usually be complete, so checking `copy_event.query()` before `copy_event.synchronize()` could avoid unnecessary synchronization overhead.
+- Change tested: Temporary code only; changed `_get_pinned_normalized_buffer(...)` to synchronize only when the recorded copy event had not completed.
+- Correctness: Compared exact-sized postprocess against deferred fused postprocess on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `212.27 fps`, `214.53 fps`, `211.70 fps`, and `211.77 fps`. The high run beat the checkpoint, but the repeated runs did not consistently clear the current `213.23` FPS best.
+- Learning: The query-before-sync guard is too noise-sensitive here and likely adds API overhead on the common completed-event path. Keep the simpler unconditional event synchronize.
