@@ -371,3 +371,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared against the previous preprocessing path on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.60s fps=207.17` and `frames=538 elapsed=2.62s fps=205.04`, below the cached-normalization checkpoint.
 - Learning: The generic no-op helper is not a meaningful limiter; keeping the established shared helper is better than adding a special branch here.
+
+### Rejected: Same-Stream RFDETR TRT Postprocess
+
+- Hypothesis: Nsight Systems showed substantial CUDA event overhead around cross-stream raw output handoff. Running RFDETR TRT postprocess on the inference stream and removing raw-output `record_stream(...)` calls could reduce event bookkeeping, at the cost of less overlap between next-frame inference and previous-frame postprocess.
+- Change tested: Temporary code only; changed `RFDetrForInstanceSegmentationTRT.post_process(...)` to use `_inference_stream` instead of `_post_process_stream` and removed the raw result `record_stream(...)` loop.
+- Correctness: Deferred fused postprocess vs exact-sized postprocess on all 538 frames matched class IDs, dense masks, and boxes exactly; max box delta `0` px.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.59s fps=207.84` and `frames=538 elapsed=2.63s fps=204.87`, below the current checkpoint band.
+- Learning: The existing separate postprocess stream still pays for itself. Keeping postprocess overlapped with the next TensorRT replay is better than removing the stream/event bookkeeping.
