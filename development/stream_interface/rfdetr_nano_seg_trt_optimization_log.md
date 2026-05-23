@@ -1380,3 +1380,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_OVERLAP_MASK_CLONE=1`, recorded a partial-output event after cloning boxes/logits, attached a mask-ready event to the mask clone tensor, and made fused mask resize wait for that event. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.32s fps=232.33`, below the accepted fixed-copy band.
 - Learning: The added event and partial handoff scheduling overhead exceeds any overlap gained between mask clone and selector. Keep the simple all-output clone plus stream wait.
+
+### Rejected: Triton Num Stages Tuning
+
+- Hypothesis: The selector and mask-resize Triton kernels are small post-graph kernels where the default pipeline staging may add register/codegen overhead. Forcing `num_stages=1` could reduce latency for these elementwise/reduction kernels on T4.
+- Change tested: Temporary code only; first launched `_resize_selected_masks_kernel` with `num_stages=1`, then restored resize and launched `_select_topk_boxes_kernel` with `num_stages=1`. Pipeline depth remained fixed at `2`.
+- Result on requested command: resize `num_stages=1` measured `frames=538 elapsed=2.31s fps=232.79`; selector `num_stages=1` measured `frames=538 elapsed=2.30s fps=233.43`, neither better than the accepted fixed-copy band.
+- Learning: Triton's default staging is already adequate for both kernels. Keep the accepted launches without explicit `num_stages`.
