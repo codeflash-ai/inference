@@ -125,7 +125,10 @@ def pre_process_network_input(
         tensors.append(tensor.to(device=target_device))
         metadata.append(meta)
 
-    batch = torch.stack(tensors).contiguous()
+    if len(tensors) == 1:
+        batch = tensors[0].unsqueeze(0).contiguous()
+    else:
+        batch = torch.stack(tensors).contiguous()
     return batch, metadata
 
 

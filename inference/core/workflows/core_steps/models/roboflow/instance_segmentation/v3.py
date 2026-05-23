@@ -1,9 +1,16 @@
+import uuid
 from typing import List, Literal, Optional, Type, Union
 
+import numpy as np
+import supervision as sv
 from pydantic import ConfigDict, Field, PositiveInt, model_validator
+from supervision.config import CLASS_NAME_DATA_FIELD
 
 from inference.core.entities.requests.inference import (
     InstanceSegmentationInferenceRequest,
+)
+from inference.core.models.inference_models_adapters import (
+    InferenceModelsInstanceSegmentationAdapter,
 )
 from inference.core.env import (
     HOSTED_INSTANCE_SEGMENTATION_URL,
@@ -20,7 +27,12 @@ from inference.core.workflows.core_steps.common.utils import (
     convert_inference_detections_batch_to_sv_detections,
     filter_out_unwanted_classes_from_sv_detections_batch,
 )
-from inference.core.workflows.execution_engine.constants import INFERENCE_ID_KEY
+from inference.core.workflows.execution_engine.constants import (
+    DETECTION_ID_KEY,
+    IMAGE_DIMENSIONS_KEY,
+    INFERENCE_ID_KEY,
+    PARENT_ID_KEY,
+)
 from inference.core.workflows.execution_engine.entities.base import (
     Batch,
     OutputDefinition,
@@ -322,6 +334,16 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             model_id=model_id,
             api_key=self._api_key,
         )
+        if disable_active_learning is True and active_learning_target_dataset is None:
+            direct_result = self._try_run_inference_models_fast_path(
+                images=images,
+                inference_images=inference_images,
+                request=request,
+                class_filter=class_filter,
+                model_id=model_id,
+            )
+            if direct_result is not None:
+                return direct_result
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
@@ -336,6 +358,101 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             class_filter=class_filter,
             model_id=model_id,
         )
+
+    def _try_run_inference_models_fast_path(
+        self,
+        images: Batch[WorkflowImageData],
+        inference_images: List[dict],
+        request: InstanceSegmentationInferenceRequest,
+        class_filter: Optional[List[str]],
+        model_id: str,
+    ) -> Optional[BlockResult]:
+        model = self._model_manager[model_id]
+        if not isinstance(model, InferenceModelsInstanceSegmentationAdapter):
+            return None
+        inference_kwargs = request.model_dump()
+        inference_kwargs.pop("image", None)
+        pre_processed_images, preprocessing_metadata = model.preprocess(
+            image=inference_images,
+            **inference_kwargs,
+        )
+        predictions = model.predict(pre_processed_images, **inference_kwargs)
+        detections = model._model.post_process(
+            predictions,
+            preprocessing_metadata,
+            **model.map_inference_kwargs(inference_kwargs),
+        )
+        predictions = self._convert_inference_models_detections_to_sv_detections(
+            model=model,
+            detections=detections,
+            preprocessing_metadata=preprocessing_metadata,
+            inference_id=request.id,
+        )
+        predictions = attach_prediction_type_info_to_sv_detections_batch(
+            predictions=predictions,
+            prediction_type="instance-segmentation",
+        )
+        predictions = filter_out_unwanted_classes_from_sv_detections_batch(
+            predictions=predictions,
+            classes_to_accept=class_filter,
+        )
+        predictions = attach_parents_coordinates_to_batch_of_sv_detections(
+            images=images,
+            predictions=predictions,
+        )
+        return [
+            {
+                "inference_id": request.id,
+                "predictions": prediction,
+                "model_id": model_id,
+            }
+            for prediction in predictions
+        ]
+
+    @staticmethod
+    def _convert_inference_models_detections_to_sv_detections(
+        model: InferenceModelsInstanceSegmentationAdapter,
+        detections,
+        preprocessing_metadata,
+        inference_id: Optional[str],
+    ) -> List[sv.Detections]:
+        result = []
+        for detections_element, metadata in zip(detections, preprocessing_metadata):
+            xyxy = detections_element.xyxy.detach().cpu().numpy()
+            confidence = detections_element.confidence.detach().cpu().numpy()
+            class_id = detections_element.class_id.detach().cpu().numpy()
+            masks = detections_element.mask.detach().cpu().numpy()
+            class_names = np.array(
+                [
+                    (
+                        model.class_names[int(class_id_element)]
+                        if 0 <= int(class_id_element) < len(model.class_names)
+                        else str(int(class_id_element))
+                    )
+                    for class_id_element in class_id
+                ]
+            )
+            sv_detections = sv.Detections(
+                xyxy=xyxy,
+                mask=masks,
+                confidence=confidence,
+                class_id=class_id,
+                data={CLASS_NAME_DATA_FIELD: class_names},
+            )
+            sv_detections[DETECTION_ID_KEY] = np.array(
+                [str(uuid.uuid4()) for _ in range(len(sv_detections))]
+            )
+            sv_detections[PARENT_ID_KEY] = np.array([""] * len(sv_detections))
+            sv_detections[IMAGE_DIMENSIONS_KEY] = np.array(
+                [[metadata.original_size.height, metadata.original_size.width]]
+                * len(sv_detections)
+            )
+            if inference_id is not None:
+                sv_detections[INFERENCE_ID_KEY] = np.array(
+                    [inference_id] * len(sv_detections)
+                )
+            result.append(sv_detections)
+        return result
 
     def run_remotely(
         self,

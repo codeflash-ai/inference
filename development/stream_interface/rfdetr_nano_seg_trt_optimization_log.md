@@ -150,3 +150,19 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Tuning: `max_inflight=2` measured `121.24 fps`; `max_inflight=3` measured best at `141.01 fps`; `max_inflight=4` regressed to `135.86 fps`.
 - Result on requested command: `frames=538 elapsed=3.82s fps=141.01`.
 - Learning: Once per-frame CPU paths were reduced enough, cross-frame pipeline concurrency became the largest remaining gain. The exact benchmark improved from the original `72.23 fps` baseline to `141.01 fps` (+95%).
+
+### Direct Local Workflow Detections And Remove Redundant RFDETR GPU Work
+
+- Hypothesis: Nsight Systems on the pipelined path showed the largest visible GPU costs were RFDETR PyTorch postprocess kernels (`topk`, radix sort/indexing, mask resize), while workflow v3 still built polygon API responses and converted them back into `sv.Detections`. Avoiding redundant postprocess sorting, avoiding a one-image CUDA `stack`, and directly constructing local workflow `sv.Detections` from `inference_models` detections should reduce both GPU and CPU work.
+- Change:
+  - Removed redundant confidence re-sorts after `select_topk_predictions(...)`; `torch.topk(..., sorted=True)` already returns descending scores and the later boolean filters preserve order.
+  - Added a single-image RFDETR preprocessing fast path that uses `unsqueeze(0)` instead of `torch.stack([tensor])` after the host-to-device copy.
+  - Added a local workflow v3 fast path for `InferenceModelsInstanceSegmentationAdapter` when active learning is disabled. It runs adapter preprocess/predict, converts dense `InstanceDetections` directly to `sv.Detections`, attaches the same workflow metadata fields, and falls back to the existing response path otherwise.
+- Correctness:
+  - Old sorted dense postprocess vs new unsorted postprocess on all 538 frames: class IDs exact, boxes exact, confidences exact, dense masks exact.
+  - Single-image `unsqueeze(0)` batch vs previous one-image `torch.stack(...)` equivalent on 128 frames: `max_tensor_diff=0`.
+  - Existing workflow fallback vs new local fast path on all 538 frames: frame order matched, class IDs exact, and max box delta was `0` px.
+- Micro-result: Dense RFDETR postprocess improved from `2.585 ms/frame` to `1.548 ms/frame` over 240 frames when synchronized around postprocess.
+- Tuning: After the postprocess/preprocess changes, `max_inflight=3` remained best in the clean sink harness (`143.64 fps`), with `max_inflight=4` at `142.30 fps`, `5` at `137.45 fps`, and `6` at `130.28 fps`.
+- Result on requested command: `frames=538 elapsed=3.46s fps=155.28`. In-memory prototype of the same direct workflow fast path measured `157.61 fps`.
+- Learning: After cross-frame pipelining, the biggest remaining workflow overhead was the local API response round trip, not the sink conversion itself. Direct local `sv.Detections` construction preserves the benchmark's class/box contract and lets the pipeline spend more time feeding the serialized GPU path.

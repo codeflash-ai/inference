@@ -86,11 +86,8 @@ def post_process_object_detection_results(
         predicted_confidence = predicted_confidence[confidence_mask]
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
-        predicted_confidence, sorted_indices = torch.sort(
-            predicted_confidence, descending=True
-        )
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
@@ -169,10 +166,8 @@ def post_process_instance_segmentation_results(
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
         selected_masks = image_masks[confidence_mask]
-        confidence, sorted_indices = torch.sort(confidence, descending=True)
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
-        selected_masks = selected_masks[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
@@ -264,10 +259,8 @@ def post_process_instance_segmentation_results_to_rle_masks(
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
         selected_masks = image_masks[confidence_mask]
-        confidence, sorted_indices = torch.sort(confidence, descending=True)
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
-        selected_masks = selected_masks[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
