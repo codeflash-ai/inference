@@ -1394,3 +1394,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; reordered `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` to enqueue the mask D2H copy before count and metadata copies. Pipeline depth remained fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.45`, then repeated at `frames=538 elapsed=2.31s fps=232.77`, not a stable improvement over the accepted fixed-copy band.
 - Learning: D2H copy submission order is not a reliable limiter after fixed-count conversion. Keep the original count/metadata/mask order.
+
+### Rejected: NumPy Count Read From Pinned Buffer
+
+- Hypothesis: After fixed 7-row D2H copy synchronization, `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` reads the copied count via `count_buffer.item()`. Reading through the pinned tensor's NumPy view might avoid Torch scalar extraction overhead in the CPU materialization tail.
+- Change tested: Temporary code only; replaced `int(count_buffer.item())` with `int(count_buffer.numpy()[0])`. Pipeline depth remained fixed at `2`.
+- Result on requested command: `frames=538 elapsed=2.31s fps=233.16`, not better than the accepted fixed-copy band.
+- Learning: Count scalar extraction is below the limiter. Keep the simpler `count_buffer.item()` path.
