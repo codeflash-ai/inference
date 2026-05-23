@@ -1776,3 +1776,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: A single-process full-video comparison against the accepted cloned-output path passed over all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`, with `max_count=7`.
 - Result: The unsafe first workflow run appeared fast (`frames=538 elapsed=2.05s fps=263.03`) but repeated depth-2 workflow runs hit CUDA illegal-memory-access failures during CPU conversion, exposing a missing stream/lifetime handoff. Materializing selected masks without deferred count was stable but slow (`220.33 FPS`). Adding the required default-stream wait made the deferred path stable but not faster: `244.20`, `243.62`, and `243.88` FPS.
 - Learning: The apparent `263 FPS` result was an invalid asynchronous/lifetime artifact. Once graph-owned outputs are handed off safely to CPU conversion, the path returns to the accepted throughput band. Removed the temporary callback/direct-postprocess code; a future safe win would need real double-buffered graph output ownership or conversion under a redesigned pipeline contract, not borrowing the single graph state's raw outputs.
+
+### Rejected: CUDA Device Max Connections
+
+- Hypothesis: The accepted TensorRT plan uses `4` auxiliary streams. Setting `CUDA_DEVICE_MAX_CONNECTIONS` before process startup might change CUDA work-queue mapping enough to improve TensorRT aux-stream scheduling or graph replay spacing.
+- Change tested: External process environment only; ran the requested benchmark with `CUDA_DEVICE_MAX_CONNECTIONS` set to `1`, `2`, `8`, and `32`. Pipeline depth remained fixed at `2`.
+- Correctness: This setting does not change model math or tensor values.
+- Result on requested command: `1` measured `243.06` FPS, `2` measured `244.31` FPS, `8` measured `243.64` FPS, and `32` measured `243.07` FPS.
+- Learning: CUDA connection count does not improve the accepted warmed graph path. Keep the default CUDA scheduling environment.
