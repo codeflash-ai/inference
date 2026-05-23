@@ -187,11 +187,37 @@ def _pre_process_numpy(
         )
 
     resized = TF.resize(pil, (target_size.height, target_size.width), antialias=True)
+    tensor = _pil_image_to_normalized_tensor(
+        image=resized,
+        network_input=network_input,
+        swap_tensor_channels=swap_tensor_channels,
+    )
+    if tensor is not None:
+        return tensor, meta
     tensor = TF.to_tensor(resized)
     if swap_tensor_channels and tensor.shape[0] == 3:
         tensor = tensor[[2, 1, 0], :, :]
     tensor = _apply_normalization(tensor, network_input)
     return tensor, meta
+
+
+def _pil_image_to_normalized_tensor(
+    image: Image.Image,
+    network_input: NetworkInputDefinition,
+    swap_tensor_channels: bool,
+) -> Optional[torch.Tensor]:
+    if not network_input.normalization or network_input.input_channels != 3:
+        return None
+    image_array = np.asarray(image, dtype=np.float32)
+    if image_array.ndim != 3 or image_array.shape[2] != 3:
+        return None
+    if swap_tensor_channels:
+        image_array = image_array[:, :, [2, 1, 0]]
+    image_array *= 1.0 / 255.0
+    mean, std = network_input.normalization
+    image_array -= np.asarray(mean, dtype=np.float32)
+    image_array /= np.asarray(std, dtype=np.float32)
+    return torch.from_numpy(np.ascontiguousarray(image_array.transpose(2, 0, 1)))
 
 
 def _needs_two_step_resize(network_input: NetworkInputDefinition) -> bool:

@@ -243,3 +243,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: No code change; ran the requested command with `ENABLE_AUTO_CUDA_GRAPHS_FOR_TRT_BACKEND=False`.
 - Result on requested command: `frames=538 elapsed=3.11s fps=173.27`, below the committed CUDA graph path.
 - Learning: TRT graph replay still wins overall; the graph-launch reduction is more valuable than removing output-buffer clone traffic.
+
+### NumPy RFDETR PIL Tensor Conversion
+
+- Hypothesis: The RFDETR preprocessing path still spent CPU time in `TF.to_tensor(...)` followed by `TF.normalize(...)` after the PIL-compatible resize. A single NumPy float32 conversion/normalization step should preserve the same resized pixels while reducing Python/PyTorch transform overhead.
+- Change: Added a gated RFDETR numpy/PIL preprocessing fast path for 3-channel normalized inputs. It converts the PIL-resized image to `float32` NumPy, applies channel swap and normalization in HWC layout, then creates the CHW tensor from a contiguous transpose. Non-normalized or non-3-channel cases fall back to the previous torchvision path.
+- Correctness: Compared the previous `TF.to_tensor`/`TF.normalize` path against the NumPy path on all 538 frames: max tensor diff `0.00000072`, detection counts matched, class IDs matched exactly, and max box delta was `0` px.
+- Micro-result: Preprocess-only loop over 128 frames improved from `1.957 ms/frame` to `1.890 ms/frame`.
+- Pipeline tuning: Default depth `2` measured `frames=538 elapsed=2.81s fps=191.24`; serial depth `3` measured `frames=538 elapsed=2.94s fps=182.96`, so depth `2` remains best.
+- Result on requested command: `frames=538 elapsed=2.81s fps=191.24`.
+- Learning: Keeping the PIL resize source-of-truth while reducing conversion overhead gives a real pipeline gain; after postprocess fusion, small CPU preprocessing savings matter because they improve producer/consumer balance at depth `2`.
