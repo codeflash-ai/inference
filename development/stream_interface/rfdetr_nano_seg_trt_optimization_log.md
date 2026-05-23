@@ -228,3 +228,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the previous CPU-normalized tensor path against the GPU-normalized path on all 538 frames: max tensor diff rounded to `0.00000000`, detection counts matched, class IDs matched exactly, and max box delta was `0` px.
 - Result on requested command: depth `2` measured `frames=538 elapsed=3.15s fps=170.80`; retuning depth `3` measured `frames=538 elapsed=3.43s fps=157.08`.
 - Learning: The smaller H2D copy did not compensate for the additional GPU conversion/normalization kernels and stream contention. Any useful version likely needs a single fused conversion kernel and careful scheduling, or reusable CPU-side normalized transfer remains better.
+
+### Rejected: Packed Workflow Detection Metadata Copy
+
+- Hypothesis: The local workflow conversion copies selected boxes, confidences, class IDs, and masks from GPU separately. Packing non-mask detection fields in the fused selector kernel and copying them as one tensor could reduce D2H API overhead.
+- Change tested: Temporary fused selector output of `[x1, y1, x2, y2, confidence, class_id]` for workflow conversion, using the packed tensor instead of separate `xyxy`, `confidence`, and `class_id` copies.
+- Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames matched detection counts, class IDs, and dense masks exactly; max box delta was `0.5` px due to packed float boxes instead of rounded int boxes.
+- Result on requested command: Two exact passes measured `frames=538 elapsed=3.08s fps=174.63` and `frames=538 elapsed=3.09s fps=174.32`, not better than the committed checkpoint.
+- Learning: The extra selector stores and altered code generation offset the small D2H-call reduction. Keep the simpler separate tensors unless a future fused CPU conversion removes more overhead.
