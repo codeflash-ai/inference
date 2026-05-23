@@ -133,6 +133,7 @@ def post_process_instance_segmentation_results(
     num_classes: int,
     classes_re_mapping: Optional[ClassesReMapping],
     defer_fused_postprocess_count: bool = False,
+    deferred_mask_resize_detection_limit: Optional[int] = None,
 ) -> List[InstanceDetections]:
     logits_sigmoid = torch.nn.functional.sigmoid(logits)
     results = []
@@ -150,6 +151,7 @@ def post_process_instance_segmentation_results(
             threshold=threshold,
             classes_re_mapping=classes_re_mapping,
             defer_count=defer_fused_postprocess_count,
+            deferred_mask_resize_detection_limit=deferred_mask_resize_detection_limit,
         )
         if fused_result is not None:
             results.append(fused_result)
@@ -238,6 +240,7 @@ def _try_fused_instance_segmentation_post_process(
     threshold: Union[float, torch.Tensor],
     classes_re_mapping: Optional[ClassesReMapping],
     defer_count: bool = False,
+    deferred_mask_resize_detection_limit: Optional[int] = None,
 ) -> Optional[InstanceDetections]:
     if isinstance(threshold, torch.Tensor) or classes_re_mapping is None:
         return None
@@ -277,15 +280,30 @@ def _try_fused_instance_segmentation_post_process(
             count=selected_count,
             output_height=image_meta.original_size.height,
             output_width=image_meta.original_size.width,
+            detection_limit=deferred_mask_resize_detection_limit,
         )
         if aligned_masks is None:
             return None
+        image_metadata = {"valid_count": selected_count}
+        if deferred_mask_resize_detection_limit is not None:
+            image_metadata.update(
+                {
+                    "mask_resize_detection_limit": min(
+                        int(deferred_mask_resize_detection_limit),
+                        aligned_masks.shape[0],
+                    ),
+                    "source_masks": image_masks,
+                    "query_indices": query_indices,
+                    "output_height": image_meta.original_size.height,
+                    "output_width": image_meta.original_size.width,
+                }
+            )
         return InstanceDetections(
             xyxy=selected_boxes.round().int(),
             confidence=confidence,
             class_id=top_classes.int(),
             mask=aligned_masks,
-            image_metadata={"valid_count": selected_count},
+            image_metadata=image_metadata,
         )
     if selected_count == 0:
         aligned_masks = torch.empty(

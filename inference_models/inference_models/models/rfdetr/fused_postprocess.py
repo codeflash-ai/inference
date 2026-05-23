@@ -219,6 +219,7 @@ def fused_resize_selected_masks(
     count: torch.Tensor,
     output_height: int,
     output_width: int,
+    detection_limit: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
     if triton is None or not image_masks.is_cuda:
         return None
@@ -229,8 +230,11 @@ def fused_resize_selected_masks(
     )
     _, input_height, input_width = image_masks.shape
     block_size = 256
+    if detection_limit is None:
+        detection_limit = MAX_RFDETR_DETECTIONS
+    detection_limit = min(max(int(detection_limit), 1), MAX_RFDETR_DETECTIONS)
     grid = (
-        MAX_RFDETR_DETECTIONS,
+        detection_limit,
         triton.cdiv(output_height * output_width, block_size),
     )
     _resize_selected_masks_kernel[grid](

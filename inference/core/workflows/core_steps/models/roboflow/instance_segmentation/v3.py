@@ -513,6 +513,7 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             mask_format="dense",
             defer_cuda_stream_sync=True,
             defer_fused_postprocess_count=True,
+            deferred_mask_resize_detection_limit=8,
         )
         inference_id = str(uuid.uuid4())
         predictions = self._convert_inference_models_detections_to_sv_detections(
@@ -559,7 +560,13 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
                 xyxy_tensor = detections_element.xyxy[:valid_count]
                 confidence_tensor = detections_element.confidence[:valid_count]
                 class_id_tensor = detections_element.class_id[:valid_count]
-                mask_tensor = detections_element.mask[:valid_count]
+                recovered_masks = RoboflowInstanceSegmentationModelBlockV3._recover_limited_rfdetr_masks(
+                    detections_element=detections_element,
+                    valid_count=valid_count,
+                )
+                if recovered_masks is None:
+                    recovered_masks = detections_element.mask
+                mask_tensor = recovered_masks[:valid_count]
             else:
                 xyxy_tensor = detections_element.xyxy
                 confidence_tensor = detections_element.confidence
@@ -610,6 +617,44 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
                 )
             result.append(sv_detections)
         return result
+
+    @staticmethod
+    def _recover_limited_rfdetr_masks(
+        detections_element,
+        valid_count: int,
+    ) -> Optional[torch.Tensor]:
+        image_metadata = detections_element.image_metadata
+        if image_metadata is None:
+            return None
+        mask_resize_detection_limit = image_metadata.get("mask_resize_detection_limit")
+        if mask_resize_detection_limit is None or valid_count <= int(
+            mask_resize_detection_limit
+        ):
+            return None
+        source_masks = image_metadata.get("source_masks")
+        query_indices = image_metadata.get("query_indices")
+        count = image_metadata.get("valid_count")
+        output_height = image_metadata.get("output_height")
+        output_width = image_metadata.get("output_width")
+        if (
+            source_masks is None
+            or query_indices is None
+            or count is None
+            or output_height is None
+            or output_width is None
+        ):
+            return None
+        from inference_models.models.rfdetr.fused_postprocess import (
+            fused_resize_selected_masks,
+        )
+
+        return fused_resize_selected_masks(
+            image_masks=source_masks,
+            query_indices=query_indices,
+            count=count,
+            output_height=output_height,
+            output_width=output_width,
+        )
 
     @staticmethod
     def _try_copy_cuda_detection_tensors_to_pinned_numpy(

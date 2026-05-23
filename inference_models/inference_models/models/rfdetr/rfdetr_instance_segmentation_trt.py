@@ -325,6 +325,9 @@ class RFDetrForInstanceSegmentationTRT(
                     defer_fused_postprocess_count=kwargs.get(
                         "defer_fused_postprocess_count", False
                     ),
+                    deferred_mask_resize_detection_limit=kwargs.get(
+                        "deferred_mask_resize_detection_limit"
+                    ),
                 )
             else:
                 results = post_process_instance_segmentation_results_to_rle_masks(
