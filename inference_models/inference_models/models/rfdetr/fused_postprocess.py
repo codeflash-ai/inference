@@ -247,6 +247,6 @@ def fused_resize_selected_masks(
         output_height,
         output_width,
         block_size,
-        num_warps=4,
+        num_warps=2,
     )
     return output

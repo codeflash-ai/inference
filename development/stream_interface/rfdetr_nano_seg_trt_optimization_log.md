@@ -2202,3 +2202,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This only changed the partitioning of the same bilinear mask threshold computation. `py_compile` passed after each variant and the benchmark completed normally. Classes and boxes are untouched by this kernel.
 - Result on requested command: `512` measured `frames=538 elapsed=2.20s fps=244.14` and `frames=538 elapsed=2.20s fps=244.03`; `128` measured `frames=538 elapsed=2.21s fps=242.92`. After reverting to accepted `256`, the immediate same-session baseline measured `frames=538 elapsed=2.21s fps=242.96`, indicating the session was noisy/slow but neither variant showed a stable gain.
 - Learning: The accepted `256` tile remains the best default. This kernel is too small relative to the TensorRT CUDA graph body for tiling-only changes to move end-to-end throughput reliably.
+
+### Accepted: RFDETR Mask Resize Two-Warp Launch
+
+- Hypothesis: The accepted deferred mask resize uses a `256`-pixel tile with `num_warps=4`. Since the fixed first-stage grid only covers up to `7` detections at `312x312`, the per-program vector work may be over-provisioned; `num_warps=2` could reduce scheduling/register pressure while preserving the same per-pixel math.
+- Change: Changed `_resize_selected_masks_kernel` launch in `fused_resize_selected_masks(...)` from `num_warps=4` to `num_warps=2`. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. This kernel runs after class selection and box decoding, so class IDs and boxes are unchanged by construction; the mask computation is the same independent per-pixel bilinear threshold with only Triton launch geometry changed.
+- Result on requested command: `num_warps=2` measured `frames=538 elapsed=2.20s fps=244.42`, `frames=538 elapsed=2.20s fps=244.51`, and `frames=538 elapsed=2.20s fps=244.02`. Same-session `num_warps=4` baselines measured `frames=538 elapsed=2.21s fps=243.50` and `frames=538 elapsed=2.21s fps=243.82`.
+- Learning: The improvement is small and still in the noisy graph-bound band, but the same-session A/B favored two warps and the change is low-risk. Keep `num_warps=2` as the current accepted mask-resize launch geometry.
