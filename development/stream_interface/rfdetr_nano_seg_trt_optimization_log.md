@@ -1267,3 +1267,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_POSTPROCESS=1`, created the RFDETR per-thread postprocess stream with priority `-1` instead of the default priority. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=234.32`, then `frames=538 elapsed=2.34s fps=229.94`, not a stable improvement over the accepted fixed-copy band.
 - Learning: Stream priority changes add variance and do not consistently improve the already short post-graph tail. Keep the default-priority postprocess stream.
+
+### Rejected: High-Priority Preprocess Stream
+
+- Hypothesis: H2D transfer and GPU normalization on the preprocessing stream overlap TensorRT graph replay. Giving preprocessing higher priority might make the next frame's input ready earlier and reduce occasional graph launch delay.
+- Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_PREPROCESS=1`, created the RFDETR per-thread preprocessing stream with priority `-1` instead of default priority. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.52`, below the accepted fixed-copy band.
+- Learning: Preprocessing priority is not the limiter in the current depth-2 pipeline. Keep the default-priority preprocessing stream to avoid extra scheduling variance.
