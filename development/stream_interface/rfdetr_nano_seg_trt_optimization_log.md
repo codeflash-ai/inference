@@ -1814,3 +1814,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary env-gated code only; with `RFDETR_FUSED_SV_CONVERSION=True`, the RFDETR workflow fast path copied the existing pinned detection tensors and built final `sv.Detections` metadata in one helper, preserving prediction type, image dimensions, inference ID, detection IDs, root-parent metadata, and parent metadata. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: Baseline with the accepted path measured `frames=538 elapsed=2.21s fps=243.78`; the fused conversion branch measured `frames=538 elapsed=2.21s fps=242.91`.
 - Learning: CPU-side detection packaging is no longer a useful lever for this benchmark. The accepted depth-2 path is constrained by the CUDA graph body plus required GPU copy/postprocess tail, so keep the generic metadata helpers and focus further work on TensorRT graph-body or safe GPU-output ownership changes.
+
+### Rejected: Explicit TensorRT Optimization Profile Async
+
+- Hypothesis: Even though the accepted RFDETR TensorRT plan has one optimization profile, explicitly calling `IExecutionContext.set_optimization_profile_async(0, graph_stream)` before setting the static input shape might alter context setup or graph-capture scheduling enough to reduce TensorRT graph replay latency.
+- Change tested: Temporary env-gated code only; with `RFDETR_TRT_SET_PROFILE_ASYNC=true`, `_capture_cuda_graph(...)` created the graph stream before shape binding, selected profile `0` asynchronously on that stream, synchronized, then proceeded with the accepted warmup and CUDA graph capture. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Evidence: The runtime inspection showed `num_optimization_profiles=1` and `active_optimization_profile=0` before the change, so this was expected to be low probability.
+- Result on requested command: Accepted baseline in the same session measured `frames=538 elapsed=2.22s fps=242.41`; the explicit-profile gate measured `frames=538 elapsed=2.22s fps=242.52` and repeat `frames=538 elapsed=2.21s fps=243.16`.
+- Learning: Explicit profile selection is a no-op for this already-active single-profile engine and does not move the depth-2 ceiling. Keep the simpler accepted graph-capture path.
