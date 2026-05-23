@@ -2113,3 +2113,19 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External process environment only; ran the requested benchmark with `PYTHONMALLOC=malloc`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: `PYTHONMALLOC=malloc` first measured `frames=538 elapsed=2.19s fps=245.44`, but repeated at `frames=538 elapsed=2.21s fps=243.90`; immediate default rerun measured `frames=538 elapsed=2.21s fps=243.77`.
 - Learning: The first allocator result was not repeatable and stays inside normal run-to-run variance. Python allocator selection is not a stable improvement, and the target command should keep the default allocator.
+
+### Profile: Depth-2 Graphbound Refresh
+
+- Request: Capture another Nsight Systems report for user analysis while keeping workflow pipeline depth fixed at `2`. Depth `3` was not tested.
+- Profile: `/tmp/rfdetr_depth2_graphbound_20260523_194100.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_graphbound_20260523_194100.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_graphbound_20260523_194100_stats_cuda_gpu_kern_sum_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_graphbound_20260523_194100_stats_cuda_gpu_mem_time_sum_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_graphbound_20260523_194100_stats_cuda_api_sum_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.26s fps=238.29`.
+- Graph spacing: The capture includes `602` CUDA graph traces: `64` capture warmup replays plus `538` frame replays. After skipping the `64` warmups plus the next `100` frame launches, CUDA graph duration was p50 `4076.798 us`, p90 `4139.707 us`, p95 `4144.201 us`, p99 `4155.937 us`, mean `4065.573 us`; graph end-to-next-start gap was p50 `40.863 us`, p90 `42.201 us`, p95 `42.477 us`, p99 `42.879 us`, mean `40.945 us`.
+- Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `35.455 us`, mean `35.648 us`; idle inside the gap was p50 `5.200 us`, mean `5.220 us`. The largest gap occupants were TensorRT mask D2D clone (`2433600B`, `13.457 us` avg overlap), next-frame input D2D copy (`1168128B`, `13.102 us`), sigmoid (`6.598 us`), fill-long (`2.800 us`), selector (`2.393 us`), logits D2D clone (`36400B`, `2.099 us`), fill-int (`2.063 us`), and boxes D2D clone (`1600B`, `1.991 us`).
+- Learning: The refreshed report still matches the target shape: the graph-to-graph idle bubble is about `5 us`, while the TensorRT CUDA graph body is about `4.07 ms`. The remaining throughput ceiling is dominated by the TensorRT graph forward pass plus required ownership copies and a narrow postprocess tail.
+
+### Rejected: Two-Phase Limited D2H Detection Copy
+
+- Hypothesis: The fixed RFDETR workflow conversion copies `7` masks to pinned CPU buffers every frame, while the benchmark detection distribution averages only `3.54` detections per frame (`1`: 15 frames, `2`: 104, `3`: 164, `4`: 145, `5`: 74, `6`: 14, `7`: 22). Copying the GPU count first, synchronizing, then copying only `valid_count` rows could reduce D2H bytes enough to improve the CPU materialization boundary.
+- Change tested: Temporary code only; in `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)`, copied and synchronized `valid_count` before copying boxes, confidences, class IDs, and masks for only the valid rows. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `frames=538 elapsed=2.80s fps=192.19`, a severe regression from the accepted warmed band.
+- Learning: The saved D2H bytes do not compensate for introducing a second synchronization at the conversion boundary. The accepted single-sync fixed 7-row copy is the better depth-2 schedule because it keeps the GPU/CPU pipeline from stalling on an early count readback.
