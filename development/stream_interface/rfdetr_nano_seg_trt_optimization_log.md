@@ -683,3 +683,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared standard TensorRT execution against CUDA graph execution on 120 frames after the cache change: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=219.26`, `frames=538 elapsed=2.46s fps=218.76`, then `frames=538 elapsed=2.48s fps=217.02`; not stable enough to checkpoint over the current `219.03` FPS best.
 - Learning: The double lock is not a reliable limiter, and the altered lookup path is noise-sensitive. Keep the existing cache API.
+
+### Rejected: Static RFDETR PreProcessingOverrides
+
+- Hypothesis: The RFDETR TRT workflow fast path constructs the same `PreProcessingOverrides(False, False, False)` object every frame. Reusing a module-level instance could remove a small allocation from the CPU path before graph replay.
+- Change tested: Temporary code only; added a module-level `RFDETR_TRT_PRE_PROCESSING_OVERRIDES` and passed it to `model._model.pre_process(...)` in `_try_run_rfdetr_trt_fast_path(...)`.
+- Correctness: Full-video `InferencePipeline` comparison against an equivalent overrides object matched all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=219.53`, then repeated at `frames=538 elapsed=2.49s fps=215.74`; not stable enough to checkpoint.
+- Learning: Per-frame override-object construction is below the noise floor. Keep the simpler local construction.
