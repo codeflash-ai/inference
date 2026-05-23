@@ -1295,3 +1295,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_EVENT_SYNC_D2H=1`, reused a thread-local `torch.cuda.Event`, recorded it after the fixed D2H copies, and synchronized the event instead of synchronizing the whole current stream. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.66`, then `frames=538 elapsed=2.33s fps=231.23`, not stable enough to keep over the accepted fixed-copy band.
 - Learning: The current stream contains only the relevant copy chain in this path, and the event record/sync adds overhead and variance. Keep the simpler stream synchronize.
+
+### Rejected: Metadata Array Allocation Variant
+
+- Hypothesis: RFDETR workflow conversion creates parent ID, image-dimensions, and inference ID arrays using Python list multiplication before converting to NumPy. Using `np.full(...)` and a preallocated dimensions array could reduce CPU metadata allocation work in the materialization tail.
+- Change tested: Temporary gated code only; with `RFDETR_FAST_METADATA_ARRAYS=1`, cached `len(sv_detections)`, used `np.full(...)` for parent and inference IDs, and filled a `(N, 2)` `np.int64` image-dimensions array directly. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.84`, then `frames=538 elapsed=2.31s fps=233.27`, not better than the accepted fixed-copy band.
+- Learning: Per-detection metadata arrays are below the limiter after the fixed D2H copy. The existing simple list-to-array construction is stable enough; keep it.
