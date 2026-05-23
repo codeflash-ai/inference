@@ -450,3 +450,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared against the non-fused PyTorch fallback on 160 frames: counts and classes matched exactly, max box delta `0.5` px.
 - Result on requested command: depth `2` repeat runs measured `frames=538 elapsed=2.57s fps=209.35` and `frames=538 elapsed=2.57s fps=209.72`, close but still below the current `210.18` FPS checkpoint.
 - Learning: Reducing small D2H copies alone does not beat the added Triton stores and changed CPU formatting. Keep the simpler separate metadata tensors.
+
+### Rejected: Skip TensorRT Input Record Stream In Fast Path
+
+- Hypothesis: In the RFDETR local workflow fast path, the preprocessed input tensor remains alive until postprocess has waited on inference, so `pre_processed_images.record_stream(inference_stream)` in the TensorRT wrapper might be redundant allocator bookkeeping.
+- Change tested: Temporary code only; added a `record_input_stream` flag to `infer_from_trt_engine(...)` and disabled it only when `defer_cuda_stream_sync=True`.
+- Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: counts, classes, and boxes matched exactly.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.58s fps=208.39`, below the current checkpoint.
+- Learning: The input allocator stream handoff is still useful or its removal shifts synchronization elsewhere. Keep the TensorRT wrapper's input `record_stream(...)`.
