@@ -764,3 +764,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared conversion with and without inference ID attachment on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`. This intentionally omitted the `inference_id` data field, so it was not suitable to keep unless it clearly won.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=216.36`, below the pinned-conversion checkpoint.
 - Learning: UUID/inference-ID attachment is not a meaningful limiter, and removing it weakens metadata behavior. Keep the normal inference ID path.
+
+### Rejected: Split Mask D2H Copy Onto Separate Stream
+
+- Hypothesis: In the pinned conversion checkpoint, boxes/confidences/classes/masks are copied to pinned CPU buffers on the same CUDA stream and synchronized together. Copying the larger dense mask payload on a side stream while the current stream handles small metadata copies could overlap CPU class-name/object preparation with mask D2H.
+- Change tested: Temporary code only; added a thread-local mask-copy CUDA stream, launched the mask pinned copy there after waiting on the current stream, synchronized the current stream for small metadata, built class names, then synchronized the mask stream before constructing `sv.Detections`.
+- Correctness: Compared split-stream pinned conversion against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.50s fps=215.61`, below the pinned-conversion checkpoint.
+- Learning: The side-stream wait/synchronize overhead is larger than any overlap available in the small CPU metadata window. Keep the single-stream grouped pinned copies.
