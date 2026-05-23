@@ -2557,3 +2557,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `16.96-17.09 us` under NCU replay. Compute throughput was about `9.61-9.64%`, memory throughput about `12.54-12.56%`, DRAM throughput about `5.60-5.82%`, and L2 throughput about `5.76-5.82%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.15` after the profile.
 - Learning: This TT tail is one of the clearest small-grid cases: only `16` CTAs for `40` T4 SMs and `0.08` waves/SM. The remaining graph-body tail is dominated by many such short, underfilled TensorRT kernels.
+
+### Rejected: CUDA Device Max Connections Sweep
+
+- Hypothesis: The accepted TensorRT CUDA graph uses multiple internal streams per replay. Changing `CUDA_DEVICE_MAX_CONNECTIONS` before CUDA context creation might alter stream-to-hardware-queue mapping and reduce graph-body bubbles or graph-to-graph scheduling jitter.
+- Diagnostic: Ran the accepted workflow command in fresh processes with `CUDA_DEVICE_MAX_CONNECTIONS=1`, `8`, and `32`, always with pipeline depth fixed at `2`; depth `3` was not tested. An initial concurrent launch of the three variants was discarded because the processes contended for the same GPU and produced invalid FPS.
+- Result: Same-session default baseline measured `frames=538 elapsed=2.21s fps=243.78`. Sequential valid runs measured `243.65 fps` for `CUDA_DEVICE_MAX_CONNECTIONS=1`, `243.29 fps` for `8`, and `242.67 fps` for `32`. A default rerun afterward measured `frames=538 elapsed=2.21s fps=243.47`.
+- Learning: CUDA connection count does not improve the accepted depth-2 workflow and can slightly regress it. The remaining graph-body gaps are not recoverable through this stream scheduling environment knob; keep the default CUDA connection behavior.
