@@ -1073,3 +1073,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed the CUDA graph state's stream construction from `torch.cuda.Stream(device=device)` to `torch.cuda.Stream(device=device, priority=-1)` and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `237.18`, `233.05`, `237.76`, `236.59`, and `235.95` FPS. This is the same noisy band as the accepted path with a low outlier.
 - Learning: Stream priority does not reliably reduce TensorRT graph duration or the graph-to-graph gap on this T4 workload. Keep the default-priority graph stream.
+
+### Rejected: Clone Graph Outputs On Caller Stream
+
+- Hypothesis: CUDA graph replay currently clones TensorRT output buffers on the graph replay stream before the caller stream can continue. Moving those clones to the caller inference stream might free the graph replay stream earlier and improve depth-2 scheduling while preserving cloned-output ownership.
+- Change tested: Temporary code only; after `cuda_graph.replay()`, made the caller stream wait on the graph stream, cloned `output_buffers` on the caller stream, and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.26s fps=237.82`, `frames=538 elapsed=2.29s fps=235.14`, and `frames=538 elapsed=2.29s fps=235.36`, which is not stable enough to keep over the accepted fixed-copy path.
+- Learning: The output clones remain on the critical ownership chain regardless of which stream performs them. Moving the clone stream only perturbs scheduling, so keep the established graph-stream clone path.
