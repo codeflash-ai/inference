@@ -1836,3 +1836,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime setting only; confirmed and killed a stale benchmark process that was holding a CUDA context, set `nvidia-smi -c EXCLUSIVE_PROCESS`, ran the requested benchmark with pipeline depth fixed at `2`, then restored compute mode with `nvidia-smi -c DEFAULT`.
 - Result on requested command: `frames=538 elapsed=2.22s fps=242.77`, below the accepted warmed band.
 - Learning: Compute-mode isolation does not improve this single-process workload. Keep the default compute mode; the remaining limiter is still the TensorRT CUDA graph body plus the small required post-graph tail.
+
+### Rejected: CPU Affinity And Nice Priority
+
+- Hypothesis: The depth-2 pipeline still depends on a CPU producer thread keeping the TensorRT graph fed. Pinning the process to one hardware thread per physical core or raising process priority could reduce CPU scheduling jitter enough to tighten the graph-to-graph launch cadence.
+- Change tested: External runtime settings only; after confirming no other CUDA process was active, ran the requested benchmark with `taskset -c 0-3` on the 4-core/8-thread VM, then with `nice -n -20`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: Clean default baseline after stale-process cleanup measured `frames=538 elapsed=2.21s fps=243.99`. `taskset -c 0-3` measured `244.44` then `243.88` FPS. `nice -n -20` measured `243.46` FPS.
+- Learning: CPU scheduler tuning is not a stable improvement. The small first affinity result is within normal warmed-path noise, and priority does not help. Keep the default CPU scheduling for the benchmark.
