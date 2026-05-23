@@ -1169,3 +1169,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Prediction math and stream dependencies are unchanged; this only changes the copy enqueue flag for a D2D copy on the same graph replay stream.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.14`, `frames=538 elapsed=2.31s fps=233.32`, and `frames=538 elapsed=2.30s fps=234.02`, below the accepted fixed-copy band.
 - Learning: The D2D input copy flag is not limiting the graph-to-graph interval. Keep the default `copy_(...)` call.
+
+### Rejected: Capture TensorRT Output Copies Inside CUDA Graph
+
+- Hypothesis: The accepted CUDA graph replay path clones TensorRT output buffers after `cuda_graph.replay()`, leaving D2D output copy work in the small graph-to-graph gap. Capturing those D2D output copies as CUDA graph nodes and alternating between two graph states could keep postprocess reading copied buffers while removing per-frame Python-side clone launches from the gap.
+- Change tested: Temporary code only; added a captured-output-copy mode to the TensorRT graph helper, allocated internal TensorRT output buffers plus public copied output buffers, captured `execute_async_v3(...)` followed by `destination.copy_(source)` for each output, and enabled a two-slot graph-state pool only in the RFDETR TRT workflow fast path. Pipeline depth remained fixed at `2`.
+- Correctness: Direct full-video comparison against the normal cloned-output CUDA graph path over all 538 frames matched exactly: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.26`, `frames=538 elapsed=2.32s fps=232.04`, and `frames=538 elapsed=2.33s fps=230.70`, below the accepted fixed-copy band.
+- Learning: Moving output copies into the CUDA graph lengthens the effective graph bottleneck more than it helps the already tiny post-graph gap. Keep output clones outside the captured TensorRT graph.
