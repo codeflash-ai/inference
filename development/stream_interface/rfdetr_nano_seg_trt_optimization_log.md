@@ -537,3 +537,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=217.60` and `frames=538 elapsed=2.50s fps=215.45`, below the current `218.97` FPS checkpoint.
 - Learning: This object construction is not a reliable bottleneck, and omitting the metadata may perturb surrounding scheduling without improving throughput. Keep the fast path semantically closer to the generic runner.
+
+### Rejected: Call Local Instance Segmentation Block Directly
+
+- Hypothesis: The single-step workflow fast path still calls the block's generic `run(...)`, which computes the confidence value and branches on local vs remote execution every frame. For the local benchmark, precomputing confidence once and calling `run_locally(...)` directly could shave CPU work before the next CUDA graph launch.
+- Change tested: Temporary code only; required the cached single-step fast path to be local, precomputed the manifest confidence value, and called `step.run_locally(...)` instead of `step.run(...)`.
+- Correctness: Compared the generic execution engine against the direct local fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.48` and `frames=538 elapsed=2.46s fps=218.33`, close but still below the current `218.97` FPS checkpoint.
+- Learning: The generic block method wrapper is not the next meaningful limiter. Keep the broader fast path that still supports the block's normal local/remote dispatch.
