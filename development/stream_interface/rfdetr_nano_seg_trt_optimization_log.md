@@ -804,3 +804,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: On a sampled video frame, a cache miss followed by a cache hit produced matching detections: `counts 4 4`, `classes_equal=True`, `masks_equal=True`, `max_box_delta=0`, `max_conf_delta=0.0`; the cached scalar also matched `ConfidenceFilter.get_threshold(...)`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.80` and `frames=538 elapsed=2.47s fps=217.45`, below the pinned-conversion checkpoint.
 - Learning: Confidence threshold construction is below the limiter; changing the model object state and postprocess bytecode does not tighten the graph-to-graph gap. Keep the original local `ConfidenceFilter` path.
+
+### Rejected: Two-Slot TRT CUDA Graph Output Copies
+
+- Hypothesis: The CUDA graph replay path allocates fresh result tensors with `buf.clone()` for each TensorRT output after every replay. For the requested depth `2` workflow, alternating between two reusable output-copy slots could keep ownership safe while reducing allocator work between graph launches.
+- Change tested: Temporary code only; added optional `cuda_graph_output_copy_slots=2` plumbing to the TRT replay path and enabled it only in the RFDETR workflow fast path, copying graph outputs into alternating reusable CUDA tensors instead of cloning into fresh tensors.
+- Correctness: Compared slot-copy outputs against the clone path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.78` and `frames=538 elapsed=2.45s fps=219.73`, not an improvement over the pinned-conversion checkpoint.
+- Learning: PyTorch's cached allocation for the result clones is not the source of the remaining graph gap. Keeping reusable borrowed CUDA buffers also adds a depth-specific ownership assumption, so leave the clone path unchanged.
