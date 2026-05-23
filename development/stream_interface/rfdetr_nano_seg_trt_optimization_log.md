@@ -1161,3 +1161,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness/probe: Before this change, a direct 20-frame preprocessing probe alternated between only 2 CUDA input pointers. With external graph input enabled, a 12-frame probe produced 9 distinct CUDA input pointers and took `3.696s`, because each captured graph state retained its external input tensor and prevented normal allocator reuse. A full correctness comparison was stopped after it failed to make timely progress for the same reason.
 - Result: Not benchmarked on the full requested command because the cache cannot reach steady state: it captures graphs for transient input pointers instead of reusing one static graph. This adds repeated capture cost and extra retained input buffers.
 - Learning: Removing the input D2D copy would require a deliberate reusable CUDA preprocessing buffer pool owned by the model, not binding graphs to arbitrary tensors returned by the allocator. The current graph-owned input buffer plus D2D copy remains the stable path.
+
+### Rejected: Non-Blocking Graph Input D2D Copy
+
+- Hypothesis: The CUDA graph replay path enqueues a device-to-device copy from the preprocessed CUDA tensor into the graph-owned input buffer. Passing `non_blocking=True` to that `copy_(...)` could remove conservative copy synchronization while preserving the explicit stream ordering already enforced by `stream.wait_stream(caller_stream)`.
+- Change tested: Temporary code only; changed `trt_cuda_graph_state.input_buffer.copy_(pre_processed_images)` to `copy_(pre_processed_images, non_blocking=True)` in the TensorRT CUDA graph cache-hit path. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction math and stream dependencies are unchanged; this only changes the copy enqueue flag for a D2D copy on the same graph replay stream.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.14`, `frames=538 elapsed=2.31s fps=233.32`, and `frames=538 elapsed=2.30s fps=234.02`, below the accepted fixed-copy band.
+- Learning: The D2D input copy flag is not limiting the graph-to-graph interval. Keep the default `copy_(...)` call.
