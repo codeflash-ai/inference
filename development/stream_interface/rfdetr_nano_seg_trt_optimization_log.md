@@ -1193,3 +1193,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Prediction math and graph topology are unchanged; this only changes TensorRT execution-context metadata verbosity.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.62`, `frames=538 elapsed=2.30s fps=234.00`, and `frames=538 elapsed=2.32s fps=231.96`, below the accepted fixed-copy band.
 - Learning: Runtime NVTX verbosity is not the TensorRT graph replay limiter in this no-profiler benchmark. Keep the default context verbosity.
+
+### Rejected: Extra TensorRT Warmup Before CUDA Graph Capture
+
+- Hypothesis: TensorRT might lazily settle execution-context state during the first enqueue before CUDA graph capture. Running two warmup enqueues instead of one before capture could produce a more stable or faster captured graph.
+- Change tested: Temporary code only; changed `_capture_cuda_graph(...)` to enqueue `execute_async_v3(...)` twice on the graph stream before synchronizing and capturing. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction math and captured graph operations are unchanged; this only changes pre-capture warmup count.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=232.82`, `frames=538 elapsed=2.31s fps=232.97`, and `frames=538 elapsed=2.32s fps=232.11`, below the accepted fixed-copy band.
+- Learning: One warmup enqueue is enough for this engine. Extra pre-capture warmup does not improve the steady captured graph and may perturb initialization/cache behavior. Keep the original single warmup.
