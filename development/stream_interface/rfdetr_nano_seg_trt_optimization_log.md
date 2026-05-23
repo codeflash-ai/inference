@@ -2714,3 +2714,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `19.65-19.74 us` under NCU replay. Compute throughput was about `15.48-15.52%`, memory throughput about `18.56-18.61%`, DRAM throughput about `13.36-13.44%`, and L2 throughput about `12.31-12.33%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.85` after the profile.
 - Learning: This fused 64x64 FP16/FP32 GEMM is also an underfilled TensorRT tactic: fewer CTAs than T4 SMs plus high register/shared-memory usage. It adds another data point that the remaining graph-body limiter is broad TensorRT GEMM tactic geometry rather than one isolated kernel or pipeline bubble.
+
+### Profile: TensorRT Myelin Compare/Select Tail Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_GtrNotNotMoveTranSele_*` as a single graph node at about `14 us/replay`. Profiling it can show whether this fused compare/select transform is a memory-movement Myelin tail or another underfilled scheduling problem.
+- Profile: `/tmp/rfdetr_trt_myelin_select_tail_graphnode_basic_ncu_20260523_235628.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_select_tail_graphnode_basic_ncu_20260523_235628_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_select_tail_graphnode_basic_ncu_20260523_235628_raw.csv`. The NCU command used graph profiling mode `node`, matched `regex:__myl_GtrNotNotMoveTranSele_0x0f229fc5c543c6b367671dfabd631179`, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.04s fps=38.31`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `88`, block size `1024`, `32` registers/thread, `16.90 KiB` static shared memory per block, no dynamic shared memory, and `2.20` waves/SM. Theoretical occupancy is `100%`, achieved occupancy is about `98.88-99.50%`, and active warps/SM are about `31.64-31.84`.
+- Throughput: Duration was about `22.82-23.23 us` under NCU replay. Compute and memory throughput were about `29.49-29.64%`, DRAM throughput about `11.73-11.88%`, and L2 throughput about `6.10-6.18%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.01` after the profile.
+- Learning: This Myelin compare/select tail is well occupied and does not share the small-grid GEMM pathology. It is a moderate fused TensorRT transform tail; the larger remaining optimization target remains the repeated underfilled GEMM/MHA tactic structure.
