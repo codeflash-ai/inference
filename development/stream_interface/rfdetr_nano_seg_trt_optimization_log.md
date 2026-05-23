@@ -724,3 +724,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.62`, `frames=538 elapsed=2.45s fps=219.88`, and `frames=538 elapsed=2.45s fps=220.00`.
 - Profile: Nsight Systems capture `/tmp/rfdetr_pinned_conversion_20260523_063547.nsys-rep` exported to `/tmp/rfdetr_pinned_conversion_20260523_063547.sqlite`; under profiler, depth `2` measured `frames=538 elapsed=2.58s fps=208.40`. After skipping the first 100 graph launches, CUDA graph duration was p50 `3782.980 us`; graph end-to-next-start gap was p50 `806.163 us`, p90 `904.306 us`, p95 `921.649 us`, p99 `1010.096 us`. CUDA API `cudaStreamSynchronize` calls dropped from the earlier current-profile `2702` calls to `1088` calls.
 - Learning: The deferred GPU count still gates CPU materialization, but grouping the remaining D2H copies onto pinned buffers reduces enough per-frame synchronization/API overhead to move the checkpoint above the previous `219.03` FPS band.
+
+### Rejected: Fixed-Capacity RFDETR Conversion Buffers
+
+- Hypothesis: The pinned conversion checkpoint grows thread-local host buffers when selected detection count increases, producing extra `cudaHostAlloc` calls in the Nsight profile. Allocating the full 100 RFDETR detection slots on first use could avoid reallocations during timed frames.
+- Change tested: Temporary code only; forced `_get_rfdetr_conversion_buffers(...)` to allocate at least 100 rows while still copying only the selected-count slice.
+- Correctness: Compared fixed-capacity pinned conversion against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=219.73`, `frames=538 elapsed=2.44s fps=220.67`, then `frames=538 elapsed=2.48s fps=216.81`; not stable enough to keep over the dynamic-capacity pinned conversion checkpoint.
+- Learning: The larger pinned allocation changes memory behavior enough to introduce variance, and avoiding a few growth allocations does not reliably improve steady-state throughput. Keep the dynamic grow-to-needed-count buffers.
