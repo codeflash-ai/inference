@@ -1912,3 +1912,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The LUT values matched the existing float32 multiply/add formula exactly for all `256` possible uint8 inputs across all three channels (`array_equal=True`, `max_diff=0.0`).
 - Result on requested command: first LUT run measured `frames=538 elapsed=2.20s fps=244.65`; repeat measured `frames=538 elapsed=2.21s fps=242.98`, below the recent same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
 - Learning: The LUT gather path is not faster end to end. The existing vectorized multiply/add normalization is already efficient and better for the current depth-2 producer/GPU balance. Reverted to the accepted ufunc normalization path.
+
+### TensorRT Accepted Engine Layer-Time Snapshot
+
+- Request: Map the remaining TensorRT graph-body bottleneck from kernel names back to TensorRT layer names to see whether a targeted plugin or replacement layer is plausible.
+- Profile: Ran the accepted engine directly with TensorRT `IProfiler` on `50` non-graph executions after warmup. Raw JSON summary is `/tmp/rfdetr_trt_layer_profile_20260523_accepted.json`.
+- Result: The profile reported `261` layers. Summed reported layer time was `5.925 ms` per execute under profiler instrumentation. Coarse layer groups by summed average time were matmul/FC `2.857 ms` across `72` layers, attention/MHA `1.185 ms` across `37` layers, fused elementwise/shape layers `1.100 ms` across `85` layers, convolutions `0.555 ms` across `14` layers, other layers `0.210 ms`, and resize `0.019 ms`.
+- Top layers: the largest individual layers were twelve repeated Myelin MHA layers (`_gemm_mha_v2_myl2_*`) at about `0.066-0.069 ms` each, followed by many backbone encoder MLP `fc2` MatMul layers at about `0.054-0.059 ms` each. The segmentation-head convolutions and resize were smaller.
+- Learning: The remaining graph body is distributed across many small Myelin-generated transformer MHA/MLP matmul layers, not a single bad layer. A custom patch would need a broad correct transformer/tactic/export change; there is no obvious one-layer plugin target left in the accepted serialized engine.
