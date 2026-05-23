@@ -1481,3 +1481,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: `frames=538 elapsed=2.30s fps=234.29`.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4102.607 us`, p90 `4117.545 us`, p95 `4121.161 us`, p99 `4127.790 us`, mean `4070.076 us`; graph end-to-next-start gap was p50 `40.479 us`, p90 `41.913 us`, p95 `42.303 us`, p99 `43.076 us`, mean `40.907 us`. Busy work inside the gap was p50 `35.072 us`, mean `35.500 us`; idle inside the gap was p50 `5.247 us`, mean `5.407 us`.
 - Learning: The current accepted path is still bottlenecked by the TensorRT CUDA graph body. The post-graph tail remains about `40 us` and only about `5 us` of that is idle, so further end-to-end wins need to reduce TensorRT graph duration or remove required input/output copies without adding synchronization.
+
+### Rejected: Borrow TensorRT Boxes And Logits Outputs
+
+- Hypothesis: The accepted CUDA graph path still clones the small TensorRT boxes and logits outputs after every replay. Borrowing those graph-owned outputs while keeping the full mask clone as the decoupling buffer might shave the graph-to-graph gap without forcing mask resize onto the next replay's critical path.
+- Change tested: Temporary gated code only; with `RFDETR_BORROW_TRT_SMALL_OUTPUTS=true`, cache-hit replay returned graph-owned boxes/logits and cloned only masks. A CPU-side ready event plus CUDA release event protected the borrowed buffers, and the fused path released them immediately after sigmoid and selector had been enqueued on the postprocess stream. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.02`, below the accepted fixed-copy band.
+- Learning: The two small D2D clones are cheaper than the extra release-event handoff on this depth-2 pipeline. Keep the simpler accepted TensorRT output clone path.
