@@ -1116,3 +1116,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; passed `pre_processing_overrides=None` from `_try_run_rfdetr_trt_fast_path(...)` and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=234.41`, `frames=538 elapsed=2.30s fps=233.61`, and `frames=538 elapsed=2.31s fps=232.93`, below the accepted fixed-copy band.
 - Learning: The dataclass allocation is below the limiter, and changing the branch pattern through preprocessing worsens the pipeline balance. Keep the explicit false overrides object.
+
+### Rejected: Highest-Priority TensorRT Graph Replay Stream
+
+- Hypothesis: A previous high-priority graph-stream test used priority `-1`, but this T4 runtime reports priority range `(0, -3)`. Using the highest priority `-3` might better prioritize TensorRT graph replay over low-priority postprocess work.
+- Change tested: Temporary code only; changed the CUDA graph state's stream construction to `torch.cuda.Stream(device=device, priority=-3)` and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=232.94`, `frames=538 elapsed=2.30s fps=233.60`, and `frames=538 elapsed=2.33s fps=231.04`, below the accepted fixed-copy band.
+- Learning: For this workload, explicit stream priority hurts scheduling. Keep the default-priority graph stream.
