@@ -1510,3 +1510,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_DISABLE_ENQUEUE_PROFILE=true`, `_capture_cuda_graph(...)` set `graph_context.enqueue_emits_profile = False` immediately after creating the graph execution context. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.45`, repeat `frames=538 elapsed=2.33s fps=231.01`, not a stable improvement over the accepted fixed-copy band.
 - Learning: TensorRT enqueue profiling emission is not a meaningful limiter for the captured RFDETR graph path. Keep the default execution-context setting.
+
+### Rejected: TensorRT On-Profile-Change Context Allocation
+
+- Hypothesis: TensorRT exposes `ExecutionContextAllocationStrategy.ON_PROFILE_CHANGE` in addition to the default static execution-context allocation. For this static-shape engine, the alternate allocation strategy might reduce context memory management overhead or produce a slightly different captured graph schedule.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_ON_PROFILE_CHANGE_CONTEXT=true`, `_capture_cuda_graph(...)` created the graph execution context with `engine.create_execution_context(trt.ExecutionContextAllocationStrategy.ON_PROFILE_CHANGE)`. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.16`, `frames=538 elapsed=2.28s fps=235.96`, and `frames=538 elapsed=2.31s fps=232.94`, not stable enough to keep over the accepted fixed-copy band.
+- Learning: The alternate allocation strategy does not reduce the TensorRT CUDA graph bottleneck. Keep the default static execution-context allocation.
