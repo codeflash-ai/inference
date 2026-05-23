@@ -872,3 +872,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Profile: Nsight Systems capture `/tmp/rfdetr_float_boxes_20260523_080830.nsys-rep` exported to `/tmp/rfdetr_float_boxes_20260523_080830.sqlite`; CSV summaries are `/tmp/rfdetr_float_boxes_20260523_080830_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_float_boxes_20260523_080830_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_float_boxes_20260523_080830_stats_cuda_api_sum.csv`. Under profiler, depth `2` measured `frames=538 elapsed=2.55s fps=211.32`.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `3786.738 us`, p90 `3821.854 us`, p95 `3824.001 us`, p99 `3845.892 us`; graph end-to-next-start gap was p50 `710.133 us`, p90 `792.947 us`, p95 `817.445 us`, p99 `975.935 us`, mean `702.444 us`. The PyTorch round kernel is absent from the top-kernel breakdown.
 - Learning: Avoiding integer box materialization can produce a higher upper band once mask resize is limited, although the benchmark remains noisy. This is acceptable for the optimized workflow because geometry remains well inside the requested tolerance and class/mask outputs stay exact.
+
+### Rejected: Float Boxes With Int32 Deferred Query Indices
+
+- Hypothesis: Keeping deferred query indices as `int32` failed by itself, but after removing the deferred box round/int conversion it might remove another small copy/cast kernel without upsetting scheduling.
+- Change tested: Temporary code only; combined the committed deferred float-box path with returning `query_indices` as `int32` from `fused_select_topk_boxes(..., return_cpu_count=False)`.
+- Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.41s fps=223.26`, `frames=538 elapsed=2.45s fps=219.47`, and `frames=538 elapsed=2.42s fps=222.56`; the low outlier makes it less stable than the committed float-box checkpoint.
+- Learning: The query-index cast remains schedule-sensitive even after removing box rounding. Keep the int64 conversion and preserve the more stable float-box checkpoint.
