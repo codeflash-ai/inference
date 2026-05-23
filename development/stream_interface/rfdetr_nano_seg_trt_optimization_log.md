@@ -458,3 +458,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: counts, classes, and boxes matched exactly.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.58s fps=208.39`, below the current checkpoint.
 - Learning: The input allocator stream handoff is still useful or its removal shifts synchronization elsewhere. Keep the TensorRT wrapper's input `record_stream(...)`.
+
+### Rejected: Inline Workflow Metadata Attachment
+
+- Hypothesis: The local workflow fast path constructs `sv.Detections`, then walks those objects again to attach prediction type and parent/root coordinate metadata. Filling those arrays during conversion could reduce CPU-side object mutation before the next frame can feed CUDA graph replay.
+- Change tested: Temporary code only; extended `_convert_inference_models_detections_to_sv_detections(...)` to accept `images` and `prediction_type`, then skipped `attach_prediction_type_info_to_sv_detections_batch(...)` and `attach_parents_coordinates_to_batch_of_sv_detections(...)` in the fast path.
+- Correctness: This change runs after tensor-to-NumPy conversion and does not affect model classes or boxes.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.59s fps=207.76`, below the current checkpoint.
+- Learning: The generic metadata helpers are not the current limiter; inlining their work added enough Python/object overhead to hurt throughput.
