@@ -1373,3 +1373,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_EMPTY_COPY_OUTPUTS=1`, copied each graph output into an explicit `empty_like` tensor on the graph stream. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=234.10`, not a clear improvement over the accepted fixed-copy band.
 - Learning: PyTorch `clone()` is already as efficient as the explicit empty-and-copy form for these graph outputs. Keep the simpler clone path.
+
+### Rejected: Overlap Mask Clone With Selector
+
+- Hypothesis: The accepted TensorRT graph stream clones boxes, logits, and the large mask output before RFDETR postprocess can start. Returning after boxes/logits are cloned while the mask clone continues on the graph stream could let sigmoid and selector overlap the mask clone, then wait for a mask-ready event only before mask resize.
+- Change tested: Temporary gated code only; with `RFDETR_OVERLAP_MASK_CLONE=1`, recorded a partial-output event after cloning boxes/logits, attached a mask-ready event to the mask clone tensor, and made fused mask resize wait for that event. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.32s fps=232.33`, below the accepted fixed-copy band.
+- Learning: The added event and partial handoff scheduling overhead exceeds any overlap gained between mask clone and selector. Keep the simple all-output clone plus stream wait.
