@@ -1920,3 +1920,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: The profile reported `261` layers. Summed reported layer time was `5.925 ms` per execute under profiler instrumentation. Coarse layer groups by summed average time were matmul/FC `2.857 ms` across `72` layers, attention/MHA `1.185 ms` across `37` layers, fused elementwise/shape layers `1.100 ms` across `85` layers, convolutions `0.555 ms` across `14` layers, other layers `0.210 ms`, and resize `0.019 ms`.
 - Top layers: the largest individual layers were twelve repeated Myelin MHA layers (`_gemm_mha_v2_myl2_*`) at about `0.066-0.069 ms` each, followed by many backbone encoder MLP `fc2` MatMul layers at about `0.054-0.059 ms` each. The segmentation-head convolutions and resize were smaller.
 - Learning: The remaining graph body is distributed across many small Myelin-generated transformer MHA/MLP matmul layers, not a single bad layer. A custom patch would need a broad correct transformer/tactic/export change; there is no obvious one-layer plugin target left in the accepted serialized engine.
+
+### Rejected: cuBLAS Workspace Runtime Config
+
+- Hypothesis: The accepted TensorRT plan is Myelin-heavy but still contains many GEMM/MHA-style kernels. Setting `CUBLAS_WORKSPACE_CONFIG` before process startup might alter cuBLAS/cuBLASLt workspace behavior for any library-backed tactics and improve graph-bound throughput.
+- Change tested: External process environment only; ran the requested benchmark with `CUBLAS_WORKSPACE_CONFIG=:4096:8`, then with `CUBLAS_WORKSPACE_CONFIG=:16:8`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result on requested command: `:4096:8` measured `frames=538 elapsed=2.20s fps=244.86`; `:16:8` measured `frames=538 elapsed=2.21s fps=243.95`, both below the recent same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
+- Learning: cuBLAS workspace configuration is not a useful runtime knob for this serialized TensorRT/Myelin plan. Keep the default library workspace behavior.
