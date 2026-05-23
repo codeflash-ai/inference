@@ -1000,3 +1000,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Prediction tensors and kernels were unchanged; the experiment only changed allocator stream-lifetime bookkeeping for the output clone tensors.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=235.14` and `frames=538 elapsed=2.31s fps=233.07`, below the accepted fixed-copy checkpoint.
 - Learning: `record_stream(...)` is not the remaining limiter, and skipping it still perturbs scheduling enough to lose low-end stability. Keep the original stream lifetime bookkeeping.
+
+### Rejected: Raw-Logit Selector With Selected-Only Sigmoid
+
+- Hypothesis: Sigmoid is monotonic, so the fused selector can rank raw logits and compare against `logit(threshold)`, then compute sigmoid only for selected output confidences. This avoids the full PyTorch sigmoid over the `100x91` logits without doing `exp` for every class lane inside the selector.
+- Change tested: Temporary code only; changed RFDETR instance postprocess to try the fused selector before materializing `logits_sigmoid`, added a raw-logit threshold mode to `_select_topk_boxes_kernel`, and stored `sigmoid(top_logit)` only for kept detections. Pipeline depth remained fixed at `2`.
+- Correctness: Compared raw-logit fused postprocess against the PyTorch fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=1.1920928955078125e-07`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=233.26` and `frames=538 elapsed=2.29s fps=234.68`, below the accepted fixed-copy checkpoint.
+- Learning: Removing the global sigmoid kernel is still not worth the extra selector complexity and selected-score `exp` work. Keep the standalone PyTorch sigmoid plus simpler selector.
