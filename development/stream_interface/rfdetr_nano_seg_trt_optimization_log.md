@@ -1547,3 +1547,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first `100` graph launches, CUDA graph duration was p50 `4064.207 us`, p90 `4130.817 us`, p95 `4134.781 us`, p99 `4141.249 us`, mean `4058.199 us`; graph end-to-next-start gap was p50 `40.479 us`, p90 `41.868 us`, p95 `42.335 us`, p99 `42.964 us`, mean `41.481 us`.
 - Gap decomposition: Busy work inside the gap was p50 `35.168 us`, mean `35.742 us`; idle inside the gap was p50 `5.184 us`, p90 `5.920 us`, p95 `6.015 us`, p99 `6.208 us`, mean `5.739 us`. The largest gap occupants were the TensorRT mask D2D clone (`2433600B`, `13.156 us` avg overlap), graph input D2D copy (`1168128B`, `13.119 us` avg overlap), sigmoid (`6.872 us` avg overlap), fill-long (`2.817 us` avg overlap), selector (`2.184 us` avg overlap), logits D2D clone (`36400B`, `2.102 us` avg overlap), and boxes D2D clone (`1600B`, `1.991 us` avg overlap).
 - Learning: Depth `2` remains constrained by the CUDA graph body. The post-graph interval is low and consistent, and the remaining idle bubble is only about `5-6 us`; further wins need to reduce TensorRT graph duration or eliminate required input/output copies without adding postprocess dependencies.
+
+### Rejected: Boxes-Mask-Logits TensorRT Output Clone Order
+
+- Hypothesis: The accepted TensorRT graph cache-hit path clones boxes, logits, then masks. Cloning boxes first, then the large mask tensor, then logits might improve D2D copy scheduling while still returning `[detections, labels, mask]` to callers.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_BOX_MASK_LOGITS_OUTPUT_CLONE=true`, cloned TensorRT output buffer `0`, then `2`, then `1`, and returned results in the original output order. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.66`, below the accepted fixed-copy band.
+- Learning: Reordering the same graph-stream D2D clones does not reduce the critical graph-to-graph interval. Keep the original boxes/logits/mask order.
