@@ -1309,3 +1309,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_REUSE_SIGMOID_BUFFER=1`, cached a thread-local same-shape logits sigmoid buffer and wrote sigmoid results into it for RFDETR postprocess. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.65`, below the accepted fixed-copy band.
 - Learning: PyTorch's normal sigmoid allocation is not the limiter, and the `out=` path/thread-local lookup does not tighten the graph-to-graph interval. Keep the standard out-of-place sigmoid.
+
+### Rejected: Disable TensorRT Aux Streams During Capture
+
+- Hypothesis: The cached TensorRT engine reports four auxiliary streams. Forcing the CUDA-graph execution context to use no aux streams during capture might make the graph replay easier to schedule and reduce the graph-to-graph tail.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_ZERO_AUX_STREAMS=1`, called `graph_context.set_aux_streams([])` before graph capture. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.41`, below the accepted fixed-copy band.
+- Learning: Disabling TensorRT auxiliary streams during graph capture slows the forward pass on this engine/runtime. Keep TensorRT's default aux-stream scheduling.
