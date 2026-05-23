@@ -1538,3 +1538,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_MASK_FIRST_OUTPUT_CLONE=true`, cloned TensorRT output buffer `2` first, then buffers `0` and `1`, and returned `[detections, labels, mask]`. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.15`, below the accepted fixed-copy band.
 - Learning: Output clone order does not improve the graph-to-graph interval. The existing boxes/logits/mask order remains the better schedule for this pipeline.
+
+### Depth-2 Accepted Nsight Systems Refresh
+
+- Request: Collect a fresh Nsight Systems report for the current accepted implementation while keeping pipeline depth fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_141912.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_141912.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_141912_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_141912_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_141912_stats_cuda_api_sum.csv`.
+- Profiled result: `frames=538 elapsed=2.30s fps=233.83` under Nsight Systems overhead.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first `100` graph launches, CUDA graph duration was p50 `4064.207 us`, p90 `4130.817 us`, p95 `4134.781 us`, p99 `4141.249 us`, mean `4058.199 us`; graph end-to-next-start gap was p50 `40.479 us`, p90 `41.868 us`, p95 `42.335 us`, p99 `42.964 us`, mean `41.481 us`.
+- Gap decomposition: Busy work inside the gap was p50 `35.168 us`, mean `35.742 us`; idle inside the gap was p50 `5.184 us`, p90 `5.920 us`, p95 `6.015 us`, p99 `6.208 us`, mean `5.739 us`. The largest gap occupants were the TensorRT mask D2D clone (`2433600B`, `13.156 us` avg overlap), graph input D2D copy (`1168128B`, `13.119 us` avg overlap), sigmoid (`6.872 us` avg overlap), fill-long (`2.817 us` avg overlap), selector (`2.184 us` avg overlap), logits D2D clone (`36400B`, `2.102 us` avg overlap), and boxes D2D clone (`1600B`, `1.991 us` avg overlap).
+- Learning: Depth `2` remains constrained by the CUDA graph body. The post-graph interval is low and consistent, and the remaining idle bubble is only about `5-6 us`; further wins need to reduce TensorRT graph duration or eliminate required input/output copies without adding postprocess dependencies.
