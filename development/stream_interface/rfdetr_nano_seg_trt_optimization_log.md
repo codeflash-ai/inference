@@ -1059,3 +1059,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; moved detection-limit clamping before the output allocation in `fused_resize_selected_masks(...)`, allocated only the limited row count, and kept pipeline depth fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.93`, `frames=538 elapsed=2.26s fps=237.60`, and `frames=538 elapsed=2.31s fps=232.63`, not a stable improvement over the accepted fixed-copy band.
 - Learning: The fixed full-capacity allocation remains more stable in the two-frame pipeline despite unused rows. Keep the current output shape and rely on the limited launch grid for the actual kernel work reduction.
+
+### Rejected: CUDA Device Max Connections Tuning
+
+- Hypothesis: The run is now sensitive to stream scheduling between TensorRT graph replay, postprocess kernels, H2D preprocessing, and D2H prediction copies. Tuning `CUDA_DEVICE_MAX_CONNECTIONS` before CUDA initialization might reduce scheduling variance or graph-to-graph gaps.
+- Change tested: No code change; ran the exact benchmark with `CUDA_DEVICE_MAX_CONNECTIONS=1`, `2`, `4`, and `8`, always with pipeline depth fixed at `2`.
+- Result on requested command: `1` regressed badly to `frames=538 elapsed=2.71s fps=198.62`; `2` measured `237.26` FPS; `4` measured `234.84` FPS; `8` measured `236.23` FPS. The non-1 settings are within normal accepted-path noise and do not justify changing the command/runtime defaults.
+- Learning: Do not force CUDA device connection count for this benchmark. The default stream scheduling is already in the best observed band, while `1` removes useful concurrency.
