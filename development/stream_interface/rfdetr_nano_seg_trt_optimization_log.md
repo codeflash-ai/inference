@@ -1323,3 +1323,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_CALLER_GRAPH_STREAM=true`, captured the TensorRT CUDA graph on `torch.cuda.current_stream(device)` and skipped the wait edges when the cached graph stream matched the caller stream. Pipeline depth remained fixed at `2`. A first run with `RFDETR_TRT_CALLER_GRAPH_STREAM=1` failed before processing frames because this repo's env parser accepts `true`/`false`, not `1`/`0`, and was discarded.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.32s fps=231.91`, below the accepted fixed-copy band.
 - Learning: The separate graph stream plus explicit handoff remains the better schedule for this depth-2 pipeline. The extra event edges are not the limiter, and folding graph replay onto the caller stream slows the full run.
+
+### Profile: Fresh Accepted Depth-2 Graph Gap
+
+- Request: Collect a new Nsight Systems report for the current accepted implementation while keeping the pipeline fixed at depth `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_122306.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_122306.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_122306_stats_cuda_gpu_kern_sum_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_122306_stats_cuda_gpu_mem_time_sum_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_122306_stats_cuda_api_sum_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.31s fps=232.91`.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4104.479 us`, p90 `4121.887 us`, p95 `4125.118 us`, p99 `4179.422 us`, mean `4078.695 us`; graph end-to-next-start gap was p50 `40.511 us`, p90 `41.919 us`, p95 `42.751 us`, p99 `43.327 us`, mean `40.813 us`. Busy work inside the gap was p50 `35.071 us`, mean `35.382 us`; idle inside the gap was p50 `5.344 us`, mean `5.431 us`.
+- Learning: The latest accepted path is still effectively TensorRT CUDA-graph limited. The post-graph interval is short and stable, and the remaining idle bubble is only about `5 us` median.
