@@ -338,3 +338,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The `512` variant matched exact-sized postprocess on all 538 frames, including dense masks and max box delta `0` px. The `128` variant changes only tile shape and uses the same math.
 - Result on requested command: `512/8` measured `frames=538 elapsed=2.68s fps=200.67`; `128/4` measured `frames=538 elapsed=2.66s fps=202.41`, both below the committed `256/4` path.
 - Learning: The current 256-pixel tile remains the best balance. Larger tiles likely hurt register/occupancy behavior, while smaller tiles add too many programs.
+
+### Direct NumPy Ufunc RFDETR Channel Fill
+
+- Hypothesis: The pinned preprocessing path still allocates a temporary float32 array for each channel via `astype(...)` before copying into the pinned CHW output. Writing each uint8 channel directly into the destination with NumPy ufuncs should remove those temporary arrays.
+- Change: Replaced per-channel `astype(np.float32)` temporaries with `np.multiply(..., out=channel, casting="unsafe")` directly into the normalized output channel, followed by in-place mean/std normalization.
+- Correctness: Compared the patched preprocessing path against the prior temporary-channel formula on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Micro-result: Isolated channel-fill prototype measured `0.434 ms/frame` vs `0.476 ms/frame` for the previous temporary-channel fill. Integrated preprocess-only loop over 128 frames measured `1.638 ms/frame`.
+- Result on requested command: isolated depth `2` runs measured `frames=538 elapsed=2.61s fps=206.40` and `frames=538 elapsed=2.59s fps=207.82`.
+- Learning: Small CPU allocation reductions still matter after the pinned H2D change because they improve the producer side of the two-frame pipeline without changing GPU semantics.

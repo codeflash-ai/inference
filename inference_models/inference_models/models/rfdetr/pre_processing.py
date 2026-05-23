@@ -238,11 +238,15 @@ def _pil_image_to_normalized_tensor(
         normalized_tensor = None
         normalized = np.empty(shape, dtype=np.float32)
     for output_channel, input_channel in enumerate(channel_order):
-        channel = image_array[:, :, input_channel].astype(np.float32)
-        channel *= 1.0 / 255.0
+        channel = normalized[output_channel]
+        np.multiply(
+            image_array[:, :, input_channel],
+            np.float32(1.0 / 255.0),
+            out=channel,
+            casting="unsafe",
+        )
         channel -= mean[output_channel]
         channel /= std[output_channel]
-        normalized[output_channel] = channel
     if normalized_tensor is not None:
         return normalized_tensor
     return torch.from_numpy(normalized)
