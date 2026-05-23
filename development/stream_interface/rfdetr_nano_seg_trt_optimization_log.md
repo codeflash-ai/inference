@@ -1843,3 +1843,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime settings only; after confirming no other CUDA process was active, ran the requested benchmark with `taskset -c 0-3` on the 4-core/8-thread VM, then with `nice -n -20`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: Clean default baseline after stale-process cleanup measured `frames=538 elapsed=2.21s fps=243.99`. `taskset -c 0-3` measured `244.44` then `243.88` FPS. `nice -n -20` measured `243.46` FPS.
 - Learning: CPU scheduler tuning is not a stable improvement. The small first affinity result is within normal warmed-path noise, and priority does not help. Keep the default CPU scheduling for the benchmark.
+
+### External Runtime Refresh: Application Clocks After Cleanup
+
+- Hypothesis: After removing a stale benchmark process that had been holding a CUDA context, the previous max application-clock diagnostic might expose a higher ceiling for the accepted warmed path.
+- Change tested: External runtime setting only; set application clocks to `(MEM 5001, SM 1590)`, ran the requested benchmark with pipeline depth fixed at `2`, then reset application clocks with `nvidia-smi -rac`.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.24`, compared with the same-session default-clock clean baseline of `frames=538 elapsed=2.21s fps=243.99`.
+- Learning: Application clocks still do not move throughput beyond the accepted warmed band. The current code-level CUDA graph warmup already reaches the practical graph-bound clock regime for the measured interval.
