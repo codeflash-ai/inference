@@ -715,3 +715,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared compact borrowed outputs against the cloned-output fused path on 120 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.53`, below the current `219.03` FPS checkpoint.
 - Learning: Replacing the full mask clone with selector/gather stream choreography adds enough pre-next-graph work to lose throughput. The existing clone is cheaper than the synchronization structure needed to borrow graph outputs safely.
+
+### RFDETR Pinned Host Detection Materialization
+
+- Hypothesis: The workflow conversion path performs separate blocking `.cpu().numpy()` copies for boxes, confidences, classes, and dense masks after the deferred fused count read. Reusing thread-local pinned host buffers and enqueueing all D2H copies before one stream synchronize should reduce result-materialization overhead while preserving independent NumPy arrays for queued predictions.
+- Change: Added a CUDA-only conversion fast path in the instance segmentation workflow block. When RFDETR fused postprocess provides a deferred valid count, the converter copies selected boxes, confidences, classes, and masks into reusable pinned CPU buffers with `non_blocking=True`, synchronizes once, then returns normal copied NumPy arrays so queued sink payloads are not backed by reusable storage.
+- Correctness: Compared pinned conversion against the previous `.cpu().numpy()` conversion on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.62`, `frames=538 elapsed=2.45s fps=219.88`, and `frames=538 elapsed=2.45s fps=220.00`.
+- Learning: The deferred GPU count still gates CPU materialization, but grouping the remaining D2H copies onto pinned buffers reduces enough per-frame synchronization/API overhead to move the checkpoint above the previous `219.03` FPS band.

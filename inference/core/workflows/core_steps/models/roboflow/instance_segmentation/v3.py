@@ -1,8 +1,10 @@
+import threading
 import uuid
 from typing import List, Literal, Optional, Type, Union
 
 import numpy as np
 import supervision as sv
+import torch
 from pydantic import ConfigDict, Field, PositiveInt, model_validator
 from supervision.config import CLASS_NAME_DATA_FIELD
 
@@ -72,6 +74,40 @@ You will need to set your Roboflow API key in your Inference environment to use 
 block. To learn more about setting your Roboflow API key, [refer to the Inference
 documentation](https://inference.roboflow.com/quickstart/configure_api_key/).
 """
+
+_RFDETR_CONVERSION_BUFFERS = threading.local()
+
+
+def _get_rfdetr_conversion_buffers(
+    count: int,
+    mask_shape: tuple,
+    xyxy_dtype: torch.dtype,
+    confidence_dtype: torch.dtype,
+    class_id_dtype: torch.dtype,
+    mask_dtype: torch.dtype,
+) -> tuple:
+    existing_key = getattr(_RFDETR_CONVERSION_BUFFERS, "key", None)
+    existing_capacity = getattr(_RFDETR_CONVERSION_BUFFERS, "capacity", 0)
+    requested_key = (
+        mask_shape,
+        xyxy_dtype,
+        confidence_dtype,
+        class_id_dtype,
+        mask_dtype,
+    )
+    if existing_key == requested_key and existing_capacity >= count:
+        return _RFDETR_CONVERSION_BUFFERS.buffers
+    capacity = max(count, existing_capacity)
+    buffers = (
+        torch.empty((capacity, 4), dtype=xyxy_dtype, pin_memory=True),
+        torch.empty((capacity,), dtype=confidence_dtype, pin_memory=True),
+        torch.empty((capacity,), dtype=class_id_dtype, pin_memory=True),
+        torch.empty((capacity,) + mask_shape, dtype=mask_dtype, pin_memory=True),
+    )
+    _RFDETR_CONVERSION_BUFFERS.key = requested_key
+    _RFDETR_CONVERSION_BUFFERS.capacity = capacity
+    _RFDETR_CONVERSION_BUFFERS.buffers = buffers
+    return buffers
 
 
 class BlockManifest(WorkflowBlockManifest):
@@ -529,10 +565,20 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
                 confidence_tensor = detections_element.confidence
                 class_id_tensor = detections_element.class_id
                 mask_tensor = detections_element.mask
-            xyxy = xyxy_tensor.detach().cpu().numpy()
-            confidence = confidence_tensor.detach().cpu().numpy()
-            class_id = class_id_tensor.detach().cpu().numpy()
-            masks = mask_tensor.detach().cpu().numpy()
+            pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
+                xyxy_tensor=xyxy_tensor,
+                confidence_tensor=confidence_tensor,
+                class_id_tensor=class_id_tensor,
+                mask_tensor=mask_tensor,
+                valid_count=valid_count,
+            )
+            if pinned_arrays is not None:
+                xyxy, confidence, class_id, masks = pinned_arrays
+            else:
+                xyxy = xyxy_tensor.detach().cpu().numpy()
+                confidence = confidence_tensor.detach().cpu().numpy()
+                class_id = class_id_tensor.detach().cpu().numpy()
+                masks = mask_tensor.detach().cpu().numpy()
             class_names = np.array(
                 [
                     (
@@ -564,6 +610,47 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
                 )
             result.append(sv_detections)
         return result
+
+    @staticmethod
+    def _try_copy_cuda_detection_tensors_to_pinned_numpy(
+        xyxy_tensor: torch.Tensor,
+        confidence_tensor: torch.Tensor,
+        class_id_tensor: torch.Tensor,
+        mask_tensor: torch.Tensor,
+        valid_count: Optional[int],
+    ) -> Optional[tuple]:
+        if valid_count is None or not xyxy_tensor.is_cuda or not mask_tensor.is_cuda:
+            return None
+        if (
+            not confidence_tensor.is_cuda
+            or not class_id_tensor.is_cuda
+            or mask_tensor.ndim != 3
+        ):
+            return None
+        try:
+            buffers = _get_rfdetr_conversion_buffers(
+                count=max(valid_count, 1),
+                mask_shape=tuple(mask_tensor.shape[1:]),
+                xyxy_dtype=xyxy_tensor.dtype,
+                confidence_dtype=confidence_tensor.dtype,
+                class_id_dtype=class_id_tensor.dtype,
+                mask_dtype=mask_tensor.dtype,
+            )
+        except RuntimeError:
+            return None
+        xyxy_buffer, confidence_buffer, class_id_buffer, mask_buffer = buffers
+        if valid_count:
+            xyxy_buffer[:valid_count].copy_(xyxy_tensor, non_blocking=True)
+            confidence_buffer[:valid_count].copy_(confidence_tensor, non_blocking=True)
+            class_id_buffer[:valid_count].copy_(class_id_tensor, non_blocking=True)
+            mask_buffer[:valid_count].copy_(mask_tensor, non_blocking=True)
+            torch.cuda.current_stream(xyxy_tensor.device).synchronize()
+        return (
+            xyxy_buffer[:valid_count].numpy().copy(),
+            confidence_buffer[:valid_count].numpy().copy(),
+            class_id_buffer[:valid_count].numpy().copy(),
+            mask_buffer[:valid_count].numpy().copy(),
+        )
 
     def run_remotely(
         self,
