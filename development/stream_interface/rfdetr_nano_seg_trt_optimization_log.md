@@ -1444,3 +1444,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_SKIP_FORWARD_LOCK_ON_GRAPH_HIT=1`, `RFDetrForInstanceSegmentationTRT.forward(...)` used the normal lock for graph capture, then skipped it when the static cache key was already present. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.77`, repeat `frames=538 elapsed=2.32s fps=231.57`, not better than the accepted fixed-copy band.
 - Learning: The forward lock is not a meaningful bottleneck now that graph-to-graph idle is only a few microseconds. It likely helps keep cross-thread scheduling stable, so keep the locked forward path.
+
+### Rejected: Skip PyCUDA Context On TensorRT Graph Cache Hit
+
+- Hypothesis: Once the static TensorRT CUDA graph has been captured, cache-hit replay uses PyTorch streams and the captured graph state. Skipping the per-frame `use_cuda_context(...)` push/pop on cache hits might remove CPU overhead without changing graph execution.
+- Change tested: Temporary gated code only; with `RFDETR_SKIP_CUDA_CONTEXT_ON_GRAPH_HIT=1`, `RFDetrForInstanceSegmentationTRT.forward(...)` kept the model lock but skipped the PyCUDA context manager when the static graph-cache key was already present. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=234.21`, repeat `frames=538 elapsed=2.33s fps=230.89`, not stable enough to keep over the accepted fixed-copy band.
+- Learning: Context push/pop is below the limiter or helps maintain predictable CUDA context state across worker threads. Keep the original context manager on forward.
