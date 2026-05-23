@@ -812,3 +812,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared slot-copy outputs against the clone path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.78` and `frames=538 elapsed=2.45s fps=219.73`, not an improvement over the pinned-conversion checkpoint.
 - Learning: PyTorch's cached allocation for the result clones is not the source of the remaining graph gap. Keeping reusable borrowed CUDA buffers also adds a depth-specific ownership assumption, so leave the clone path unchanged.
+
+### Current Depth-2 Nsight Profile
+
+- Request: Generate a fresh Nsight Systems capture on the current accepted code path while keeping pipeline depth fixed at `2`.
+- Profile: Nsight Systems capture `/tmp/rfdetr_depth2_graphtrace_local_20260523_073518.nsys-rep` exported to `/tmp/rfdetr_depth2_graphtrace_local_20260523_073518.sqlite`; CSV summaries are `/tmp/rfdetr_depth2_graphtrace_local_20260523_073518_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_graphtrace_local_20260523_073518_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_graphtrace_local_20260523_073518_stats_cuda_api_sum.csv`.
+- Result under profiler: depth `2` measured `frames=538 elapsed=2.58s fps=208.77`.
+- Graph spacing: The corrected capture includes `538` CUDA graph traces on stream `39`. After skipping the first 100 launches, CUDA graph duration was p50 `3781.637 us`, p90 `3812.413 us`, p95 `3817.378 us`, p99 `3824.886 us`; graph end-to-next-start gap was p50 `803.827 us`, p90 `891.474 us`, p95 `911.633 us`, p99 `1134.530 us`, mean `810.141 us`.
+- Note: An earlier same-turn capture omitted `PYTHONPATH=/app/inference_models`, used the installed package, and did not include CUDA graph replay; ignore `/tmp/rfdetr_depth2_current_20260523_073219.*` and `/tmp/rfdetr_depth2_graphtrace_20260523_073343.*` for this optimization thread.
