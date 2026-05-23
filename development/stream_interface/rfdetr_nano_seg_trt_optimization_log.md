@@ -311,3 +311,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The change runs after tensor-to-NumPy conversion and does not affect model classes or boxes.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.79s fps=193.07` and `frames=538 elapsed=2.83s fps=189.99`, not a clear improvement.
 - Learning: UUID generation is not a measurable limiter after the fused/deferred path; keep the existing identifier behavior.
+
+### Rejected: PIL Image FromBuffer Wrapper
+
+- Hypothesis: `Image.fromarray(...)` may copy contiguous OpenCV frames before PIL resize. For uint8 HWC contiguous images, `Image.frombuffer(...)` could avoid that copy while preserving channel values.
+- Change tested: Temporary `_pil_from_hwc_uint8(...)` helper that used `Image.frombuffer("RGB", ...)` for contiguous 3-channel uint8 images and fell back to `Image.fromarray(...)` otherwise.
+- Correctness: Compared patched preprocessing against the previous `Image.fromarray(...)` path on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Micro-result: Isolated conversion prototype measured `1.446 ms/frame` vs `1.455 ms/frame` for the `fromarray` path over 128 frames.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.81s fps=191.23` and `frames=538 elapsed=2.82s fps=191.04`, below the current checkpoint band.
+- Learning: Any copy saved by `frombuffer` is too small to matter, and PIL resize plus downstream pipeline scheduling dominate this part of preprocessing.
