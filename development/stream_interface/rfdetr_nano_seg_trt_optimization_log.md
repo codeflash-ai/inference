@@ -2293,3 +2293,21 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: graph only measured `4.050621 ms` (`246.88 fps`), input copy plus graph measured `4.081056 ms` (`245.03 fps`), graph plus output clones measured `4.103890 ms` (`243.67 fps`), and input copy plus graph plus output clones measured `4.129317 ms` (`242.17 fps`).
 - Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.10` after the diagnostic.
 - Learning: Input copy and output clones are real costs, but the accepted two-frame schedule overlaps enough surrounding work that the full workflow can run slightly faster than a single-stream serialized helper loop. Prior clone/borrow/copy rewrites lost this overlap. Further copy/clone tuning is unlikely to beat the current schedule unless it preserves the same decoupling while reducing the TensorRT graph body or replacing the serialized plan.
+
+### Diagnostic: TensorRT Temporary Allocator Probe
+
+- Hypothesis: `IExecutionContext.temporary_allocator` could reveal or control hidden TensorRT temporary allocations during the warmup/capture/replay path. If TensorRT was allocating temporary device buffers around graph capture, a preallocated allocator might reduce graph setup or replay jitter.
+- Diagnostic: Used a temporary Python harness against the accepted engine and attached a logging `trt.IGpuAllocator` to the CUDA graph execution context. The allocator returned `None` for allocations so any real TensorRT temporary allocation would be visible and fail fast; no workflow code was changed. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Result: The allocator received `0` callbacks after the pre-capture warmup enqueue, `0` callbacks after CUDA graph capture, and `0` callbacks after ten graph replays.
+- Learning: TensorRT is not using the per-context temporary allocator in this static RFDETR graph path. There is no useful temporary-allocation hook to optimize, and adding a custom allocator would only add complexity.
+
+### Profile: Depth-2 Graph-Paced Nsight Systems Refresh
+
+- Request: Capture a fresh Nsight Systems report for user analysis while keeping workflow pipeline depth fixed at `2`. Depth `3` was not tested.
+- Profile: `/tmp/rfdetr_depth2_graphpaced_20260523_211726.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_graphpaced_20260523_211726.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_graphpaced_20260523_211726_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_graphpaced_20260523_211726_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_graphpaced_20260523_211726_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.30s fps=234.28`.
+- Graph spacing: The capture contains `602` CUDA graph traces. After skipping `64` capture warmup replays plus `100` settling launches, graph duration was p50 `4070.800 us`, p90 `4134.482 us`, p95 `4137.841 us`, mean `4075.039 us`; graph end-to-next-start gap was p50 `40.383 us`, p90 `41.548 us`, p95 `41.856 us`, mean `40.500 us`; graph start-to-start interval was p50 `4111.038 us`, p90 `4175.217 us`, p95 `4178.257 us`, mean `4115.560 us`.
+- Gap decomposition after the same skip: busy work inside the graph-to-graph gap was p50 `34.943 us`, p90 `36.319 us`, p95 `37.036 us`, mean `35.086 us`; true idle was p50 `5.408 us`, p90 `6.048 us`, p95 `6.272 us`, mean `5.414 us`.
+- Gap occupants: the largest clipped occupants were next-frame input Device-to-Device copy (`1168128B`, `13.130 us/gap`), TensorRT mask Device-to-Device clone (`2433600B`, `13.114 us/gap`), sigmoid (`6.902 us/gap`), fill-long (`2.812 us/gap`), logits Device-to-Device clone (`36400B`, `2.105 us/gap`), boxes Device-to-Device clone (`1600B`, `2.000 us/gap`), fill-int (`1.947 us/gap`), and `_select_topk_boxes_kernel` (`1.660 us/gap`).
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.29` immediately after the profile.
+- Learning: The run is already graph-paced with only about `5.4 us` median idle between TensorRT graph replays. The consistent limiter is still the approximately `4.075 ms` TensorRT CUDA graph body plus unavoidable input/output ownership copies and a narrow fused-postprocess tail; CPU work is not blocking the next model forward in the steady state.
