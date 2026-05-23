@@ -659,3 +659,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.60`, `frames=538 elapsed=2.46s fps=219.03`, and `frames=538 elapsed=2.46s fps=218.97`.
 - Profile: Nsight Systems capture `/tmp/rfdetr_fused_norm_20260523_054913.nsys-rep` exported to `/tmp/rfdetr_fused_norm_20260523_054913.sqlite`; under profiler, depth `2` measured `frames=538 elapsed=2.56s fps=210.22`. After skipping the first 100 graph launches, CUDA graph duration was p50 `3787.381 us`; graph end-to-next-start gap was p50 `763.060 us`, p90 `852.370 us`, p95 `892.396 us`, p99 `1042.918 us`.
 - Learning: This is a small CPU-side gain but it is algebraically simple and keeps the benchmark at the current best band. The remaining bottleneck is still the graph replay plus the postprocess/materialization tail rather than normalization alone.
+
+### Rejected: Skip Pinned Buffer Reuse Synchronize
+
+- Hypothesis: The RFDETR workflow fast path runs preprocess, forward, postprocess, and result materialization before the same worker thread reuses its thread-local pinned normalization buffer. The previous H2D copy should therefore already be complete, so skipping `_get_pinned_normalized_buffer(...)`'s `copy_event.synchronize()` in this fast path could remove a small CPU API wait.
+- Change tested: Temporary code only; added a guarded `skip_pinned_buffer_reuse_sync` flag through RFDETR preprocessing and enabled it only for the RFDETR TRT workflow fast path.
+- Correctness: Compared skip-sync against the normal synchronized path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.19` and `frames=538 elapsed=2.50s fps=215.27`, below the current `219.03` FPS checkpoint.
+- Learning: The event synchronize is either already cheap when completed or helps maintain better copy/launch ordering. Keep the explicit pinned-buffer reuse synchronization.
