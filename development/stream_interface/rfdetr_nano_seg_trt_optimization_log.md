@@ -2517,3 +2517,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `83.30-83.49 us` under NCU replay. Compute throughput was about `36.28-36.48%`, memory throughput about `40.33-40.58%`, DRAM throughput about `16.66-16.72%`, and L2 throughput about `33.66-33.73%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.00` after the profile.
 - Learning: The indexed fprop node has more CTAs than the smallest GEMMs but is still low-occupancy and moderately memory/L2 pressured. It remains a TensorRT-forward tactic issue; the surrounding pipeline is already keeping the CPU and postprocess off the critical path.
+
+### Profile: TensorRT 128x128 FP16/FP32 NT GEMM Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `sm75_xmma_gemm_f16f16_f16f32_f32_nt_n_tilesize128x128x32_stage1_warpsize2x2x1_tensor16x8x8_aligna4_alignc4_execute_kernel_trt` as a single TensorRT graph node around `45 us/replay`. Profiling it can show whether this FP32-accumulating NT GEMM is limited by compute throughput, register pressure, or small-grid occupancy.
+- Profile: `/tmp/rfdetr_trt_gemm128x128_nt_f16f32_graphnode_basic_ncu_20260523_223846.ncu-rep`, details text `/tmp/rfdetr_trt_gemm128x128_nt_f16f32_graphnode_basic_ncu_20260523_223846_details.txt`, raw CSV `/tmp/rfdetr_trt_gemm128x128_nt_f16f32_graphnode_basic_ncu_20260523_223846_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact kernel name, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.25s fps=37.75`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `48`, block size `128`, `226` registers/thread, `17.408 KiB` dynamic shared memory per block, and `0.60` waves/SM. Achieved occupancy is about `16.31-16.64%`, with active warps/SM about `5.22-5.32`.
+- Throughput: Duration was about `61.76-62.75 us` under NCU replay. Compute throughput was about `27.42-27.58%`, memory throughput about `30.14-30.30%`, DRAM throughput about `11.88-12.18%`, and L2 throughput about `14.61-14.85%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.57` after the profile.
+- Learning: This FP32-accumulating NT GEMM is register-heavy and still small-grid limited, with only `48` CTAs and about `16.5%` achieved occupancy. The remaining isolated TensorRT GEMMs continue to reinforce that local wrapper/postprocess work is no longer the limiting surface.
