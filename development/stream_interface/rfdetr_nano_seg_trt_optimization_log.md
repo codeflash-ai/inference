@@ -634,3 +634,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared deferred fused postprocess against exact-sized postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.27` and `frames=538 elapsed=2.49s fps=215.66`, below the current `218.97` FPS checkpoint.
 - Learning: The current 4-warp launch is already well-balanced for this T4 kernel. More warps change scheduling without reducing the end-to-end graph gap.
+
+### Rejected: Direct Pinned Host Input To CUDA Graph
+
+- Hypothesis: The current TRT graph path first copies the normalized pinned CPU tensor to a temporary CUDA tensor, then copies that CUDA tensor into the captured graph input buffer. Returning the pinned CPU tensor from RFDETR preprocessing and copying it directly into the graph input buffer could remove the temporary CUDA input tensor and one device-to-device copy.
+- Change tested: Temporary code only; added a guarded `keep_cuda_graph_input_on_host` path for the RFDETR TRT workflow fast path, skipped CUDA transfer in preprocessing, let the CUDA graph input copy accept pinned CPU input with `non_blocking=True`, and recorded the pinned-buffer reuse event after graph-stream consumption.
+- Correctness: Compared direct pinned-host graph input against the normal CUDA-input graph path on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.65` and `frames=538 elapsed=2.49s fps=216.35`, below the current `218.97` FPS checkpoint.
+- Learning: The existing temporary CUDA input allows the H2D copy to overlap on the preprocessing stream before graph replay. Moving H2D into the graph input copy reduces a D2D copy but puts the larger H2D transfer closer to the critical path, widening the effective graph gap.
