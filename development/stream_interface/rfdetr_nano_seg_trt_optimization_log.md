@@ -1437,3 +1437,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_AUX_STREAM_COUNT`, `_capture_cuda_graph(...)` created that many Torch CUDA streams, passed their handles to `IExecutionContext.set_aux_streams(...)`, and kept them alive on the CUDA graph state. Pipeline depth remained fixed at `2`.
 - Result on requested command: `RFDETR_TRT_AUX_STREAM_COUNT=2` measured `frames=538 elapsed=2.31s fps=233.11`; `RFDETR_TRT_AUX_STREAM_COUNT=1` measured `frames=538 elapsed=2.31s fps=232.90`, both below the accepted fixed-copy band.
 - Learning: Manually constraining TensorRT aux-stream count does not improve graph replay. Keep TensorRT's default aux-stream scheduling.
+
+### Rejected: Skip RFDETR Forward Lock On Graph Cache Hit
+
+- Hypothesis: After the static TensorRT CUDA graph is captured, the model-level RFDETR forward lock might be unnecessary because the graph cache is internally locked and the shared inference stream serializes GPU work. Skipping the lock on cache hits could reduce CPU scheduling overhead before graph replay.
+- Change tested: Temporary gated code only; with `RFDETR_SKIP_FORWARD_LOCK_ON_GRAPH_HIT=1`, `RFDetrForInstanceSegmentationTRT.forward(...)` used the normal lock for graph capture, then skipped it when the static cache key was already present. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.77`, repeat `frames=538 elapsed=2.32s fps=231.57`, not better than the accepted fixed-copy band.
+- Learning: The forward lock is not a meaningful bottleneck now that graph-to-graph idle is only a few microseconds. It likely helps keep cross-thread scheduling stable, so keep the locked forward path.
