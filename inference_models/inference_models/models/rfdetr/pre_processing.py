@@ -211,16 +211,24 @@ def _pil_image_to_normalized_tensor(
 ) -> Optional[torch.Tensor]:
     if not network_input.normalization or network_input.input_channels != 3:
         return None
-    image_array = np.asarray(image, dtype=np.float32)
+    image_array = np.asarray(image)
     if image_array.ndim != 3 or image_array.shape[2] != 3:
         return None
-    if swap_tensor_channels:
-        image_array = image_array[:, :, [2, 1, 0]]
-    image_array *= 1.0 / 255.0
     mean, std = network_input.normalization
-    image_array -= np.asarray(mean, dtype=np.float32)
-    image_array /= np.asarray(std, dtype=np.float32)
-    return torch.from_numpy(np.ascontiguousarray(image_array.transpose(2, 0, 1)))
+    mean = np.asarray(mean, dtype=np.float32)
+    std = np.asarray(std, dtype=np.float32)
+    channel_order = (2, 1, 0) if swap_tensor_channels else (0, 1, 2)
+    normalized = np.empty(
+        (3, image_array.shape[0], image_array.shape[1]),
+        dtype=np.float32,
+    )
+    for output_channel, input_channel in enumerate(channel_order):
+        channel = image_array[:, :, input_channel].astype(np.float32)
+        channel *= 1.0 / 255.0
+        channel -= mean[output_channel]
+        channel /= std[output_channel]
+        normalized[output_channel] = channel
+    return torch.from_numpy(normalized)
 
 
 def _needs_two_step_resize(network_input: NetworkInputDefinition) -> bool:

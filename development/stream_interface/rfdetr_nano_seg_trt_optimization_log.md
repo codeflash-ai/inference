@@ -286,3 +286,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared model execution outside vs inside `torch.inference_mode()` on all 538 frames: class IDs exact and max box delta `0` px.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.80s fps=191.83` and `frames=538 elapsed=2.81s fps=191.27`.
 - Learning: The TRT path already produces tensors with no autograd work worth removing; the wrapper is neutral within noise and does not justify extra workflow code.
+
+### RFDETR Channel-Wise CHW Normalization
+
+- Hypothesis: The NumPy RFDETR preprocessing path still creates a normalized HWC float array and then makes a contiguous CHW copy. Writing normalized channels directly into a CHW float32 output should avoid one layout-conversion allocation.
+- Change: `_pil_image_to_normalized_tensor(...)` now reads the resized PIL image as uint8, normalizes each selected channel into a preallocated CHW float32 array, and returns that array directly as the tensor backing storage.
+- Correctness: Reproduced the prior HWC-float/transpose formula over all 538 frames and compared tensors against the patched preprocessing path: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Micro-result: Preprocess-only loop over 128 frames measured `1.980 ms/frame`; the isolated conversion prototype measured `0.605 ms/frame` vs `0.622 ms/frame` for the prior conversion helper.
+- Pipeline tuning: Depth `2` measured `frames=538 elapsed=2.80s fps=192.42` and `frames=538 elapsed=2.79s fps=193.16`; depth `3` measured `frames=538 elapsed=3.10s fps=173.33`.
+- Learning: This is an exact, small allocation cleanup. It does not materially shift the bottleneck or pipeline depth, but it keeps the preprocessing path leaner without changing model inputs.
