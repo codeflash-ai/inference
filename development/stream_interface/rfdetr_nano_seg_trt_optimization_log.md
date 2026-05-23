@@ -1576,3 +1576,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime setting only; ran `nvidia-smi -lgc 1590,1590`, then launched the accepted benchmark with `CUDA_DEVICE_MAX_CONNECTIONS=2` and pipeline depth fixed at `2`, then reset graphics clocks with `nvidia-smi -rgc`.
 - Result on requested command: `frames=538 elapsed=2.21s fps=243.26`, effectively the same as the prior max-clock-only `243.54` FPS result.
 - Learning: Once clocks are held at maximum, the connection-count scheduler knob does not move the ceiling. The remaining limiter is the TensorRT CUDA graph body.
+
+### Rejected Under Max Clocks: Clone Graph Outputs On Caller Stream
+
+- Hypothesis: Moving TensorRT output clones from the graph stream to the caller/inference stream was noisy under default clocks. With T4 clocks locked, the cleaner graph-bound regime might show whether this schedule frees the graph stream sooner.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_CLONE_OUTPUTS_ON_CALLER_STREAM=true`, cache-hit replay copied input and replayed the CUDA graph on the graph stream, then cloned TensorRT outputs on the caller stream. Pipeline depth remained fixed at `2`, and the benchmark ran with graphics clocks temporarily locked to `1590 MHz`.
+- Result on requested command: `frames=538 elapsed=2.22s fps=242.51`, below the accepted graph-stream clone schedule under max clocks (`243.54` FPS).
+- Learning: Even in the max-clock regime, moving output clones to the caller stream does not improve throughput. Keep the original graph-stream output clone schedule.
