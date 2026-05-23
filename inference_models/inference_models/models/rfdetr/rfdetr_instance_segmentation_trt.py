@@ -251,7 +251,10 @@ class RFDetrForInstanceSegmentationTRT(
                 image_size_wh=image_size,
                 pre_processing_overrides=pre_processing_overrides,
             )
-        torch.cuda.current_stream(self._device).wait_stream(self._pre_process_stream)
+        if not kwargs.get("defer_cuda_stream_sync", False):
+            torch.cuda.current_stream(self._device).wait_stream(
+                self._pre_process_stream
+            )
         return pre_processed_images, pre_processing_meta
 
     def forward(
@@ -276,9 +279,10 @@ class RFDetrForInstanceSegmentationTRT(
                     trt_cuda_graph_cache=cache,
                     synchronize=False,
                 )
-                torch.cuda.current_stream(self._device).wait_stream(
-                    self._inference_stream
-                )
+                if not kwargs.get("defer_cuda_stream_sync", False):
+                    torch.cuda.current_stream(self._device).wait_stream(
+                        self._inference_stream
+                    )
                 return detections, labels, masks
 
     def post_process(

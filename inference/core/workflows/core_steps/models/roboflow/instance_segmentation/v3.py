@@ -372,13 +372,18 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             return None
         inference_kwargs = request.model_dump()
         inference_kwargs.pop("image", None)
+        is_rfdetr_trt = (
+            model._model.__class__.__name__ == "RFDetrForInstanceSegmentationTRT"
+        )
+        if is_rfdetr_trt and inference_kwargs.get("response_mask_format") != "rle":
+            inference_kwargs["defer_cuda_stream_sync"] = True
         pre_processed_images, preprocessing_metadata = model.preprocess(
             image=inference_images,
             **inference_kwargs,
         )
         predictions = model.predict(pre_processed_images, **inference_kwargs)
         post_process_kwargs = model.map_inference_kwargs(inference_kwargs)
-        if model._model.__class__.__name__ == "RFDetrForInstanceSegmentationTRT":
+        if is_rfdetr_trt:
             post_process_kwargs["defer_fused_postprocess_count"] = True
         detections = model._model.post_process(
             predictions,

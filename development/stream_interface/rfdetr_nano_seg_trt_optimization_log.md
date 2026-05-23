@@ -379,3 +379,34 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Deferred fused postprocess vs exact-sized postprocess on all 538 frames matched class IDs, dense masks, and boxes exactly; max box delta `0` px.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.59s fps=207.84` and `frames=538 elapsed=2.63s fps=204.87`, below the current checkpoint band.
 - Learning: The existing separate postprocess stream still pays for itself. Keeping postprocess overlapped with the next TensorRT replay is better than removing the stream/event bookkeeping.
+
+### Rejected: Float Boxes In Deferred Fused Postprocess
+
+- Hypothesis: The deferred RFDETR workflow path still launches tiny PyTorch `round` and `int` kernels for selected boxes. Returning float `xyxy` tensors through workflow conversion could remove those kernels while staying within the allowed 5 px box tolerance.
+- Change tested: Temporary code only; returned `selected_boxes` instead of `selected_boxes.round().int()` when `defer_fused_postprocess_count=True`.
+- Correctness: Compared deferred vs exact-sized postprocess on 120 frames: counts and class IDs matched, with max box delta `0.5` px.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.63s fps=204.86`, below the current checkpoint band. A simultaneous depth `2`/`3` run was discarded because both processes contended for the GPU.
+- Learning: Removing these tiny kernels is not enough to improve the full pipeline, and keeping integer boxes preserves the established output type.
+
+### Rejected: Retire Completed Workflow Futures Out Of Order
+
+- Hypothesis: The two-frame workflow pipeline may create CUDA graph bubbles when a completed out-of-order future still counts against the in-flight limit until earlier frames dispatch. Moving completed futures into a ready map immediately while preserving ordered emission could free worker slots sooner.
+- Change tested: Temporary `InferencePipeline` scheduler change using `concurrent.futures.wait(..., FIRST_COMPLETED)` for multi-worker inference.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.64s fps=203.71`; depth `3` measured `frames=538 elapsed=3.10s fps=173.46`.
+- Learning: The graph bubbles are dominated by whole-frame stage balance, not by completed futures being held for ordered dispatch. The extra scheduler bookkeeping was not useful here.
+
+### RFDETR Fast Path Deferred Current-Stream Waits
+
+- Hypothesis: In the direct local RFDETR TRT workflow path, `pre_process(...)`, `forward(...)`, and `post_process(...)` are called back-to-back by the same fast path. The intermediate current-stream waits after preprocessing and forward add CUDA event edges even though `forward(...)` already waits on the preprocessing stream and `post_process(...)` already waits on the inference stream.
+- Change: Added `defer_cuda_stream_sync` for RFDETR TRT dense-mask workflow execution. The fast path passes it through preprocess and predict, and `RFDetrForInstanceSegmentationTRT` skips only the redundant current-stream waits after preprocessing and forward. The postprocess-to-CPU conversion wait is unchanged.
+- Pipeline tuning: Depth `2` measured `frames=538 elapsed=2.57s fps=209.12`, `frames=538 elapsed=2.61s fps=206.46`, and `frames=538 elapsed=2.56s fps=210.18`. Depth `3` measured `frames=538 elapsed=2.74s fps=196.27`, so depth `2` remains best.
+- Nsight Systems: New report for analysis: `/tmp/rfdetr_stream_wait_20260523_031606.nsys-rep` with SQLite export `/tmp/rfdetr_stream_wait_20260523_031606.sqlite`. Under profiler, throughput improved to `frames=538 elapsed=3.09s fps=173.88`.
+- Graph spacing: Compared to the clean local baseline profile `/tmp/rfdetr_gap_local_20260523_031231.nsys-rep`, post-warmup graph end-to-next-start gaps improved from p90 `7635.910 us`, p95 `8175.037 us`, p99 `8748.532 us`, mean `2734.651 us` to p90 `4091.966 us`, p95 `4392.314 us`, p99 `4934.320 us`, mean `2050.445 us` after skipping the first 100 graph launches.
+- Learning: Removing redundant wait edges reduces the long graph bubbles visible in Nsight while preserving the explicit stream dependencies that matter. The run is now more tightly constrained by the CUDA graph forward pass plus fused postprocess, and depth `3` is still worse because extra workers add CPU/GPU contention.
+
+### Rejected: Postprocess-Stream CPU Conversion
+
+- Hypothesis: After deferring the intermediate waits, the remaining postprocess current-stream wait might be avoidable by performing the workflow tensor-to-NumPy copies under the RFDETR postprocess stream context.
+- Change tested: Temporary code only; skipped the postprocess current-stream wait and wrapped local workflow conversion in `torch.cuda.stream(model._model._post_process_stream)`.
+- Result on requested command: after fixing a temporary helper-name typo, depth `2` measured `frames=538 elapsed=2.65s fps=202.97`.
+- Learning: The synchronization still has to happen before CPU predictions are materialized, and moving those copies onto the postprocess stream made the normal run slower. Keep the postprocess wait at the model boundary.
