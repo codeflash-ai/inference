@@ -12,6 +12,7 @@ from inference.core.entities.requests.inference import (
 from inference.core.models.inference_models_adapters import (
     InferenceModelsInstanceSegmentationAdapter,
 )
+from inference_models.models.auto_loaders.entities import PreProcessingOverrides
 from inference.core.env import (
     HOSTED_INSTANCE_SEGMENTATION_URL,
     LOCAL_INFERENCE_API_URL,
@@ -313,6 +314,27 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        self._model_manager.add_model(
+            model_id=model_id,
+            api_key=self._api_key,
+        )
+        if disable_active_learning is True and active_learning_target_dataset is None:
+            direct_result = self._try_run_rfdetr_trt_fast_path(
+                images=images,
+                class_filter=class_filter,
+                model_id=model_id,
+                confidence=confidence,
+                class_agnostic_nms=class_agnostic_nms,
+                iou_threshold=iou_threshold,
+                max_detections=max_detections,
+                max_candidates=max_candidates,
+                mask_decode_mode=mask_decode_mode,
+                tradeoff_factor=tradeoff_factor,
+                disable_active_learning=disable_active_learning,
+                active_learning_target_dataset=active_learning_target_dataset,
+            )
+            if direct_result is not None:
+                return direct_result
         inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
         request = InstanceSegmentationInferenceRequest(
             api_key=self._api_key,
@@ -329,10 +351,6 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             mask_decode_mode=mask_decode_mode,
             tradeoff_factor=tradeoff_factor,
             source="workflow-execution",
-        )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
         )
         if disable_active_learning is True and active_learning_target_dataset is None:
             direct_result = self._try_run_inference_models_fast_path(
@@ -411,6 +429,77 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
         return [
             {
                 "inference_id": request.id,
+                "predictions": prediction,
+                "model_id": model_id,
+            }
+            for prediction in predictions
+        ]
+
+    def _try_run_rfdetr_trt_fast_path(
+        self,
+        images: Batch[WorkflowImageData],
+        class_filter: Optional[List[str]],
+        model_id: str,
+        confidence: Union[None, float, Literal["best", "default"]],
+        class_agnostic_nms: Optional[bool],
+        iou_threshold: Optional[float],
+        max_detections: Optional[int],
+        max_candidates: Optional[int],
+        mask_decode_mode: Literal["accurate", "tradeoff", "fast"],
+        tradeoff_factor: Optional[float],
+        disable_active_learning: Optional[bool],
+        active_learning_target_dataset: Optional[str],
+    ) -> Optional[BlockResult]:
+        model = self._model_manager[model_id]
+        if not isinstance(model, InferenceModelsInstanceSegmentationAdapter):
+            return None
+        if model._model.__class__.__name__ != "RFDetrForInstanceSegmentationTRT":
+            return None
+        pre_processing_overrides = PreProcessingOverrides(
+            disable_contrast_enhancement=False,
+            disable_grayscale=False,
+            disable_static_crop=False,
+        )
+        pre_processed_images, preprocessing_metadata = model._model.pre_process(
+            images=[image.numpy_image for image in images],
+            input_color_format="bgr",
+            pre_processing_overrides=pre_processing_overrides,
+            defer_cuda_stream_sync=True,
+        )
+        predictions = model._model.forward(
+            pre_processed_images,
+            defer_cuda_stream_sync=True,
+        )
+        detections = model._model.post_process(
+            predictions,
+            preprocessing_metadata,
+            confidence=confidence,
+            mask_format="dense",
+            defer_cuda_stream_sync=True,
+            defer_fused_postprocess_count=True,
+        )
+        inference_id = str(uuid.uuid4())
+        predictions = self._convert_inference_models_detections_to_sv_detections(
+            model=model,
+            detections=detections,
+            preprocessing_metadata=preprocessing_metadata,
+            inference_id=inference_id,
+        )
+        predictions = attach_prediction_type_info_to_sv_detections_batch(
+            predictions=predictions,
+            prediction_type="instance-segmentation",
+        )
+        predictions = filter_out_unwanted_classes_from_sv_detections_batch(
+            predictions=predictions,
+            classes_to_accept=class_filter,
+        )
+        predictions = attach_parents_coordinates_to_batch_of_sv_detections(
+            images=images,
+            predictions=predictions,
+        )
+        return [
+            {
+                "inference_id": inference_id,
                 "predictions": prediction,
                 "model_id": model_id,
             }

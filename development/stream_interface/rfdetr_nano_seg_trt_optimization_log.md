@@ -474,3 +474,18 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The change only affects CPU materialization; no model classes or boxes are changed.
 - Result on requested command: depth `2` measured `frames=538 elapsed=3.50s fps=153.82`.
 - Learning: Pinned staging at the workflow boundary is much slower than PyTorch's direct `.cpu().numpy()` path here. The explicit stream synchronization and large pinned mask buffer mechanics dominate any potential overlap benefit.
+
+### RFDETR TRT Pre-Request Workflow Fast Path
+
+- Hypothesis: The local workflow path still builds `inference_images`, creates a Pydantic `InstanceSegmentationInferenceRequest`, dumps it back into a dict, and runs adapter image loading before reaching the RFDETR TRT fast path. For the benchmark's local dense-mask RFDETR TRT case, the workflow image already has a BGR NumPy frame, so the model can be called directly before request construction.
+- Change: `run_locally(...)` now attempts an RFDETR-TRT-specific fast path before constructing the request. It loads the model, uses `WorkflowImageData.numpy_image` directly, passes minimal model kwargs, keeps `defer_cuda_stream_sync=True`, and still uses the existing `sv.Detections` conversion and workflow metadata helpers.
+- Correctness: Over all 538 frames, `load_image_bgr({"type": "numpy_object", "value": frame})` matched the direct `frame` pixels exactly (`bad_pixels=0`). Deferred fused postprocess matched exact-sized postprocess with `bad_counts=0`, `bad_classes=0`, and `max_box_delta=0` px.
+- Result on requested command: depth `2` runs measured `frames=538 elapsed=2.53s fps=212.35` and `frames=538 elapsed=2.52s fps=213.23`, improving the previous `210.18` FPS checkpoint.
+- Learning: Avoiding per-frame request construction, request dump, numpy payload wrapping, adapter image loading, and repeated kwarg mapping keeps the CPU producer closer to the CUDA graph replay cadence without changing model inputs.
+
+### Rejected: Cached RFDETR PreProcessingOverrides In Workflow Fast Path
+
+- Hypothesis: The new RFDETR pre-request fast path creates a default `PreProcessingOverrides` object per frame. Reusing one immutable default instance could remove a small allocation.
+- Change tested: Temporary code only; replaced the per-call default override object with a module-level `_RFDETR_NO_PREPROCESSING_OVERRIDES = PreProcessingOverrides()`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.57s fps=208.98`, below the per-call override fast path.
+- Learning: This was either noise-sensitive or interacted poorly with the surrounding path; keep the simpler per-call object that produced the better repeated benchmark.
