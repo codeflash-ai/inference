@@ -197,3 +197,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Pipeline tuning: With the deferred fused path, depth `3` measured `frames=538 elapsed=3.44s fps=156.61`; depth `2` measured `frames=538 elapsed=3.10s fps=173.39`.
 - Result on requested command: `frames=538 elapsed=3.07s fps=175.12`.
 - Learning: Once postprocess count synchronization and mask resize were moved to the workflow conversion boundary, the optimal pipeline depth dropped from `3` to `2`; the third in-flight worker became extra contention instead of useful overlap.
+
+### Rejected: Blocked Triton Mask Resize Programs
+
+- Hypothesis: The fused mask resize nsys profile showed `_resize_selected_masks_kernel` as the top postprocess kernel. Processing several detections per Triton program could reduce launch-grid overhead while still supporting up to 100 detections.
+- Change tested: Temporary code only; changed the mask resize kernel from one detection per program to four detections per program with a smaller pixel block.
+- Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames still matched detection counts, class IDs, boxes, and dense masks exactly.
+- Result on requested command: `frames=538 elapsed=3.18s fps=168.99`, slower than the committed single-detection program layout.
+- Learning: The larger per-program vector shape hurt this T4 path more than the lower program count helped. Keep the simpler mask kernel and look next at reducing H2D preprocessing transfer or avoiding full-size mask materialization.
