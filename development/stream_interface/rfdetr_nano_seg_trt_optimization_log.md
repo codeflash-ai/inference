@@ -1531,3 +1531,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_ADAPTIVE_FIXED_COPY=true`, `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` predicted the row count from a thread-local previous valid count, copied that many rows plus the count, then updated the stored count after synchronization. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.32s fps=231.82`, below the accepted fixed seven-row copy band.
 - Learning: The current fixed seven-row copy is faster than adaptive under-copy with fallback. Extra branching and fallback copies on count increases cost more than copying a few unused mask rows.
+
+### Rejected: Mask-First TensorRT Output Clone Order
+
+- Hypothesis: The accepted TensorRT graph cache-hit path clones boxes, logits, then the large mask output. Cloning the mask first while returning outputs in the original order might improve D2D copy scheduling in the post-graph tail.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_MASK_FIRST_OUTPUT_CLONE=true`, cloned TensorRT output buffer `2` first, then buffers `0` and `1`, and returned `[detections, labels, mask]`. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.15`, below the accepted fixed-copy band.
+- Learning: Output clone order does not improve the graph-to-graph interval. The existing boxes/logits/mask order remains the better schedule for this pipeline.
