@@ -1066,3 +1066,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: No code change; ran the exact benchmark with `CUDA_DEVICE_MAX_CONNECTIONS=1`, `2`, `4`, and `8`, always with pipeline depth fixed at `2`.
 - Result on requested command: `1` regressed badly to `frames=538 elapsed=2.71s fps=198.62`; `2` measured `237.26` FPS; `4` measured `234.84` FPS; `8` measured `236.23` FPS. The non-1 settings are within normal accepted-path noise and do not justify changing the command/runtime defaults.
 - Learning: Do not force CUDA device connection count for this benchmark. The default stream scheduling is already in the best observed band, while `1` removes useful concurrency.
+
+### Rejected: High-Priority TensorRT Graph Replay Stream
+
+- Hypothesis: Since CUDA graph replay is now the bottleneck, creating the captured TensorRT graph stream with high priority could keep small postprocess kernels from delaying graph replay in the depth-2 pipeline.
+- Change tested: Temporary code only; changed the CUDA graph state's stream construction from `torch.cuda.Stream(device=device)` to `torch.cuda.Stream(device=device, priority=-1)` and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `237.18`, `233.05`, `237.76`, `236.59`, and `235.95` FPS. This is the same noisy band as the accepted path with a low outlier.
+- Learning: Stream priority does not reliably reduce TensorRT graph duration or the graph-to-graph gap on this T4 workload. Keep the default-priority graph stream.
