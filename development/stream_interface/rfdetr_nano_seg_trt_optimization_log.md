@@ -2076,3 +2076,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the fast path against the generic helper on `16` frames from `vehicles_312px.mp4`; normalized tensor max diff was `0.0` and preprocessing metadata matched exactly.
 - Result on requested command: depth-2 runs measured `frames=538 elapsed=2.21s fps=243.65` and `frames=538 elapsed=2.21s fps=243.64`, below the same-session default baseline of `frames=538 elapsed=2.20s fps=244.42`.
 - Learning: This helper call is not a measurable limiter in the current graph-bound run. The added branch slightly worsens scheduling/noise, so the generic helper remains the accepted path.
+
+### Profile: Triton Selector Kernel NCU Snapshot
+
+- Request: Gather lower-level evidence for the remaining custom Triton selector work while keeping the benchmark command at pipeline depth `2`. Depth `3` was not tested.
+- Profiles: Initial launch-shape-only report `/tmp/rfdetr_selector_kernel_depth2_20260523_192029.ncu-rep`; explicit-counter report `/tmp/rfdetr_selector_kernel_metrics_20260523_192216.ncu-rep`; details text `/tmp/rfdetr_selector_kernel_metrics_20260523_192216_details.txt`.
+- Result under profiler: The explicit-counter NCU run measured `frames=538 elapsed=7.26s fps=74.06`, which is profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled `_select_topk_boxes_kernel` launches as a single Triton program with CUDA launch shape `(1, 1, 1)x(256, 1, 1)`. Across five sampled launches, NCU reported mean `gpu__time_duration.avg=24.766 us`, mean DRAM read `53.914 KB`, mean DRAM write `12.8 B`, fixed L1 global-load traffic `42.820 KB`, fixed L1 global-store traffic `928 B`, and fixed `15811` SMSP instructions.
+- Learning: This supports the earlier selector experiments: the kernel is under-parallelized by shape, but it is also very small and mostly reads the `100x91` score matrix. Prior attempts to improve occupancy with top-2-per-query, different warp counts, max-iteration caps, and raw-logit selection all lost end to end because the extra launch/codegen/traffic costs outweighed the tiny selector tail. Future selector work should only proceed if it also removes another launch or required copy, not as standalone selector tuning.
