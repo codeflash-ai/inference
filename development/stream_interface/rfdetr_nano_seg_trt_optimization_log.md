@@ -2547,3 +2547,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `69.79-70.59 us` under NCU replay. Compute throughput was about `25.86-25.99%`, memory and DRAM throughput about `24.90-25.05%`, and L2 throughput about `11.36-11.51%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.02` after the profile.
 - Learning: The larger K tile does not escape the same TensorRT tactic constraint: high register/shared-memory use, a `48`-CTA grid, and about `16%` achieved occupancy. This further supports focusing any future large gain attempt on a new engine/export/tactic search rather than local runtime scheduling.
+
+### Profile: TensorRT 64x32 TT GEMM Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `sm75_xmma_gemm_f16f16_f16f16_f16_tt_n_tilesize64x32x64_stage1_warpsize2x2x1_tensor16x8x8_aligna4_alignc4_execute_kernel_trt` at about `38 us/replay` aggregated across four graph nodes. Profiling it can show whether the TT tail is another partial-wave GEMM or has a different memory pattern.
+- Profile: `/tmp/rfdetr_trt_gemm64x32_tt_graphnode_basic_ncu_20260523_224618.ncu-rep`, details text `/tmp/rfdetr_trt_gemm64x32_tt_graphnode_basic_ncu_20260523_224618_details.txt`, raw CSV `/tmp/rfdetr_trt_gemm64x32_tt_graphnode_basic_ncu_20260523_224618_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact kernel name, skipped `400` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.03s fps=38.35`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `16`, block size `128`, `80` registers/thread, `12.288 KiB` dynamic shared memory per block, and only `0.08` waves/SM. Achieved occupancy is about `13.46-13.60%`, with active warps/SM about `4.31-4.35`.
+- Throughput: Duration was about `16.96-17.09 us` under NCU replay. Compute throughput was about `9.61-9.64%`, memory throughput about `12.54-12.56%`, DRAM throughput about `5.60-5.82%`, and L2 throughput about `5.76-5.82%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.15` after the profile.
+- Learning: This TT tail is one of the clearest small-grid cases: only `16` CTAs for `40` T4 SMs and `0.08` waves/SM. The remaining graph-body tail is dominated by many such short, underfilled TensorRT kernels.
