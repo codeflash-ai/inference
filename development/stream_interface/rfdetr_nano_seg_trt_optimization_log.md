@@ -1129,3 +1129,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Request: Confirm the accepted code path after reverting the rejected stream-priority and preprocessing-override experiments.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.33s fps=231.37`, then `frames=538 elapsed=2.28s fps=235.47`.
 - Learning: The benchmark remains noisy, but the clean accepted path is back in the expected low-to-mid `230s` FPS band, with the same TensorRT graph replay bottleneck and tiny graph-to-graph gap identified in the Nsight profiles.
+
+### Rejected: Skip Empty Class Filter Helper
+
+- Hypothesis: The benchmark workflow does not set `class_filter`, so `filter_out_unwanted_classes_from_sv_detections_batch(...)` returns immediately. Skipping the call in the RFDETR TRT fast path could remove a tiny CPU call from the materialization tail without changing outputs.
+- Change tested: Temporary code only; guarded the helper call with `if class_filter:` in `_try_run_rfdetr_trt_fast_path(...)` and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.32s fps=231.76`, `frames=538 elapsed=2.29s fps=234.92`, and `frames=538 elapsed=2.33s fps=231.34`, not better than the accepted fixed-copy path.
+- Learning: The empty class-filter helper is below the limiter. Keep the normal helper chain for predictable scheduling and consistent behavior.
