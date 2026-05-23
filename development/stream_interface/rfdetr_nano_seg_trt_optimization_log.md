@@ -577,3 +577,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=219.07`, then repeated at `frames=538 elapsed=2.47s fps=217.57`; not stable enough to beat the current `218.97` FPS checkpoint.
 - Learning: Class-name construction is too small/noise-sensitive to checkpoint. Keep the simpler existing loop.
+
+### Rejected: Larger Triton Mask Resize Pixel Tile
+
+- Hypothesis: `_resize_selected_masks_kernel` is the largest custom postprocess kernel. Increasing its pixel tile from `256` to `512` could reduce program count and launch-side work without changing the one-detection-per-program layout that outperformed prior blocked-detection variants.
+- Change tested: Temporary code only; changed `fused_resize_selected_masks(...)` block size from `256` to `512`.
+- Correctness: Compared exact-sized postprocess against deferred fused postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `219.52 fps`, then `218.91 fps`, then `215.93 fps`; not stable enough to checkpoint over the current `218.97` FPS best.
+- Learning: The larger tile can occasionally win but is too variable on this T4 workload. Keep the original `256` pixel tile.
