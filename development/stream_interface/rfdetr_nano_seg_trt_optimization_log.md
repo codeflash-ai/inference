@@ -1656,3 +1656,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary env-gated code only; with `RFDETR_TRT_REUSE_OUTPUT_COPY_BUFFERS=True`, each thread reused `empty_like` buffers for the TensorRT outputs and copied graph-owned outputs into those buffers on the graph stream. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.19s fps=246.00`, then `frames=538 elapsed=2.21s fps=243.87`, then `frames=538 elapsed=2.20s fps=244.26`.
 - Learning: The first run beat the accepted band, but repeats did not. Reusable output copy buffers are too noise-sensitive in the current graph-bound regime and are not stable enough to checkpoint. Keep the accepted `buf.clone()` output path.
+
+### External Runtime Probe: Memory Plus Graphics Clock Lock
+
+- Hypothesis: The previous external max-clock probe locked graphics clocks only. Since the accepted path is TensorRT graph-bound and includes input/output copy traffic, also locking the T4 memory clock to the supported `5001 MHz` state might improve the graph-bound ceiling.
+- Change tested: External runtime setting only; attempted `nvidia-smi -lmc 5001,5001`, then locked graphics clocks with `nvidia-smi -lgc 1590,1590`, ran the benchmark with pipeline depth fixed at `2`, and reset clock locks afterward.
+- Result: The T4 runtime reported locked memory clocks are not supported. The run executed at `P0`, `1590 MHz` graphics clock, and `5000 MHz` memory clock, measuring `frames=538 elapsed=2.21s fps=243.26`, matching the earlier graphics-clock-only result. After reset and idle, the GPU returned to `P8`, `300 MHz` graphics, `405 MHz` memory.
+- Learning: There is no separate memory-clock lock knob available in this environment, and graphics-clock lock remains only an external deployment/runtime tuning option. It does not change the accepted library code path.
