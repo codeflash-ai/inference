@@ -796,3 +796,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the list fast path against the existing generic single-frame 4D NumPy batch path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`, `max_tensor_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.84` and `frames=538 elapsed=2.47s fps=217.64`, below the pinned-conversion checkpoint.
 - Learning: The generic loop overhead is not meaningful, and adding another top-level branch/function path likely perturbs Python scheduling. Keep the existing preprocessing control flow.
+
+### Rejected: Cache RFDETR TRT Confidence Threshold
+
+- Hypothesis: RFDETR TRT postprocess constructs a `ConfidenceFilter` and resolves the same custom confidence threshold every frame. Caching the resolved threshold on the model instance could remove small Python work between graph replay and fused postprocess.
+- Change tested: Temporary code only; added a per-instance `_confidence_threshold_cache` keyed by `(confidence, id(recommended_parameters))` and passed the cached threshold into dense and RLE postprocess.
+- Correctness: On a sampled video frame, a cache miss followed by a cache hit produced matching detections: `counts 4 4`, `classes_equal=True`, `masks_equal=True`, `max_box_delta=0`, `max_conf_delta=0.0`; the cached scalar also matched `ConfidenceFilter.get_threshold(...)`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.80` and `frames=538 elapsed=2.47s fps=217.45`, below the pinned-conversion checkpoint.
+- Learning: Confidence threshold construction is below the limiter; changing the model object state and postprocess bytecode does not tighten the graph-to-graph gap. Keep the original local `ConfidenceFilter` path.
