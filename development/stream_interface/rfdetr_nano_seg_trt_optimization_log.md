@@ -1031,3 +1031,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: depth `2` measured `frames=538 elapsed=2.28s fps=235.96`.
 - Graph spacing: The capture includes `538` CUDA graph traces on stream `39`. After skipping the first 100 launches, CUDA graph duration was p50 `4012.688 us`, p90 `4070.684 us`, p95 `4074.743 us`, p99 `4081.137 us`; graph end-to-next-start gap was p50 `40.607 us`, p90 `41.855 us`, p95 `42.245 us`, p99 `42.781 us`, mean `40.599 us`. GPU work inside that gap covered p50 `35.231 us`, leaving p50 idle gap `5.216 us`.
 - Learning: The depth-2 accepted path is still shaped as intended: CPU work and prediction D2H copies are overlapped enough that there is only a few microseconds of idle time between CUDA graph replays. Remaining FPS is dominated by the TensorRT CUDA graph duration plus the small fixed postprocess kernels.
+
+### Rejected: In-Place Sigmoid Retest After Fixed Copy
+
+- Hypothesis: Now that graph-to-graph idle time is almost gone, changing `torch.nn.functional.sigmoid(logits)` to `logits.sigmoid_()` on the cloned TensorRT logits might remove an allocation/write in postprocess without affecting outputs.
+- Change tested: Temporary code only; used in-place sigmoid in RFDETR instance segmentation postprocess and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.26s fps=237.80`, then `frames=538 elapsed=2.30s fps=233.80` and `frames=538 elapsed=2.30s fps=234.08`, below the accepted fixed-copy stability band.
+- Learning: This remains a scheduling/noise-level optimization. Even if the tensor math is equivalent on cloned outputs, the in-place form does not reliably reduce the critical graph-to-graph interval, so keep the out-of-place sigmoid.
