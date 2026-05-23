@@ -2218,3 +2218,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed. A synthetic check over empty, in-range, and out-of-range class IDs matched the original mapping exactly. This path only changes display-name construction after model classes, boxes, and masks have already been materialized.
 - Result on requested command: vectorized mapping measured `frames=538 elapsed=2.20s fps=244.55` and `frames=538 elapsed=2.21s fps=243.81`; after reverting to the original list comprehension, the same-session baseline measured `frames=538 elapsed=2.20s fps=244.04`.
 - Learning: Class-name mapping is not a stable limiter in the accepted graph-bound run. Keep the simpler original mapping.
+
+### Rejected: RFDETR Mask Resize One-Warp Launch
+
+- Hypothesis: After accepting `num_warps=2` for the limited mask resize kernel, reducing further to `num_warps=1` might lower scheduling overhead for the same `256`-pixel tile and small `7 x 312 x 312` first-stage grid.
+- Change tested: Temporary code only; changed `_resize_selected_masks_kernel` launch in `fused_resize_selected_masks(...)` from `num_warps=2` to `num_warps=1`. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. This only changes Triton launch geometry after class selection and box decoding; class IDs and boxes are unchanged by construction, and the mask math is the same.
+- Result on requested command: `num_warps=1` measured `frames=538 elapsed=2.21s fps=243.91`, `frames=538 elapsed=2.21s fps=243.81`, and `frames=538 elapsed=2.21s fps=243.53`. After restoring the accepted `num_warps=2`, same-session runs measured `frames=538 elapsed=2.21s fps=243.28` and then `frames=538 elapsed=2.20s fps=244.52`.
+- Learning: One warp is not a stable improvement and loses to the restored two-warp launch once the session returns to the accepted band. Keep `num_warps=2`.
