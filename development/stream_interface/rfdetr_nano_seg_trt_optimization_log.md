@@ -1731,3 +1731,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This does not change computation or tensor values, only allocator backend behavior.
 - Result on requested command: `frames=538 elapsed=2.20s fps=245.00`, then `frames=538 elapsed=2.21s fps=243.47`, then `frames=538 elapsed=2.20s fps=244.54`.
 - Learning: The async allocator can land inside the accepted warmed band, but it is not a stable improvement over the default allocator. Keep the default PyTorch CUDA allocator and do not require an external allocator environment variable for the benchmark.
+
+### Rejected: ONNX Backend Alternative
+
+- Hypothesis: The workflow script can force `--backend onnx`, and the environment config lists `TensorrtExecutionProvider,CUDAExecutionProvider,CPUExecutionProvider`. ONNX Runtime might build or dispatch a faster GPU path than the native `inference-models` TensorRT package.
+- Change tested: Ran `PYTHONPATH=/app/inference_models python development/stream_interface/rfdetr_nano_seg_trt_workflow.py --video_reference vehicles_312px.mp4 --pipeline_depth 2 --backend onnx`.
+- Result: The run failed before processing frames (`frames=0`) with ONNX Runtime I/O binding error: `There's no data transfer registered for copying tensors from Device:[DeviceType:1 MemoryType:0 DeviceId:0] to Device:[DeviceType:0 MemoryType:0 DeviceId:0]`.
+- Learning: The current ONNX backend path is not a viable drop-in for this CUDA-tensor workflow fast path. Keep optimizing the accepted native TensorRT backend; do not switch benchmark backend.
