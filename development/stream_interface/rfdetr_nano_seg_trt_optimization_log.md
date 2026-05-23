@@ -2644,3 +2644,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `24.77-25.06 us` under NCU replay. Compute throughput was about `22.07-22.44%`, memory and DRAM throughput about `91.42-92.34%`, and L2 throughput about `28.62-28.96%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.42` after the profile.
 - Learning: This Myelin transpose tail is already well-filled and DRAM-bandwidth-bound, unlike the small-grid GEMM tails. Removing it would require graph-level fusion or a different TensorRT export/tactic layout that avoids the memory movement; it is not a local wrapper or pipeline scheduling issue.
+
+### Profile: TensorRT Myelin SiLU/Transpose Tail Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_AddSqrtDivMulCastMulAddTranSilu_0x22714f29f052967a02878862fc5fe9d8` at about `25 us/replay` aggregated across five graph nodes. Profiling it can show whether this smaller Myelin tail is another bandwidth-bound transform or a short compute/occupancy tail.
+- Profile: `/tmp/rfdetr_trt_myelin_silu_tran_tail_graphnode_basic_ncu_20260523_232616.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_silu_tran_tail_graphnode_basic_ncu_20260523_232616_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_silu_tran_tail_graphnode_basic_ncu_20260523_232616_raw.csv`. The NCU command used graph profiling mode `node`, matched `regex:__myl_AddSqrtDivMulCastMulAddTranSilu_0x22714f29f052967a02878862fc5fe9d8`, skipped `500` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.20s fps=37.89`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `338`, block size `256`, `17` registers/thread, no dynamic or static shared memory, and `2.11` waves/SM. Theoretical occupancy is `100%`, achieved occupancy is about `85.49-86.33%`, and active warps/SM are about `27.36-27.63`.
+- Throughput: Duration was about `8.48-8.67 us` under NCU replay. Compute throughput was about `25.98-26.14%`, memory throughput about `16.94-17.28%`, DRAM throughput about `16.76-17.28%`, and L2 throughput about `7.71-7.86%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.94` after the profile.
+- Learning: This repeated Myelin SiLU/transpose tail is short and well occupied; it is neither the severe small-grid GEMM problem nor a dominant memory-bandwidth node. It is another TensorRT-internal graph-body cost that would only be worth removing as part of a broader export/tactic/fusion change.
