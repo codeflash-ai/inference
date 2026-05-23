@@ -1094,3 +1094,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; detected the sequential background remap in the TRT model, threaded a `sequential_background_remap` flag into the fused instance selector, and added a Triton branch that keeps `raw_class_id > 0` and remaps by subtracting one. Pipeline depth remained fixed at `2`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.48`, `frames=538 elapsed=2.32s fps=232.11`, and `frames=538 elapsed=2.29s fps=234.43`, below the accepted fixed-copy band.
 - Learning: The scalar class-map load is not the selector limiter; the added branch/codegen and Python plumbing make the path slower. Keep the original generic mapping path.
+
+### Rejected: Disable TensorRT Enqueue Profiling Emission
+
+- Hypothesis: Setting `IExecutionContext.enqueue_emits_profile = False` on the CUDA graph execution context might remove TensorRT profiling/timing bookkeeping from graph capture or replay.
+- Change tested: Temporary code only; set `graph_context.enqueue_emits_profile = False` immediately after creating the TensorRT graph execution context and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.89`, `frames=538 elapsed=2.33s fps=230.91`, and `frames=538 elapsed=2.34s fps=230.12`, below the accepted fixed-copy band.
+- Learning: The flag is not useful for this no-profiler replay path and appears to perturb TensorRT execution or capture behavior negatively. Keep the default context setting.
