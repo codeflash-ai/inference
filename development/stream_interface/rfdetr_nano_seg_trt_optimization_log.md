@@ -205,3 +205,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames still matched detection counts, class IDs, boxes, and dense masks exactly.
 - Result on requested command: `frames=538 elapsed=3.18s fps=168.99`, slower than the committed single-detection program layout.
 - Learning: The larger per-program vector shape hurt this T4 path more than the lower program count helped. Keep the simpler mask kernel and look next at reducing H2D preprocessing transfer or avoiding full-size mask materialization.
+
+### Rejected: Pinned RFDETR Preprocess Transfer
+
+- Hypothesis: The fused-path nsys profile showed Host-to-Device preprocessing copies as the largest remaining memory operation. Pinning the already-normalized CPU tensor and using a non-blocking CUDA copy could improve transfer overlap.
+- Change tested: Temporary `pre_processing.py` helper that called `tensor.pin_memory().to(device, non_blocking=True)` for CPU tensors moving to CUDA.
+- Result on requested command: `frames=538 elapsed=3.19s fps=168.61`, slower than the committed pageable transfer path.
+- Learning: Per-frame pinning overhead outweighed any asynchronous-copy benefit for this 312x312 tensor. A useful transfer optimization likely needs reusable pinned buffers or moving normalization/conversion to GPU from a smaller uint8 transfer, not pinning after CPU float normalization.
