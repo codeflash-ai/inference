@@ -2210,3 +2210,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed. This kernel runs after class selection and box decoding, so class IDs and boxes are unchanged by construction; the mask computation is the same independent per-pixel bilinear threshold with only Triton launch geometry changed.
 - Result on requested command: `num_warps=2` measured `frames=538 elapsed=2.20s fps=244.42`, `frames=538 elapsed=2.20s fps=244.51`, and `frames=538 elapsed=2.20s fps=244.02`. Same-session `num_warps=4` baselines measured `frames=538 elapsed=2.21s fps=243.50` and `frames=538 elapsed=2.21s fps=243.82`.
 - Learning: The improvement is small and still in the noisy graph-bound band, but the same-session A/B favored two warps and the change is low-risk. Keep `num_warps=2` as the current accepted mask-resize launch geometry.
+
+### Rejected: Vectorized Workflow Class Name Mapping
+
+- Hypothesis: The RFDETR workflow fast path maps numeric `class_id` arrays to class-name strings with a Python list comprehension. Caching `model.class_names` as a NumPy object array and indexing it directly for in-range class IDs could reduce CPU materialization work while the depth-2 pipeline is feeding the GPU.
+- Change tested: Temporary code only; added a thread-local cached class-name object array and used NumPy indexing when all class IDs were valid, falling back to the original per-element behavior for out-of-range IDs. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. A synthetic check over empty, in-range, and out-of-range class IDs matched the original mapping exactly. This path only changes display-name construction after model classes, boxes, and masks have already been materialized.
+- Result on requested command: vectorized mapping measured `frames=538 elapsed=2.20s fps=244.55` and `frames=538 elapsed=2.21s fps=243.81`; after reverting to the original list comprehension, the same-session baseline measured `frames=538 elapsed=2.20s fps=244.04`.
+- Learning: Class-name mapping is not a stable limiter in the accepted graph-bound run. Keep the simpler original mapping.
