@@ -569,3 +569,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.65`, below the current checkpoint.
 - Learning: The single-image direct path changes preprocessing internals enough to hurt throughput; keep the explicit one-element list.
+
+### Rejected: Cache Workflow Class Names As NumPy Array
+
+- Hypothesis: Local workflow conversion rebuilds class-name strings with a Python loop for every frame. Caching `model.class_names` as a NumPy array and indexing it with `class_id` could reduce result materialization work after the single-step runner fast path removed larger orchestration costs.
+- Change tested: Temporary code only; cached `model.class_names` on the adapter as `_workflow_class_names_np` and used vectorized indexing for in-range class IDs, falling back to the original loop for out-of-range IDs.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=219.07`, then repeated at `frames=538 elapsed=2.47s fps=217.57`; not stable enough to beat the current `218.97` FPS checkpoint.
+- Learning: Class-name construction is too small/noise-sensitive to checkpoint. Keep the simpler existing loop.
