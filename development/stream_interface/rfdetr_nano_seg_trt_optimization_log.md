@@ -1302,3 +1302,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_FAST_METADATA_ARRAYS=1`, cached `len(sv_detections)`, used `np.full(...)` for parent and inference IDs, and filled a `(N, 2)` `np.int64` image-dimensions array directly. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.84`, then `frames=538 elapsed=2.31s fps=233.27`, not better than the accepted fixed-copy band.
 - Learning: Per-detection metadata arrays are below the limiter after the fixed D2H copy. The existing simple list-to-array construction is stable enough; keep it.
+
+### Rejected: Reuse Sigmoid Output Buffer
+
+- Hypothesis: The fused RFDETR instance segmentation path computes an out-of-place sigmoid tensor for class logits every frame before the Triton selector. Reusing a thread-local output buffer via `torch.sigmoid(..., out=buffer)` could preserve semantics while avoiding the per-frame sigmoid output allocation.
+- Change tested: Temporary gated code only; with `RFDETR_REUSE_SIGMOID_BUFFER=1`, cached a thread-local same-shape logits sigmoid buffer and wrote sigmoid results into it for RFDETR postprocess. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.65`, below the accepted fixed-copy band.
+- Learning: PyTorch's normal sigmoid allocation is not the limiter, and the `out=` path/thread-local lookup does not tighten the graph-to-graph interval. Keep the standard out-of-place sigmoid.
