@@ -1488,3 +1488,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_BORROW_TRT_SMALL_OUTPUTS=true`, cache-hit replay returned graph-owned boxes/logits and cloned only masks. A CPU-side ready event plus CUDA release event protected the borrowed buffers, and the fused path released them immediately after sigmoid and selector had been enqueued on the postprocess stream. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.02`, below the accepted fixed-copy band.
 - Learning: The two small D2D clones are cheaper than the extra release-event handoff on this depth-2 pipeline. Keep the simpler accepted TensorRT output clone path.
+
+### Profile: Accepted Depth-2 Graph Gap After Small-Output Borrow Rejection
+
+- Request: Collect a fresh Nsight Systems report for the restored accepted implementation, keeping pipeline depth fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_134844.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_134844.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_134844_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_134844_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_134844_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.33s fps=230.87`.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4070.910 us`, p90 `4133.057 us`, p95 `4136.255 us`, p99 `4141.648 us`, mean `4065.406 us`; graph end-to-next-start gap was p50 `40.480 us`, p90 `41.888 us`, p95 `42.374 us`, p99 `42.952 us`, mean `40.920 us`. Busy work inside the gap was p50 `35.072 us`, mean `35.486 us`; idle inside the gap was p50 `5.312 us`, mean `5.434 us`.
+- Learning: The restored accepted path is already graph-bound at depth `2`: graph replay takes roughly `4.07 ms`, while the post-graph tail is roughly `40 us` with only about `5 us` idle. The remaining gap is mostly required input copy, output clones, sigmoid/selector setup, and small postprocess kernels rather than CPU bubbles.
