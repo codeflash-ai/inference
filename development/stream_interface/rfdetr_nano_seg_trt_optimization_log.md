@@ -2176,3 +2176,21 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed and the benchmark completed normally. The change only altered TensorRT auxiliary stream scheduling for the same captured engine and output tensors.
 - Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.73` and `frames=538 elapsed=2.21s fps=243.50`; after reverting to the accepted default aux-stream behavior, the same-session baseline measured `frames=538 elapsed=2.21s fps=243.71`.
 - Learning: Three explicit aux streams are just noise in the accepted warmed band, not a stable gain. Keep TensorRT's default auxiliary stream scheduling.
+
+### Rejected: Defer TensorRT Graph Output Wait To RFDETR Postprocess
+
+- Hypothesis: The TensorRT graph cache hit path currently queues input copy, CUDA graph replay, and output clones on the dedicated graph stream, then makes the caller inference stream wait for that graph stream. In the RFDETR deferred workflow path, postprocess could wait on the graph stream directly, potentially removing one event edge before the next depth-2 replay.
+- Change tested: Temporary code only; added a `defer_cuda_graph_output_sync` flag to the TensorRT helper, used it only from RFDETR when `defer_cuda_stream_sync=True`, stored the graph stream in RFDETR thread-local state, and made postprocess wait on that stream instead of the inference stream. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed and the benchmark completed normally.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.83`, inside the accepted band but not a clear improvement. A correctly launched Nsight Systems run with this temporary scheduling variant measured `frames=538 elapsed=2.29s fps=235.03`, below the latest accepted-path graph-bound profile.
+- Profile for rejected variant: `/tmp/rfdetr_depth2_deferout_20260523_201017.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_deferout_20260523_201017.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_deferout_20260523_201017_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_deferout_20260523_201017_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_deferout_20260523_201017_stats_cuda_api_sum.csv`.
+- Learning: Moving the output wait out of the inference stream does not improve the depth-2 balance. The accepted event chain is not the current limiter, and preserving the simpler helper-level ownership handoff is better.
+
+### Profile: Depth-2 Graphbound Final Refresh
+
+- Request: Capture a fresh Nsight Systems report for user analysis after reverting the unsuccessful scheduling tweak. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Accepted-path sanity run before profiling: `frames=538 elapsed=2.20s fps=244.13`.
+- Profile: `/tmp/rfdetr_depth2_graphbound_final_20260523_201236.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_graphbound_final_20260523_201236.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_graphbound_final_20260523_201236_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_graphbound_final_20260523_201236_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_graphbound_final_20260523_201236_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.32s fps=231.55`.
+- Quick exported-data check: the profile contains `602` `cudaGraphLaunch` calls. After skipping `64` warmup launches plus `100` settling launches, graph-launch submit interval was p50 `4118.925 us`, p90 `4252.884 us`, p95 `4316.037 us`, mean `4119.233 us`.
+- Learning: The fresh accepted report is consistent with the earlier graph-bound traces. Depth `2` keeps the run shaped around the TensorRT CUDA graph replay cadence; remaining visible work is the narrow fused postprocess/copy tail rather than a CPU scheduling bubble.
