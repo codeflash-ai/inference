@@ -545,3 +545,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the direct local fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.48` and `frames=538 elapsed=2.46s fps=218.33`, close but still below the current `218.97` FPS checkpoint.
 - Learning: The generic block method wrapper is not the next meaningful limiter. Keep the broader fast path that still supports the block's normal local/remote dispatch.
+
+### Rejected: Derive Detection IDs From Inference ID
+
+- Hypothesis: The RFDETR workflow conversion creates one inference UUID per frame and one detection UUID per detection. Deriving detection IDs from the existing inference ID could reduce CPU work in result materialization after the single-step workflow fast path removed larger orchestration overhead.
+- Change tested: Temporary code only; when `inference_id` was available, set detection IDs to `f"{inference_id}.{detection_idx}"` instead of calling `uuid.uuid4()` per detection, preserving the old UUID behavior when no inference ID exists.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.79`, below the current checkpoint.
+- Learning: Per-detection UUID generation is not the limiting CPU cost in this path, or the changed string construction perturbs allocation enough to lose. Keep the existing detection UUID behavior.
