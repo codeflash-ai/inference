@@ -1345,3 +1345,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_PRECOMPUTED_RESIZE_MAPS=1`, cached resize maps per thread/device/shape and launched a variant Triton mask-resize kernel that loads coordinates and weights from those maps. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.97`, below the accepted fixed-copy band.
 - Learning: The extra global map loads are more expensive than recomputing the simple bilinear coordinates in registers for this fixed small resize. Keep the arithmetic-only resize kernel.
+
+### Rejected: FP16 TensorRT Mask Output Copy
+
+- Hypothesis: The TensorRT CUDA graph path clones all three output buffers every frame, including the large `100x78x78` mask tensor. Returning the mask output as a `float16` device copy could reduce D2D output-copy traffic and mask-resize read bandwidth while preserving the downstream zero-threshold mask test.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_FP16_MASK_OUTPUT=1`, cloned the first two TensorRT outputs normally but copied the third output with `.to(dtype=torch.float16)` on the graph stream. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.54s fps=211.59`, far below the accepted fixed-copy band.
+- Learning: The FP32-to-FP16 cast kernel and scheduling cost dominate any D2D bandwidth reduction. Keep the plain FP32 mask clone.
