@@ -1045,3 +1045,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; set `persistent_cache_limit = 4 MiB` immediately after creating the graph execution context and kept pipeline depth fixed at `2`.
 - Result: TensorRT rejected the setting on this Tesla T4 with `persistingL2CacheMaxSize(0 bytes)`, so the device/runtime does not support a nonzero persistent cache limit for this path. The measured runs (`237.38`, `237.56`, `234.01` FPS) are not considered a valid optimization because the runtime emitted an API usage error each time.
 - Learning: Persistent L2 activation caching is not available on this hardware. Do not keep this context setting for the T4 benchmark.
+
+### Rejected: Empty Query-Index Buffer Retest After Fixed Copy
+
+- Hypothesis: The deferred fused selector writes every query index that the mask resize reads, so allocating `query_indices` with `torch.empty(...)` instead of `torch.zeros(...)` could remove a small int32 fill kernel still visible in the clean depth-2 profile.
+- Change tested: Temporary code only; changed the `query_indices` allocation in `fused_select_topk_boxes(...)` from `torch.zeros(...)` to `torch.empty(...)` and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.59`, `frames=538 elapsed=2.30s fps=234.09`, and `frames=538 elapsed=2.27s fps=236.77`, not a stable improvement over the accepted fixed-copy band.
+- Learning: Removing the fill does not reliably tighten the graph-to-graph interval in the current fixed-copy path. Keep the deterministic zero-filled buffer.
