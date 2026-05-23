@@ -1625,3 +1625,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The returned results still come from a replay of the same captured graph and input; prediction math is unchanged.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.59`, below the accepted clone-after-warmup best and not enough to justify removing the extra startup work.
 - Learning: The overwritten clone likely contributes a small amount of useful warmup before the measured interval. Keep the accepted capture sequence.
+
+### Rejected: Skip Pre-Capture TensorRT Warmup Enqueue
+
+- Hypothesis: Since RFDETR now replays the captured CUDA graph `64` times before measured frames, the separate `execute_async_v3(...)` warmup before CUDA graph capture might be redundant startup work.
+- Change tested: Temporary code only; removed the pre-capture TensorRT warmup enqueue and its stream synchronization from `_capture_cuda_graph(...)`. Pipeline depth remained fixed at `2`.
+- Correctness: The graph captured and replayed successfully; prediction math should be unchanged because steady execution still uses the same captured graph.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.72`, below the accepted clone-after-warmup best and not enough to justify changing the capture sequence.
+- Learning: The pre-capture enqueue is either useful TensorRT setup or useful GPU warmup for the measured interval. Keep the accepted capture sequence.
