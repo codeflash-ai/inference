@@ -1246,3 +1246,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed `fused_resize_selected_masks(...)` block size from `256` to `512`, benchmarked, then changed it to `128` and benchmarked. Pipeline depth remained fixed at `2`.
 - Result on requested command: `block_size=512` measured `frames=538 elapsed=2.31s fps=232.65`; `block_size=128` measured `frames=538 elapsed=2.33s fps=231.06`, both below the accepted fixed-copy band.
 - Learning: The accepted `block_size=256` remains the best of the simple mask-resize launch configurations. The mask kernel is too small relative to the TensorRT graph body for this tuning to move end-to-end FPS.
+
+### Rejected: Pinned NumPy View Ring
+
+- Hypothesis: After the fixed 7-row D2H copy into pinned tensors, the conversion path still calls `.numpy().copy()` for boxes, confidence, class IDs, and masks. Returning NumPy views backed by a small ring of pinned host buffers could remove a CPU memory copy while keeping enough slots for depth-2 overlap.
+- Change tested: Temporary gated code only; changed `_get_rfdetr_conversion_buffers(...)` to rotate through four pinned host buffer slots and, with `RFDETR_PINNED_VIEW_NO_COPY=1`, returned NumPy views instead of owned `.copy()` arrays in `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)`. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=233.05`, below the accepted fixed-copy band.
+- Learning: The extra host-side NumPy copy is not limiting end-to-end FPS after depth-2 pipelining, and returning mutable pinned views weakens result ownership semantics. Keep the existing owned NumPy copies.
