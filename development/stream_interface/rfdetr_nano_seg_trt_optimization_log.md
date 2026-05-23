@@ -141,3 +141,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Smoke test patched `uuid.uuid4` to raise and converted a response containing `detection_id="known-id"`; conversion preserved the ID without calling UUID generation.
 - Result on requested command: `frames=538 elapsed=5.84s fps=92.12`.
 - Learning: This is a small but safe workflow-level CPU reduction; RFDETR local response objects already pay the necessary `detection_id` creation cost.
+
+### Pipeline Workflow CPU And GPU Work Across Frames
+
+- Hypothesis: The optimized path was still serialized at the pipeline level: workflow CPU response construction for frame `N` had to finish before GPU preprocessing/inference/postprocess for frame `N+1` could start. Allowing multiple workflow frame batches in flight should overlap CPU-side workflow work with GPU work while preserving sink dispatch order.
+- Change: `InferencePipeline.init_with_workflow(...)` now allows ordered in-flight workflow batches via `max_inflight_workflow_batches`, defaulting to `3`. Generic `init_with_custom_logic(...)` keeps the old single-worker default unless explicitly configured.
+- Correctness: Compared sequential workflow execution (`max_inflight_workflow_batches=1`) against the new default on all 538 frames from `vehicles_312px.mp4`; frame order matched, class IDs matched exactly, and max box delta was `0` px.
+- Tuning: `max_inflight=2` measured `121.24 fps`; `max_inflight=3` measured best at `141.01 fps`; `max_inflight=4` regressed to `135.86 fps`.
+- Result on requested command: `frames=538 elapsed=3.82s fps=141.01`.
+- Learning: Once per-frame CPU paths were reduced enough, cross-frame pipeline concurrency became the largest remaining gain. The exact benchmark improved from the original `72.23 fps` baseline to `141.01 fps` (+95%).

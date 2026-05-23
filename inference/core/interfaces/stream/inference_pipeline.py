@@ -479,6 +479,7 @@ class InferencePipeline:
         video_source_properties: Optional[Dict[str, float]] = None,
         workflow_init_parameters: Optional[Dict[str, Any]] = None,
         workflows_thread_pool_workers: int = 4,
+        max_inflight_workflow_batches: int = 3,
         cancel_thread_pool_tasks_on_exit: bool = True,
         video_metadata_input_name: str = "video_metadata",
         batch_collection_timeout: Optional[float] = None,
@@ -547,6 +548,9 @@ class InferencePipeline:
                 with custom plugins.
             workflows_thread_pool_workers (int): Number of workers for workflows thread pool which is used
                 by workflows blocks to run background tasks.
+            max_inflight_workflow_batches (int): Number of workflow frame batches that can be processed concurrently
+                by the inference pipeline. Values greater than one allow CPU-heavy workflow result processing for
+                one frame batch to overlap with GPU work for another frame batch, while preserving output order.
             cancel_thread_pool_tasks_on_exit (bool): Flag to decide if unstated background tasks should be
                 canceled at the end of InferencePipeline processing. By default, when video file ends or
                 pipeline is stopped, tasks that has not started will be cancelled.
@@ -690,6 +694,7 @@ class InferencePipeline:
             batch_collection_timeout=batch_collection_timeout,
             predictions_queue_size=predictions_queue_size,
             decoding_buffer_size=decoding_buffer_size,
+            inference_thread_pool_workers=max_inflight_workflow_batches,
         )
 
     @classmethod
@@ -710,6 +715,7 @@ class InferencePipeline:
         sink_mode: SinkMode = SinkMode.ADAPTIVE,
         predictions_queue_size: int = PREDICTIONS_QUEUE_SIZE,
         decoding_buffer_size: int = DEFAULT_BUFFER_SIZE,
+        inference_thread_pool_workers: int = 1,
     ) -> "InferencePipeline":
         """
         This class creates the abstraction for making inferences from given workflow against video stream.
@@ -780,6 +786,8 @@ class InferencePipeline:
                 default value is taken from INFERENCE_PIPELINE_PREDICTIONS_QUEUE_SIZE env variable
             decoding_buffer_size (int): size of video source decoding buffer
                 default value is taken from VIDEO_SOURCE_BUFFER_SIZE env variable
+            inference_thread_pool_workers (int): Number of frame batches that can be processed concurrently.
+                Output dispatching order is preserved.
 
         Other ENV variables involved in low-level configuration:
         * INFERENCE_PIPELINE_PREDICTIONS_QUEUE_SIZE - size of buffer for predictions that are ready for dispatching
@@ -826,6 +834,7 @@ class InferencePipeline:
             on_pipeline_end=on_pipeline_end,
             batch_collection_timeout=batch_collection_timeout,
             sink_mode=sink_mode,
+            inference_thread_pool_workers=inference_thread_pool_workers,
         )
 
     def __init__(
@@ -841,6 +850,7 @@ class InferencePipeline:
         max_fps: Optional[float] = None,
         batch_collection_timeout: Optional[float] = None,
         sink_mode: SinkMode = SinkMode.ADAPTIVE,
+        inference_thread_pool_workers: int = 1,
     ):
         self._on_video_frame = on_video_frame
         self._video_sources = video_sources
@@ -858,6 +868,12 @@ class InferencePipeline:
         self._on_pipeline_end = on_pipeline_end
         self._batch_collection_timeout = batch_collection_timeout
         self._sink_mode = sink_mode
+        try:
+            self._inference_thread_pool_workers = max(
+                1, int(inference_thread_pool_workers)
+            )
+        except (TypeError, ValueError):
+            self._inference_thread_pool_workers = 1
 
     def start(self, use_main_thread: bool = True) -> None:
         self._stop = False
@@ -910,26 +926,53 @@ class InferencePipeline:
             status_update_handlers=self._status_update_handlers,
         )
         logger.info(f"Inference thread started")
+        inference_executor = None
         try:
-            for video_frames in self._generate_frames():
-                self._watchdog.on_model_inference_started(
-                    frames=video_frames,
+            if self._inference_thread_pool_workers == 1:
+                for video_frames in self._generate_frames():
+                    predictions, video_frames = self._run_inference_on_video_frames(
+                        video_frames=video_frames
+                    )
+                    self._emit_inference_result(
+                        predictions=predictions,
+                        video_frames=video_frames,
+                    )
+            else:
+                inference_executor = ThreadPoolExecutor(
+                    max_workers=self._inference_thread_pool_workers
                 )
-                predictions = self._on_video_frame(video_frames)
-                self._watchdog.on_model_prediction_ready(
-                    frames=video_frames,
-                )
-                self._predictions_queue.put((predictions, video_frames))
-                send_inference_pipeline_status_update(
-                    severity=UpdateSeverity.DEBUG,
-                    event_type=INFERENCE_COMPLETED_EVENT,
-                    payload={
-                        "frames_ids": [f.frame_id for f in video_frames],
-                        "frames_timestamps": [f.frame_timestamp for f in video_frames],
-                        "sources_id": [f.source_id for f in video_frames],
-                    },
-                    status_update_handlers=self._status_update_handlers,
-                )
+                pending_predictions = {}
+                next_submitted_batch = 0
+                next_dispatched_batch = 0
+                for video_frames in self._generate_frames():
+                    while (
+                        len(pending_predictions)
+                        >= self._inference_thread_pool_workers
+                    ):
+                        predictions, predicted_video_frames = pending_predictions.pop(
+                            next_dispatched_batch
+                        ).result()
+                        self._emit_inference_result(
+                            predictions=predictions,
+                            video_frames=predicted_video_frames,
+                        )
+                        next_dispatched_batch += 1
+                    pending_predictions[next_submitted_batch] = (
+                        inference_executor.submit(
+                            self._run_inference_on_video_frames,
+                            video_frames=video_frames,
+                        )
+                    )
+                    next_submitted_batch += 1
+                while next_dispatched_batch < next_submitted_batch:
+                    predictions, predicted_video_frames = pending_predictions.pop(
+                        next_dispatched_batch
+                    ).result()
+                    self._emit_inference_result(
+                        predictions=predictions,
+                        video_frames=predicted_video_frames,
+                    )
+                    next_dispatched_batch += 1
 
         except Exception as error:
             payload = {
@@ -945,6 +988,8 @@ class InferencePipeline:
             )
             logger.exception(f"Encountered inference error: {error}")
         finally:
+            if inference_executor is not None:
+                inference_executor.shutdown(wait=True, cancel_futures=True)
             self._predictions_queue.put(None)
             send_inference_pipeline_status_update(
                 severity=UpdateSeverity.INFO,
@@ -952,6 +997,36 @@ class InferencePipeline:
                 status_update_handlers=self._status_update_handlers,
             )
             logger.info(f"Inference thread finished")
+
+    def _run_inference_on_video_frames(
+        self,
+        video_frames: List[VideoFrame],
+    ) -> Tuple[List[AnyPrediction], List[VideoFrame]]:
+        self._watchdog.on_model_inference_started(
+            frames=video_frames,
+        )
+        predictions = self._on_video_frame(video_frames)
+        self._watchdog.on_model_prediction_ready(
+            frames=video_frames,
+        )
+        return predictions, video_frames
+
+    def _emit_inference_result(
+        self,
+        predictions: List[AnyPrediction],
+        video_frames: List[VideoFrame],
+    ) -> None:
+        self._predictions_queue.put((predictions, video_frames))
+        send_inference_pipeline_status_update(
+            severity=UpdateSeverity.DEBUG,
+            event_type=INFERENCE_COMPLETED_EVENT,
+            payload={
+                "frames_ids": [f.frame_id for f in video_frames],
+                "frames_timestamps": [f.frame_timestamp for f in video_frames],
+                "sources_id": [f.source_id for f in video_frames],
+            },
+            status_update_handlers=self._status_update_handlers,
+        )
 
     def _dispatch_inference_results(self) -> None:
         while True:
