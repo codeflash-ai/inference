@@ -1109,3 +1109,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Direct comparison against the accepted cached T4 FP16 engine over all 538 frames failed: `bad_counts=8`, `bad_classes=15`, `bad_masks=345`, `bad_boxes_gt5=23`, `max_box_delta=251.0`, `max_conf_delta=0.10609796643257141`; first failure was frame `0` with accepted count `4` vs candidate count `5`.
 - Result: Not benchmarked further because it violates the explicit class/mask/box correctness gate.
 - Learning: Like the previous opt0/opt1 rebuilds, the available ONNX package is not a safe source for a drop-in engine compatible with the accepted packaged T4 FP16 plan. Further engine replacement needs the exact source/export settings for the accepted plan or a correctness-preserving engine package.
+
+### Rejected: Omit False Preprocessing Overrides
+
+- Hypothesis: The RFDETR TRT workflow fast path constructs a `PreProcessingOverrides(False, False, False)` object for every frame. Passing `None` is semantically equivalent for the preprocessing helpers and could remove a small per-frame Python allocation.
+- Change tested: Temporary code only; passed `pre_processing_overrides=None` from `_try_run_rfdetr_trt_fast_path(...)` and kept pipeline depth fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=234.41`, `frames=538 elapsed=2.30s fps=233.61`, and `frames=538 elapsed=2.31s fps=232.93`, below the accepted fixed-copy band.
+- Learning: The dataclass allocation is below the limiter, and changing the branch pattern through preprocessing worsens the pipeline balance. Keep the explicit false overrides object.
