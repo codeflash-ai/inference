@@ -1752,3 +1752,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary env-gated code only; set `graph_context.persistent_cache_limit` before CUDA graph warmup/capture, then ran the requested benchmark with pipeline depth fixed at `2` for limits `1 MiB`, `4 MiB`, and `8 MiB`.
 - Result on requested command: The T4 runtime rejected every nonzero value with `IExecutionContext::setPersistentCacheLimit: Error Code 3 ... size ... is larger than cudaDeviceProp.persistingL2CacheMaxSize(0 bytes)`. Runs measured `242.80`, `242.53`, and `243.44` FPS, below the accepted warmed band.
 - Learning: This GPU exposes no persisting L2 cache budget to TensorRT, so `persistent_cache_limit` is not an available optimization knob here. Removed the temporary hook.
+
+### Rejected: Detection-Limited Deferred Mask Allocation
+
+- Hypothesis: The deferred mask resize path only launches work for the first `7` detections, but still allocates a `100 x H x W` bool tensor. Allocating only `7 x H x W` rows when `deferred_mask_resize_detection_limit=7` could reduce allocator pressure and memory footprint between TensorRT graph launches while preserving the recovery path for frames with more detections.
+- Change tested: Temporary code only; moved detection-limit normalization before output allocation in `fused_resize_selected_masks(...)` and allocated the output tensor with `detection_limit` rows. Pipeline depth remained fixed at `2`.
+- Result on requested command: `frames=538 elapsed=2.21s fps=243.80`, then `frames=538 elapsed=2.20s fps=244.45`, below the accepted warmed band.
+- Learning: The allocation size is not the bottleneck; the gap is dominated by TensorRT output copies and graph-body latency. Keep the fixed `100` row allocation that preserves the established conversion-buffer behavior.
