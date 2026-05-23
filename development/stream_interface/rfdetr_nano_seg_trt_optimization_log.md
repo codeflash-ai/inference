@@ -1850,3 +1850,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External runtime setting only; set application clocks to `(MEM 5001, SM 1590)`, ran the requested benchmark with pipeline depth fixed at `2`, then reset application clocks with `nvidia-smi -rac`.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.24`, compared with the same-session default-clock clean baseline of `frames=538 elapsed=2.21s fps=243.99`.
 - Learning: Application clocks still do not move throughput beyond the accepted warmed band. The current code-level CUDA graph warmup already reaches the practical graph-bound clock regime for the measured interval.
+
+### Rejected: Python Optimize Mode
+
+- Hypothesis: Launching the benchmark with `PYTHONOPTIMIZE=1` could remove Python assert/debug overhead in the workflow and model stack without changing model math or TensorRT execution.
+- Change tested: External interpreter setting only; ran the requested benchmark with `PYTHONOPTIMIZE=1` and pipeline depth fixed at `2`.
+- Result on requested command: `frames=538 elapsed=2.20s fps=244.26`, then `frames=538 elapsed=2.21s fps=243.36`, compared with the same-session default baseline of `frames=538 elapsed=2.21s fps=243.99`.
+- Learning: Python optimize mode is normal warmed-path noise and not a stable throughput lever. Keep the default interpreter mode.
