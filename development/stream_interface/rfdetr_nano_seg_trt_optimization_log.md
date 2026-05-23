@@ -780,3 +780,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the localized conversion against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.45s fps=220.02`, then `frames=538 elapsed=2.48s fps=216.62`; not stable enough to keep over the pinned-conversion checkpoint.
 - Learning: These Python lookups are below the benchmark noise floor, and the altered bytecode/allocation order can regress scheduling. Keep the original straightforward conversion loop.
+
+### Rejected: NumPy Array Mask Copy
+
+- Hypothesis: The pinned conversion checkpoint uses `mask_view.copy()` to produce queue-safe owned mask arrays. A local micro-benchmark on `(5, 312, 312)` bool masks showed `np.array(mask_view, copy=True)` slightly faster, so swapping only the mask copy idiom might shave host materialization time without changing ownership.
+- Change tested: Temporary code only; replaced `mask_buffer[:valid_count].numpy().copy()` with `np.array(mask_buffer[:valid_count].numpy(), copy=True)`.
+- Correctness: Compared the alternate mask copy against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.17`, below the pinned-conversion checkpoint.
+- Learning: The isolated NumPy copy micro-benchmark does not predict full pipeline behavior; keep the direct ndarray `.copy()` path.
