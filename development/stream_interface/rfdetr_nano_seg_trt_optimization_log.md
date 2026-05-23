@@ -1562,3 +1562,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the gated path against the accepted path on all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.69`, repeat `frames=538 elapsed=2.34s fps=230.14`, below the accepted fixed-copy band.
 - Learning: The graph-stream logits clone is small enough that replacing it with sigmoid work on the graph stream perturbs the critical schedule rather than improving it. Keep the accepted logits clone plus postprocess-stream sigmoid.
+
+### External Runtime Probe: Lock T4 Graphics Clock
+
+- Hypothesis: The accepted depth-2 path is now constrained by TensorRT CUDA graph duration, and the Tesla T4 sits in a low-power P8 state at idle. Locking graphics clocks to the supported maximum before the benchmark may remove early-run clock ramp and expose the true graph-bound ceiling.
+- Change tested: External runtime setting only; ran `nvidia-smi -lgc 1590,1590`, confirmed `P0` and `1590 MHz` graphics/SM clocks, ran the accepted benchmark with pipeline depth fixed at `2`, then reset the lock with `nvidia-smi -rgc`.
+- Result on requested command: `frames=538 elapsed=2.21s fps=243.54`, with progress already near steady state by frame `50` (`254.93` FPS at frame 50, settling to `243.54` FPS overall).
+- Learning: The code path is effectively at the graph-bound ceiling when the T4 is held at max clocks. This is an external deployment/runtime tuning knob, not a library code change; future code changes should be compared under the same clock policy if the goal is absolute max FPS rather than default cloud/runtime behavior.
