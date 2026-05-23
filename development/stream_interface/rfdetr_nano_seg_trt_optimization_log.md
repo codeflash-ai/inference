@@ -2194,3 +2194,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: `frames=538 elapsed=2.32s fps=231.55`.
 - Quick exported-data check: the profile contains `602` `cudaGraphLaunch` calls. After skipping `64` warmup launches plus `100` settling launches, graph-launch submit interval was p50 `4118.925 us`, p90 `4252.884 us`, p95 `4316.037 us`, mean `4119.233 us`.
 - Learning: The fresh accepted report is consistent with the earlier graph-bound traces. Depth `2` keeps the run shaped around the TensorRT CUDA graph replay cadence; remaining visible work is the narrow fused postprocess/copy tail rather than a CPU scheduling bubble.
+
+### Rejected: RFDETR Mask Resize Triton Block Size Variants
+
+- Hypothesis: The deferred fused mask resize kernel is one of the few remaining visible postprocess kernels in the graph-to-graph tail. Changing the Triton pixel block size from `256` to either `512` or `128` might improve occupancy or reduce scheduling overhead for the `7 x 312 x 312` limited resize workload.
+- Change tested: Temporary code only; changed `fused_resize_selected_masks(...)` block size to `512`, then to `128`. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: This only changed the partitioning of the same bilinear mask threshold computation. `py_compile` passed after each variant and the benchmark completed normally. Classes and boxes are untouched by this kernel.
+- Result on requested command: `512` measured `frames=538 elapsed=2.20s fps=244.14` and `frames=538 elapsed=2.20s fps=244.03`; `128` measured `frames=538 elapsed=2.21s fps=242.92`. After reverting to accepted `256`, the immediate same-session baseline measured `frames=538 elapsed=2.21s fps=242.96`, indicating the session was noisy/slow but neither variant showed a stable gain.
+- Learning: The accepted `256` tile remains the best default. This kernel is too small relative to the TensorRT CUDA graph body for tiling-only changes to move end-to-end throughput reliably.
