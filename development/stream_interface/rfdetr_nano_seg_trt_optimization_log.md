@@ -1387,3 +1387,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; first launched `_resize_selected_masks_kernel` with `num_stages=1`, then restored resize and launched `_select_topk_boxes_kernel` with `num_stages=1`. Pipeline depth remained fixed at `2`.
 - Result on requested command: resize `num_stages=1` measured `frames=538 elapsed=2.31s fps=232.79`; selector `num_stages=1` measured `frames=538 elapsed=2.30s fps=233.43`, neither better than the accepted fixed-copy band.
 - Learning: Triton's default staging is already adequate for both kernels. Keep the accepted launches without explicit `num_stages`.
+
+### Rejected: Mask-First Fixed D2H Copy Order
+
+- Hypothesis: The fixed 7-row conversion path enqueues tiny count/box/confidence/class D2H copies before the larger mask D2H copy. Starting the large mask copy first might improve copy-engine scheduling and shave the CPU synchronization tail.
+- Change tested: Temporary code only; reordered `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` to enqueue the mask D2H copy before count and metadata copies. Pipeline depth remained fixed at `2`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.29s fps=234.45`, then repeated at `frames=538 elapsed=2.31s fps=232.77`, not a stable improvement over the accepted fixed-copy band.
+- Learning: D2H copy submission order is not a reliable limiter after fixed-count conversion. Keep the original count/metadata/mask order.
