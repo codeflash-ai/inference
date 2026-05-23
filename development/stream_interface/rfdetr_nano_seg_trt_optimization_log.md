@@ -1430,3 +1430,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_EXTERNAL_DEVICE_MEMORY=1`, `_capture_cuda_graph(...)` used an external device-memory allocation sized from `update_device_memory_size_for_shapes()` and `engine.device_memory_size_v2`, kept alive on the graph state. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: first run `frames=538 elapsed=2.29s fps=234.64`, repeat `frames=538 elapsed=2.33s fps=230.51`, not stable enough to keep over the accepted fixed-copy band.
 - Learning: TensorRT's internal context memory allocation is not the graph replay limiter for this static RFDETR engine. Keep the simpler default execution-context allocation.
+
+### Rejected: Partial TensorRT Aux Stream Counts
+
+- Hypothesis: The RFDETR engine reports four auxiliary streams. Previous tests rejected zero explicit aux streams and all four explicit aux streams; setting one or two explicit aux streams during CUDA graph capture might reduce TensorRT internal scheduling overhead while preserving some overlap.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_AUX_STREAM_COUNT`, `_capture_cuda_graph(...)` created that many Torch CUDA streams, passed their handles to `IExecutionContext.set_aux_streams(...)`, and kept them alive on the CUDA graph state. Pipeline depth remained fixed at `2`.
+- Result on requested command: `RFDETR_TRT_AUX_STREAM_COUNT=2` measured `frames=538 elapsed=2.31s fps=233.11`; `RFDETR_TRT_AUX_STREAM_COUNT=1` measured `frames=538 elapsed=2.31s fps=232.90`, both below the accepted fixed-copy band.
+- Learning: Manually constraining TensorRT aux-stream count does not improve graph replay. Keep TensorRT's default aux-stream scheduling.
