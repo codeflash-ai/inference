@@ -2319,3 +2319,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: The provider still resolves `rfdetr-seg-nano` to `coco-dataset-vdnr1/41` and exposes the same six public packages: L4 TRT FP32 `3e3ddd85586b43e4fac6d319fb2927fd`, ONNX FP32 `5362b72bfb9f01d2e0b8cba2048d932c`, L4 TRT FP16 `89d1f41e2af4f4f3ffcdfb77e774d26a`, Torch FP32 `8b8da2fe824240522a39f3cde41aafae`, T4 TRT FP32 `bbc2cc23adf6f5e71a9241956081da96`, and T4 TRT FP16 `c70f32369a54d61e06ef4e6b56c82524`.
 - Sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.01` after the metadata probe.
 - Learning: There is no newer official T4 TensorRT artifact available from the provider. The accepted T4 FP16 package remains the only official engine that has passed the all-frame class/box/mask correctness gate; further graph-body gains still need a behavior-equivalent export source or a new official package.
+
+### Rejected: TensorRT Input-Consumed Event
+
+- Hypothesis: `IExecutionContext.set_input_consumed_event(...)` could let TensorRT expose input-buffer consumption earlier or alter graph scheduling enough to reduce the accepted graph-only replay duration.
+- Diagnostic: Temporary graph-only harness only; created a CUDA event, attached it to the TensorRT execution context before warmup and CUDA graph capture, then compared `execute_async_v3(...)` graph replay timing against two baseline graph-only captures. Pipeline depth was not varied and depth `3` was not tested.
+- Result: First baseline graph replay measured `4.068339 ms` mean over five 1000-replay batches. With the input-consumed event attached, graph replay measured `4.110596 ms` mean. A later same-session baseline measured `4.137564 ms` mean, showing session drift but no event-driven improvement. A normal accepted depth-2 sanity run afterward measured `frames=538 elapsed=2.22s fps=242.75`.
+- Learning: The input-consumed event does not reduce the static TensorRT graph body and may add event work or capture complexity. Keep the accepted graph context without an input-consumed event.
