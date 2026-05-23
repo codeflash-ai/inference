@@ -320,3 +320,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Micro-result: Isolated conversion prototype measured `1.446 ms/frame` vs `1.455 ms/frame` for the `fromarray` path over 128 frames.
 - Result on requested command: repeat runs measured `frames=538 elapsed=2.81s fps=191.23` and `frames=538 elapsed=2.82s fps=191.04`, below the current checkpoint band.
 - Learning: Any copy saved by `frombuffer` is too small to matter, and PIL resize plus downstream pipeline scheduling dominate this part of preprocessing.
+
+### Reusable Pinned RFDETR Preprocess Buffer
+
+- Hypothesis: Nsight Systems still showed the normalized RFDETR input Host-to-Device copy as the largest memory operation. Filling a reusable pinned CPU tensor directly in CHW layout and copying it to CUDA with `non_blocking=True` should reduce CPU-side transfer blocking and improve overlap with the GPU pipeline.
+- Change: For the single-image CUDA numpy preprocessing path, `_pil_image_to_normalized_tensor(...)` now writes normalized channels into a thread-local pinned `torch.float32` CHW buffer. `pre_process_network_input(...)` uses a non-blocking device copy from pinned memory and records a per-thread CUDA event so the host buffer is not reused until the prior H2D copy is complete. Batch and non-CUDA paths keep the normal NumPy-backed tensor behavior.
+- Correctness: Compared the pinned integrated preprocessing path against the previous non-pinned CHW formula on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
+- Micro-result: Preprocess-only loop over 128 frames measured `1.663 ms/frame`, down from the prior ~`1.98 ms/frame` band.
+- Pipeline tuning: Depth `1` measured `frames=538 elapsed=4.15s fps=129.55`; depth `2` measured `frames=538 elapsed=2.64s fps=203.56` and `frames=538 elapsed=2.62s fps=205.28`; depth `3` measured `frames=538 elapsed=3.19s fps=168.47`.
+- Result on requested command: best isolated run `frames=538 elapsed=2.62s fps=205.28`.
+- Learning: Reusable pinned memory is the first preprocessing transfer change that helps end-to-end. The earlier per-frame `.pin_memory()` experiment was slower because it paid pinning cost every frame; reusing the pinned storage preserves the transfer benefit without that allocation cost.
