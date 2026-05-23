@@ -330,3 +330,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Pipeline tuning: Depth `1` measured `frames=538 elapsed=4.15s fps=129.55`; depth `2` measured `frames=538 elapsed=2.64s fps=203.56` and `frames=538 elapsed=2.62s fps=205.28`; depth `3` measured `frames=538 elapsed=3.19s fps=168.47`.
 - Result on requested command: best isolated run `frames=538 elapsed=2.62s fps=205.28`.
 - Learning: Reusable pinned memory is the first preprocessing transfer change that helps end-to-end. The earlier per-frame `.pin_memory()` experiment was slower because it paid pinning cost every frame; reusing the pinned storage preserves the transfer benefit without that allocation cost.
+
+### Rejected: Retune Fused Mask Resize Pixel Block
+
+- Hypothesis: `_resize_selected_masks_kernel` is still the largest custom kernel in Nsight Systems. Changing the per-program pixel block from 256 could improve occupancy or reduce Triton program count on T4.
+- Change tested: Temporary code only; tried `block_size=512` with `num_warps=8`, then `block_size=128` with `num_warps=4`.
+- Correctness: The `512` variant matched exact-sized postprocess on all 538 frames, including dense masks and max box delta `0` px. The `128` variant changes only tile shape and uses the same math.
+- Result on requested command: `512/8` measured `frames=538 elapsed=2.68s fps=200.67`; `128/4` measured `frames=538 elapsed=2.66s fps=202.41`, both below the committed `256/4` path.
+- Learning: The current 256-pixel tile remains the best balance. Larger tiles likely hurt register/occupancy behavior, while smaller tiles add too many programs.
