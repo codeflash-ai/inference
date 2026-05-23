@@ -2478,3 +2478,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `18.59-19.39 us` under NCU replay. Compute throughput was about `10.45-10.63%`, memory and DRAM throughput about `50.90-53.20%`, L1/TEX throughput about `58.70-61.30%`, and L2 throughput about `17.35-18.06%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.62` after the profile.
 - Learning: TensorRT's split-k variant improves occupancy relative to the tiniest GEMMs but is still partial-wave limited and more memory-pressure-bound than compute-bound. It supports the same conclusion: the remaining forward graph is constrained by many serialized small TensorRT tactics, and useful gains require a different correct TensorRT export/tactic mix rather than local postprocess tuning.
+
+### Diagnostic: TensorRT Engine Inspector Metadata
+
+- Hypothesis: TensorRT's engine inspector might expose layer-to-tactic metadata for the packaged RFDETR engine, giving a path to target specific tactic choices or replace a small set of TensorRT graph-body nodes with custom kernels.
+- Diagnostic: Loaded the accepted `rfdetr-seg-nano` TRT engine through the local `inference_models` path and exported engine inspector output to `/tmp/rfdetr_trt_engine_inspector_json_20260523_2228.txt` and `/tmp/rfdetr_trt_engine_inspector_oneline_20260523_2228.txt`. This was metadata-only; pipeline depth was not varied and depth `3` was not tested.
+- Result: The engine reports TensorRT `10.12.0.36`, `261` layers, `4` I/O tensors, and `ProfilingVerbosity.LAYER_NAMES_ONLY`. I/O tensors are `input` FLOAT `(1, 3, 312, 312)`, `dets` FLOAT `(1, 100, 4)`, `labels` FLOAT `(1, 100, 91)`, and mask output `4186` FLOAT `(1, 100, 78, 78)`, all LINEAR format.
+- Inspector output: The inspector exports layer names such as backbone attention MatMul/MHA and Myelin fused layers, but it does not include tactic IDs, tactic parameters, or enough per-layer implementation detail to drive tactic-level patching from the packaged plan alone.
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.93` after the diagnostic.
+- Learning: The packaged engine confirms the structural source of the observed graph-body kernels, but it was not built with detailed profiling verbosity. Further TensorRT-forward gains likely require a correctness-equivalent ONNX/export plus a fresh verbose engine build/tactic search, not a local runtime tweak to the existing plan.
