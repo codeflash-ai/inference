@@ -625,3 +625,12 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared fused output against the unfused PyTorch fallback on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.19` and `frames=538 elapsed=2.48s fps=216.58`, not consistently above the current `218.97` FPS checkpoint.
 - Learning: The small box-conversion kernels are visible in Nsight Systems but are not throughput-limiting at depth `2`. Keep the simpler float-box selector plus existing PyTorch rounding.
+
+### Rejected: More Warps For Triton Mask Resize
+
+- Profile: Nsight Compute capture `/tmp/rfdetr_resize_kernel_depth2_current.ncu-rep` sampled `_resize_selected_masks_kernel`; current launches use grid `(100, 215, 1)`, block `(128, 1, 1)`, 32 registers/thread, and full theoretical occupancy on T4 for the sampled kernels.
+- Hypothesis: The current mask resize keeps the 256-pixel tile but launches with `num_warps=4`. Increasing to `num_warps=8` could map the same per-program vector work across more lanes without changing the tile size or the one-detection-per-program layout.
+- Change tested: Temporary code only; changed `fused_resize_selected_masks(...)` to launch `_resize_selected_masks_kernel` with `num_warps=8`.
+- Correctness: Compared deferred fused postprocess against exact-sized postprocess on 120 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.27` and `frames=538 elapsed=2.49s fps=215.66`, below the current `218.97` FPS checkpoint.
+- Learning: The current 4-warp launch is already well-balanced for this T4 kernel. More warps change scheduling without reducing the end-to-end graph gap.
