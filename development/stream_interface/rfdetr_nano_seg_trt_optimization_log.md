@@ -1416,3 +1416,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: `frames=538 elapsed=2.33s fps=230.90`.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4102.399 us`, p90 `4116.422 us`, p95 `4123.113 us`, p99 `4152.967 us`, mean `4078.093 us`; graph end-to-next-start gap was p50 `40.863 us`, p90 `42.220 us`, p95 `42.528 us`, p99 `43.401 us`, mean `41.820 us`. Busy work inside the gap was p50 `35.263 us`, mean `35.769 us`; idle inside the gap was p50 `5.471 us`, mean `6.051 us`.
 - Learning: Depth `2` remains effectively constrained by the TensorRT CUDA graph. The remaining median idle bubble between graph launches is about `5.5 us`, and the graph-to-graph gap remains low and consistent.
+
+### Rejected: Prewarmed Two-Slot TensorRT Graph Pool
+
+- Hypothesis: The earlier thread-local graph replay experiment regressed because each worker captured lazily in the hot path. Prewarming two TensorRT CUDA graph caches from the first frame and assigning one cache/stream to each depth-2 worker might allow concurrent graph replay and improve GPU utilization if the TensorRT graph body has internal bubbles.
+- Change tested: Temporary gated code only; with `RFDETR_PREWARMED_TRT_GRAPH_POOL=1`, the RFDETR TRT model created two one-entry graph caches and two inference streams on the first forward pass, captured both graphs before the first result, then assigned stable slots to worker threads. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.65s fps=202.96`, far below the accepted fixed-copy band.
+- Learning: The TensorRT graph body already saturates the relevant T4 resources, or concurrent graph/context scheduling interferes with TensorRT's own auxiliary streams. Keep the single serialized TensorRT CUDA graph path with depth-2 CPU/GPU pipelining.
