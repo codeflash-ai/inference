@@ -740,3 +740,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared folded metadata against the previous helper chain on all 538 frames, ignoring random detection IDs: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes=0`, `bad_data=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.02` and `frames=538 elapsed=2.45s fps=219.31`, below the pinned-conversion checkpoint.
 - Learning: The helper calls are not the limiter, and folding them changes enough Python allocation/order behavior to lose throughput. Keep the established helper chain.
+
+### Rejected: Reuse Deferred Fused Postprocess CUDA Buffers
+
+- Hypothesis: The internal deferred RFDETR fused postprocess path allocates same-shaped CUDA tensors for scores, classes, boxes, query indices, count, and resized masks each frame. Reusing thread-local buffers for those fixed-capacity outputs could reduce allocator and Python overhead while preserving the deferred GPU count path.
+- Change tested: Temporary code only; added thread-local output buffers in `fused_postprocess.py` and enabled them only when `_try_fused_instance_segmentation_post_process(...)` runs with `defer_count=True`.
+- Correctness: Compared deferred fused postprocess with reused buffers against exact-sized postprocess on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.45`, then `frames=538 elapsed=2.49s fps=216.02`; not stable enough to keep over the pinned-conversion checkpoint.
+- Learning: PyTorch's caching allocator already handles these fixed shapes well enough. Thread-local reuse changes object lifetime/stream behavior and can degrade scheduling, so keep per-frame tensor creation.
