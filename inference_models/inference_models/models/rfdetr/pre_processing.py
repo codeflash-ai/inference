@@ -227,7 +227,7 @@ def _pil_image_to_normalized_tensor(
     image_array = np.asarray(image)
     if image_array.ndim != 3 or image_array.shape[2] != 3:
         return None
-    mean, std, scale = _get_normalization_constants(network_input.normalization)
+    multiplier, bias = _get_normalization_constants(network_input.normalization)
     channel_order = (2, 1, 0) if swap_tensor_channels else (0, 1, 2)
     shape = (3, image_array.shape[0], image_array.shape[1])
     if use_pinned_output:
@@ -240,12 +240,11 @@ def _pil_image_to_normalized_tensor(
         channel = normalized[output_channel]
         np.multiply(
             image_array[:, :, input_channel],
-            scale,
+            multiplier[output_channel],
             out=channel,
             casting="unsafe",
         )
-        channel -= mean[output_channel]
-        channel /= std[output_channel]
+        channel += bias[output_channel]
     if normalized_tensor is not None:
         return normalized_tensor
     return torch.from_numpy(normalized)
@@ -253,18 +252,18 @@ def _pil_image_to_normalized_tensor(
 
 def _get_normalization_constants(
     normalization: Tuple[List[float], List[float]],
-) -> Tuple[np.ndarray, np.ndarray, np.float32]:
+) -> Tuple[np.ndarray, np.ndarray]:
     key = (tuple(normalization[0]), tuple(normalization[1]))
     cached_key = getattr(_NORMALIZATION_STORAGE, "key", None)
     if cached_key != key:
         _NORMALIZATION_STORAGE.key = key
-        _NORMALIZATION_STORAGE.mean = np.asarray(normalization[0], dtype=np.float32)
-        _NORMALIZATION_STORAGE.std = np.asarray(normalization[1], dtype=np.float32)
-        _NORMALIZATION_STORAGE.scale = np.float32(1.0 / 255.0)
+        mean = np.asarray(normalization[0], dtype=np.float32)
+        std = np.asarray(normalization[1], dtype=np.float32)
+        _NORMALIZATION_STORAGE.multiplier = np.float32(1.0 / 255.0) / std
+        _NORMALIZATION_STORAGE.bias = -mean / std
     return (
-        _NORMALIZATION_STORAGE.mean,
-        _NORMALIZATION_STORAGE.std,
-        _NORMALIZATION_STORAGE.scale,
+        _NORMALIZATION_STORAGE.multiplier,
+        _NORMALIZATION_STORAGE.bias,
     )
 
 

@@ -650,3 +650,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The standalone packer matched a CUDA bool tensor exactly. Full `InferencePipeline` comparison against the normal mask-copy path on all 538 frames matched counts, class IDs, boxes, and dense masks exactly: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.50s fps=214.93` and `frames=538 elapsed=2.48s fps=217.31`, below the current `218.97` FPS checkpoint.
 - Learning: The extra Triton launch and CPU unpack work cost more than the saved D2H bandwidth for these small per-frame mask payloads. Keep the direct bool mask copy.
+
+### RFDETR Fused CPU Normalization Constants
+
+- Hypothesis: The RFDETR PIL/NumPy preprocessing fast path still performs three full-array operations per channel: multiply by `1/255`, subtract mean, then divide by std. Precomputing `1/(255*std)` and `-mean/std` should reduce this to multiply plus add per channel while preserving prediction outputs.
+- Change: `_get_normalization_constants(...)` now caches per-channel `multiplier` and `bias`, and `_pil_image_to_normalized_tensor(...)` applies `image * multiplier + bias` directly into the CHW float32 buffer.
+- Correctness: Compared the fused-normalization path against the torchvision fallback path on all 538 frames from `vehicles_312px.mp4`: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`, `max_tensor_delta=7.152557373046875e-07`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.60`, `frames=538 elapsed=2.46s fps=219.03`, and `frames=538 elapsed=2.46s fps=218.97`.
+- Learning: This is a small CPU-side gain but it is algebraically simple and keeps the benchmark at the current best band. The remaining bottleneck is still the graph replay plus the postprocess/materialization tail rather than normalization alone.
