@@ -2600,3 +2600,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `58.62-58.66 us` under NCU replay. Compute throughput was about `44.31-44.61%`, memory throughput about `27.36-27.53%`, DRAM throughput about `25.95-26.19%`, and L2 throughput about `20.95-20.97%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.54` after the profile.
 - Learning: This tail H1688 GEMM is also limited by high register/shared-memory usage and a small fixed grid. It matches the broader TensorRT-forward diagnosis: the remaining large opportunity is a different correct engine/tactic mix, not local postprocess or CPU pipeline work.
+
+### Profile: TensorRT Myelin Mean-Reduction Tail Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_MulAddCastMeanSubMulMean_*` at about `30 us/replay` aggregated across three graph nodes. Profiling it can show whether this smaller layernorm-style Myelin tail is dominated by partial-wave occupancy or by memory traffic.
+- Profile: `/tmp/rfdetr_trt_myelin_mean_tail_graphnode_basic_ncu_20260523_231042.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_mean_tail_graphnode_basic_ncu_20260523_231042_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_mean_tail_graphnode_basic_ncu_20260523_231042_raw.csv`. The NCU command used graph profiling mode `node`, matched `regex:__myl_MulAddCastMeanSubMulMean_.*`, skipped `400` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.03s fps=38.35`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `170`, block size `(32, 4, 1)`, `32` registers/thread, `64 B` dynamic shared memory per block, and `0.53` waves/SM. Achieved occupancy is about `48.08-49.43%`, with active warps/SM about `15.39-15.82`.
+- Throughput: Duration was about `14.91-15.62 us` under NCU replay. Compute throughput was about `14.38-14.90%`, memory and DRAM throughput about `48.88-49.57%`, and L2 throughput about `26.23-27.66%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.86` after the profile.
+- Learning: This Myelin mean-reduction tail is modestly occupied and memory/DRAM pressured. Like the other Myelin layernorm-style kernels, it would need graph-level fusion or a different export to remove memory traffic; it is not a promising local postprocess/wrapper replacement target.
