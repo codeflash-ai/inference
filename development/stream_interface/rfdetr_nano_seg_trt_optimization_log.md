@@ -1331,3 +1331,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: `frames=538 elapsed=2.31s fps=232.91`.
 - Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4104.479 us`, p90 `4121.887 us`, p95 `4125.118 us`, p99 `4179.422 us`, mean `4078.695 us`; graph end-to-next-start gap was p50 `40.511 us`, p90 `41.919 us`, p95 `42.751 us`, p99 `43.327 us`, mean `40.813 us`. Busy work inside the gap was p50 `35.071 us`, mean `35.382 us`; idle inside the gap was p50 `5.344 us`, mean `5.431 us`.
 - Learning: The latest accepted path is still effectively TensorRT CUDA-graph limited. The post-graph interval is short and stable, and the remaining idle bubble is only about `5 us` median.
+
+### Rejected: Int64 Query Indices From Selector
+
+- Hypothesis: The fused selector writes query indices as `int32` and the deferred path casts them to `int64`, producing a small copy/cast kernel before mask resize. Writing `int64` query indices directly from the Triton selector could remove that cast while preserving the indexing dtype expected by downstream PyTorch paths.
+- Change tested: Temporary code only; first gated `RFDETR_SELECTOR_INT64_QUERIES=1` to allocate query indices as `torch.int64` and skip the `.to(dtype=torch.long)` call, then tested the actual candidate as an unconditional `int64` query-index output. Pipeline depth remained fixed at `2`.
+- Result on requested command: the gated probe measured `234.01` and `234.61` FPS, but the unconditional candidate measured `frames=538 elapsed=2.32s fps=232.35`, below the accepted fixed-copy band.
+- Learning: Removing the query-index cast is not enough to improve the full pipeline, and the `int64` selector output shifts scheduling or memory behavior unfavorably. Keep the accepted `int32` selector output plus explicit cast.
