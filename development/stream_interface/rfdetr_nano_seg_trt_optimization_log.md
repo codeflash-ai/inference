@@ -1927,3 +1927,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External process environment only; ran the requested benchmark with `CUBLAS_WORKSPACE_CONFIG=:4096:8`, then with `CUBLAS_WORKSPACE_CONFIG=:16:8`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: `:4096:8` measured `frames=538 elapsed=2.20s fps=244.86`; `:16:8` measured `frames=538 elapsed=2.21s fps=243.95`, both below the recent same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
 - Learning: cuBLAS workspace configuration is not a useful runtime knob for this serialized TensorRT/Myelin plan. Keep the default library workspace behavior.
+
+### Rejected: PyTorch Native Allocator Split Size
+
+- Hypothesis: The accepted depth-2 path still allocates fixed-size PyTorch CUDA tensors around TensorRT output clones and fused postprocess. Setting `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:...` could change native caching-allocator block splitting enough to reduce allocator overhead or fragmentation while preserving tensor values.
+- Change tested: External process environment only; first tried `max_split_size_mb:16`, then tried valid `max_split_size_mb:64`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result: `max_split_size_mb:16` failed before frames because PyTorch rejected it (`CachingAllocator option max_split_size_mb too small, must be > 20`). `max_split_size_mb:64` ran successfully but measured `frames=538 elapsed=2.20s fps=244.50`, below the recent default warmed baseline of `frames=538 elapsed=2.19s fps=245.20`.
+- Learning: Native allocator split-size tuning does not improve this graph-bound run. The default allocator policy remains the best tested option; the earlier `cudaMallocAsync` allocator probe was also not stable enough to keep.
