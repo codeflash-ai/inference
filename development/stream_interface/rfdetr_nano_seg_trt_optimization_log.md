@@ -820,3 +820,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result under profiler: depth `2` measured `frames=538 elapsed=2.58s fps=208.77`.
 - Graph spacing: The corrected capture includes `538` CUDA graph traces on stream `39`. After skipping the first 100 launches, CUDA graph duration was p50 `3781.637 us`, p90 `3812.413 us`, p95 `3817.378 us`, p99 `3824.886 us`; graph end-to-next-start gap was p50 `803.827 us`, p90 `891.474 us`, p95 `911.633 us`, p99 `1134.530 us`, mean `810.141 us`.
 - Note: An earlier same-turn capture omitted `PYTHONPATH=/app/inference_models`, used the installed package, and did not include CUDA graph replay; ignore `/tmp/rfdetr_depth2_current_20260523_073219.*` and `/tmp/rfdetr_depth2_graphtrace_20260523_073343.*` for this optimization thread.
+
+### Rejected: Keep Deferred Query Indices Int32
+
+- Hypothesis: The deferred fused postprocess path converts `query_indices` from `int32` to `int64` even though the Triton mask resize kernel can consume `int32` directly. Removing that conversion could eliminate one small CUDA kernel between TensorRT graph replay and postprocess.
+- Change tested: Temporary code only; when `fused_select_topk_boxes(..., return_cpu_count=False)` returned deferred outputs, it returned `query_indices` as `int32` instead of `query_indices.to(dtype=torch.long)`.
+- Correctness: Compared deferred fused postprocess against the exact-sized path on all 538 frames: `max_count=7`, `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.25`, `frames=538 elapsed=2.45s fps=219.49`, and `frames=538 elapsed=2.46s fps=218.85`; not stable enough to keep over the pinned-conversion checkpoint.
+- Learning: The int32-to-int64 conversion kernel is visible but not a reliable limiter. Removing it changes downstream scheduling enough that FPS still falls into the noisy lower band.
