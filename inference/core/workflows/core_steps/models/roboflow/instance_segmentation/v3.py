@@ -103,6 +103,7 @@ def _get_rfdetr_conversion_buffers(
         torch.empty((capacity,), dtype=confidence_dtype, pin_memory=True),
         torch.empty((capacity,), dtype=class_id_dtype, pin_memory=True),
         torch.empty((capacity,) + mask_shape, dtype=mask_dtype, pin_memory=True),
+        torch.empty((1,), dtype=torch.int32, pin_memory=True),
     )
     _RFDETR_CONVERSION_BUFFERS.key = requested_key
     _RFDETR_CONVERSION_BUFFERS.capacity = capacity
@@ -556,36 +557,56 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             if detections_element.image_metadata is not None:
                 valid_count = detections_element.image_metadata.get("valid_count")
             if valid_count is not None:
-                valid_count = int(valid_count.detach().cpu().item())
-                xyxy_tensor = detections_element.xyxy[:valid_count]
-                confidence_tensor = detections_element.confidence[:valid_count]
-                class_id_tensor = detections_element.class_id[:valid_count]
-                recovered_masks = RoboflowInstanceSegmentationModelBlockV3._recover_limited_rfdetr_masks(
+                fixed_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_limited_cuda_detection_tensors_to_pinned_numpy(
                     detections_element=detections_element,
-                    valid_count=valid_count,
                 )
-                if recovered_masks is None:
-                    recovered_masks = detections_element.mask
-                mask_tensor = recovered_masks[:valid_count]
+                if fixed_arrays is not None:
+                    xyxy, confidence, class_id, masks = fixed_arrays
+                else:
+                    valid_count = int(valid_count.detach().cpu().item())
+                    xyxy_tensor = detections_element.xyxy[:valid_count]
+                    confidence_tensor = detections_element.confidence[:valid_count]
+                    class_id_tensor = detections_element.class_id[:valid_count]
+                    recovered_masks = RoboflowInstanceSegmentationModelBlockV3._recover_limited_rfdetr_masks(
+                        detections_element=detections_element,
+                        valid_count=valid_count,
+                    )
+                    if recovered_masks is None:
+                        recovered_masks = detections_element.mask
+                    mask_tensor = recovered_masks[:valid_count]
+                    pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
+                        xyxy_tensor=xyxy_tensor,
+                        confidence_tensor=confidence_tensor,
+                        class_id_tensor=class_id_tensor,
+                        mask_tensor=mask_tensor,
+                        valid_count=valid_count,
+                    )
+                    if pinned_arrays is not None:
+                        xyxy, confidence, class_id, masks = pinned_arrays
+                    else:
+                        xyxy = xyxy_tensor.detach().cpu().numpy()
+                        confidence = confidence_tensor.detach().cpu().numpy()
+                        class_id = class_id_tensor.detach().cpu().numpy()
+                        masks = mask_tensor.detach().cpu().numpy()
             else:
                 xyxy_tensor = detections_element.xyxy
                 confidence_tensor = detections_element.confidence
                 class_id_tensor = detections_element.class_id
                 mask_tensor = detections_element.mask
-            pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
-                xyxy_tensor=xyxy_tensor,
-                confidence_tensor=confidence_tensor,
-                class_id_tensor=class_id_tensor,
-                mask_tensor=mask_tensor,
-                valid_count=valid_count,
-            )
-            if pinned_arrays is not None:
-                xyxy, confidence, class_id, masks = pinned_arrays
-            else:
-                xyxy = xyxy_tensor.detach().cpu().numpy()
-                confidence = confidence_tensor.detach().cpu().numpy()
-                class_id = class_id_tensor.detach().cpu().numpy()
-                masks = mask_tensor.detach().cpu().numpy()
+                pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
+                    xyxy_tensor=xyxy_tensor,
+                    confidence_tensor=confidence_tensor,
+                    class_id_tensor=class_id_tensor,
+                    mask_tensor=mask_tensor,
+                    valid_count=valid_count,
+                )
+                if pinned_arrays is not None:
+                    xyxy, confidence, class_id, masks = pinned_arrays
+                else:
+                    xyxy = xyxy_tensor.detach().cpu().numpy()
+                    confidence = confidence_tensor.detach().cpu().numpy()
+                    class_id = class_id_tensor.detach().cpu().numpy()
+                    masks = mask_tensor.detach().cpu().numpy()
             class_names = np.array(
                 [
                     (
@@ -683,13 +704,77 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             )
         except RuntimeError:
             return None
-        xyxy_buffer, confidence_buffer, class_id_buffer, mask_buffer = buffers
+        xyxy_buffer, confidence_buffer, class_id_buffer, mask_buffer, _ = buffers
         if valid_count:
             xyxy_buffer[:valid_count].copy_(xyxy_tensor, non_blocking=True)
             confidence_buffer[:valid_count].copy_(confidence_tensor, non_blocking=True)
             class_id_buffer[:valid_count].copy_(class_id_tensor, non_blocking=True)
             mask_buffer[:valid_count].copy_(mask_tensor, non_blocking=True)
             torch.cuda.current_stream(xyxy_tensor.device).synchronize()
+        return (
+            xyxy_buffer[:valid_count].numpy().copy(),
+            confidence_buffer[:valid_count].numpy().copy(),
+            class_id_buffer[:valid_count].numpy().copy(),
+            mask_buffer[:valid_count].numpy().copy(),
+        )
+
+    @staticmethod
+    def _try_copy_limited_cuda_detection_tensors_to_pinned_numpy(
+        detections_element,
+    ) -> Optional[tuple]:
+        image_metadata = detections_element.image_metadata
+        if image_metadata is None:
+            return None
+        count_tensor = image_metadata.get("valid_count")
+        mask_resize_detection_limit = image_metadata.get("mask_resize_detection_limit")
+        if count_tensor is None or mask_resize_detection_limit is None:
+            return None
+        copy_count = int(mask_resize_detection_limit)
+        xyxy_tensor = detections_element.xyxy
+        confidence_tensor = detections_element.confidence
+        class_id_tensor = detections_element.class_id
+        mask_tensor = detections_element.mask
+        if (
+            copy_count <= 0
+            or not xyxy_tensor.is_cuda
+            or not confidence_tensor.is_cuda
+            or not class_id_tensor.is_cuda
+            or not mask_tensor.is_cuda
+            or mask_tensor.ndim != 3
+            or mask_tensor.shape[0] < copy_count
+        ):
+            return None
+        try:
+            buffers = _get_rfdetr_conversion_buffers(
+                count=copy_count,
+                mask_shape=tuple(mask_tensor.shape[1:]),
+                xyxy_dtype=xyxy_tensor.dtype,
+                confidence_dtype=confidence_tensor.dtype,
+                class_id_dtype=class_id_tensor.dtype,
+                mask_dtype=mask_tensor.dtype,
+            )
+        except RuntimeError:
+            return None
+        (
+            xyxy_buffer,
+            confidence_buffer,
+            class_id_buffer,
+            mask_buffer,
+            count_buffer,
+        ) = buffers
+        count_buffer.copy_(count_tensor, non_blocking=True)
+        xyxy_buffer[:copy_count].copy_(xyxy_tensor[:copy_count], non_blocking=True)
+        confidence_buffer[:copy_count].copy_(
+            confidence_tensor[:copy_count], non_blocking=True
+        )
+        class_id_buffer[:copy_count].copy_(
+            class_id_tensor[:copy_count], non_blocking=True
+        )
+        mask_buffer[:copy_count].copy_(mask_tensor[:copy_count], non_blocking=True)
+        torch.cuda.current_stream(xyxy_tensor.device).synchronize()
+        valid_count = int(count_buffer.item())
+        if valid_count > copy_count:
+            return None
         return (
             xyxy_buffer[:valid_count].numpy().copy(),
             confidence_buffer[:valid_count].numpy().copy(),
