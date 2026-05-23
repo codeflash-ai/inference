@@ -1288,3 +1288,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_FUSED_FP16_LOGITS=1`, cast `image_logits` to `torch.float16` immediately before `fused_select_topk_boxes(...)` in the fused instance segmentation postprocess path. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.55`, below the accepted fixed-copy band.
 - Learning: The extra cast kernel and allocation dominate any reduced selector/sigmoid work for this small logits tensor. Keep float32 logits from the accepted TensorRT engine.
+
+### Rejected: Event Synchronize Fixed D2H Copy
+
+- Hypothesis: The fixed 7-row D2H prediction copy currently calls `torch.cuda.current_stream(...).synchronize()` after enqueueing count, boxes, confidences, classes, and masks into pinned host buffers. Recording and synchronizing a CUDA event immediately after those copies might avoid waiting on unrelated current-stream work.
+- Change tested: Temporary gated code only; with `RFDETR_EVENT_SYNC_D2H=1`, reused a thread-local `torch.cuda.Event`, recorded it after the fixed D2H copies, and synchronized the event instead of synchronizing the whole current stream. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.30s fps=233.66`, then `frames=538 elapsed=2.33s fps=231.23`, not stable enough to keep over the accepted fixed-copy band.
+- Learning: The current stream contains only the relevant copy chain in this path, and the event record/sync adds overhead and variance. Keep the simpler stream synchronize.
