@@ -1281,3 +1281,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_HIGH_PRIORITY_INFERENCE=1`, created `_inference_stream` with priority `-1` instead of default priority. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.34s fps=230.18`, below the accepted fixed-copy band.
 - Learning: Like graph/preprocess/postprocess stream priority changes, inference-stream priority perturbs scheduling without reducing the TensorRT graph-body limiter. Keep all RFDETR streams at default priority.
+
+### Rejected: FP16 Logits Before Fused Selector
+
+- Hypothesis: TensorRT emits RFDETR class logits as float32, but the fused selector only ranks and threshold-checks a small `100x91` score matrix. Casting logits to float16 before sigmoid and selection might reduce postprocess memory traffic and selector work.
+- Change tested: Temporary gated code only; with `RFDETR_FUSED_FP16_LOGITS=1`, cast `image_logits` to `torch.float16` immediately before `fused_select_topk_boxes(...)` in the fused instance segmentation postprocess path. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.55`, below the accepted fixed-copy band.
+- Learning: The extra cast kernel and allocation dominate any reduced selector/sigmoid work for this small logits tensor. Keep float32 logits from the accepted TensorRT engine.
