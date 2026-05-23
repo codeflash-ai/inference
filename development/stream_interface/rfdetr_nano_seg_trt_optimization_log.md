@@ -828,3 +828,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared deferred fused postprocess against the exact-sized path on all 538 frames: `max_count=7`, `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.25`, `frames=538 elapsed=2.45s fps=219.49`, and `frames=538 elapsed=2.46s fps=218.85`; not stable enough to keep over the pinned-conversion checkpoint.
 - Learning: The int32-to-int64 conversion kernel is visible but not a reliable limiter. Removing it changes downstream scheduling enough that FPS still falls into the noisy lower band.
+
+### Rejected: Avoid Zero-Filling Deferred Query Indices
+
+- Hypothesis: `fused_select_topk_boxes(...)` allocates `query_indices` with `torch.zeros(...)`, launching a fill kernel even though the selector writes every query index that the deferred mask resize kernel reads. Switching to `torch.empty(...)` could remove a per-frame CUDA fill.
+- Change tested: Temporary code only; changed the `query_indices` allocation in `fused_select_topk_boxes(...)` from `torch.zeros(...)` to `torch.empty(...)`.
+- Correctness: Compared deferred fused postprocess against the exact-sized path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.46s fps=218.97`, `frames=538 elapsed=2.44s fps=220.54`, and `frames=538 elapsed=2.46s fps=218.43`; not stable enough to keep over the pinned-conversion checkpoint.
+- Learning: The query-index zero fill is visible in the profile but not a stable throughput limiter. The allocation/fill behavior likely interacts with stream scheduling and allocator reuse, so keep the deterministic zero-filled tensor.
