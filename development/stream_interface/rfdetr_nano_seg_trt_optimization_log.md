@@ -561,3 +561,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the new GPU-normalize path against the previous CPU-normalize path on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_tensor_delta=4.76837158203125e-07`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.58s fps=208.79`, far below the current checkpoint.
 - Learning: On this T4 workload, the extra device allocation, uint8 copy path, and normalization kernel cost more than the saved H2D bandwidth. Keep the CPU vectorized normalization into pinned float32.
+
+### Rejected: Pass Single RFDETR Image Without List Wrapper
+
+- Hypothesis: The RFDETR TRT workflow fast path always creates a one-element Python list of NumPy images before preprocessing. Passing the single NumPy frame directly could reduce small Python overhead and let preprocessing avoid a list allocation.
+- Change tested: Temporary code only; used `images[0].numpy_image` when the batch size was one and kept the old list comprehension for larger batches.
+- Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.65`, below the current checkpoint.
+- Learning: The single-image direct path changes preprocessing internals enough to hurt throughput; keep the explicit one-element list.
