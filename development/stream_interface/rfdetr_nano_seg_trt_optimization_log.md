@@ -609,3 +609,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.70`, below the current checkpoint.
 - Learning: The per-frame inference-mode context or its interaction with graph-replayed tensors costs more than any autograd savings. Keep the existing fast path without an extra context manager.
+
+### Rejected: Borrow TensorRT CUDA Graph Output Buffers
+
+- Hypothesis: The CUDA graph replay path clones all TensorRT output buffers before RFDETR postprocess. For the depth-2 workflow fast path, each worker consumes postprocess results before it takes another frame, so returning thread-scoped graph output buffers directly could let postprocess run on the graph outputs and remove device-to-device clone work between graph launches.
+- Change tested: Temporary code only; added an explicit `borrow_cuda_graph_outputs` flag to the TRT graph path, keyed borrowed graph states by worker thread, returned the cached graph output buffers without cloning, and enabled the flag only in the RFDETR TRT workflow fast path.
+- Correctness: Compared borrowed graph outputs against cloned graph outputs on 120 frames after slicing by the deferred valid count: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.62s fps=205.72` and `frames=538 elapsed=2.61s fps=206.36`, well below the current `218.97` FPS checkpoint.
+- Learning: Removing the D2D output clones is not enough to overcome the extra per-thread graph state and scheduling cost in this workload. Keep the existing cloned-output graph replay path.
