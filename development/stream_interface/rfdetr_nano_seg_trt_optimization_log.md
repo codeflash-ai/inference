@@ -1633,3 +1633,26 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: The graph captured and replayed successfully; prediction math should be unchanged because steady execution still uses the same captured graph.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.72`, below the accepted clone-after-warmup best and not enough to justify changing the capture sequence.
 - Learning: The pre-capture enqueue is either useful TensorRT setup or useful GPU warmup for the measured interval. Keep the accepted capture sequence.
+
+### Rejected: Steady-State Copy Pattern Capture Warmup
+
+- Hypothesis: The capture-time warmup replays only the TensorRT graph body, while measured cache-hit frames do input D2D copy, graph replay, and output D2D copies. Replaying that whole copy/replay/copy pattern during capture warmup could warm the same copy engines and allocator paths before measured frames.
+- Change tested: Temporary code only; after graph capture, allocated scratch output buffers once, then repeated `input_buffer.copy_(pre_processed_images)`, `cuda_graph.replay()`, and scratch `copy_` from each TensorRT output during the `64` warmup iterations before returning the post-warmup result clone. Pipeline depth remained fixed at `2`.
+- Result on requested command: `frames=538 elapsed=2.19s fps=245.50`, then `frames=538 elapsed=2.20s fps=244.60`, then `frames=538 elapsed=2.21s fps=243.84`.
+- Learning: Warming the full steady-state copy pattern is not a stable improvement and can regress the warmed graph-bound path. Keep the accepted warmup that replays only the captured TensorRT graph before cloning the first returned result.
+
+### Profile: Accepted Depth-2 Warmed Graph Refresh
+
+- Request: Collect a fresh Nsight Systems report on the accepted warmed implementation while keeping pipeline depth fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_150944.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_150944.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_150944_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_150944_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_accepted_20260523_150944_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.36s fps=227.82`.
+- Graph spacing: The capture includes `602` CUDA graph traces. After skipping the `64` warmups plus the next `100` frame launches, CUDA graph duration was p50 `4129.582 us`, p90 `4187.479 us`, p95 `4194.288 us`, p99 `4249.728 us`, mean `4134.538 us`; graph end-to-next-start gap was p50 `42.463 us`, p90 `43.839 us`, p95 `44.256 us`, p99 `44.872 us`, mean `42.602 us`.
+- Gap decomposition over the first `100` stable post-settling gaps: busy work inside the gap was p50 `37.791 us`, mean `37.704 us`; idle inside the gap was p50 `4.544 us`, mean `4.514 us`. The largest gap occupants were input D2D copy (`1168128B`, `13.143 us` avg overlap), mask D2D clone (`2433600B`, `13.131 us`), sigmoid (`6.945 us`), boxes D2D clone (`1600B`, `4.528 us` in this capture), fill-long (`2.723 us`), logits D2D clone (`36400B`, `2.105 us`), fill-int (`2.060 us`), and selector (`1.767 us`).
+- Learning: This refresh shows the same desired shape: only about `4-5 us` median idle between graph replays, with the rest of the graph-to-graph interval being required GPU copy/postprocess work. Remaining FPS is still dominated by TensorRT graph duration.
+
+### Rejected: Reusable TensorRT Output Copy Buffers
+
+- Hypothesis: The accepted TensorRT CUDA graph cache-hit path allocates fresh cloned output tensors every frame. Reusing per-thread output copy buffers and filling them with `copy_` from graph-owned outputs could keep cloned-output lifetime isolation while reducing allocator/clone overhead, unlike the previously rejected borrowed-output path.
+- Change tested: Temporary env-gated code only; with `RFDETR_TRT_REUSE_OUTPUT_COPY_BUFFERS=True`, each thread reused `empty_like` buffers for the TensorRT outputs and copied graph-owned outputs into those buffers on the graph stream. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.19s fps=246.00`, then `frames=538 elapsed=2.21s fps=243.87`, then `frames=538 elapsed=2.20s fps=244.26`.
+- Learning: The first run beat the accepted band, but repeats did not. Reusable output copy buffers are too noise-sensitive in the current graph-bound regime and are not stable enough to checkpoint. Keep the accepted `buf.clone()` output path.
