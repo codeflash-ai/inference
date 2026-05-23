@@ -962,3 +962,17 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the actual depth-2 `InferencePipeline` output against the accepted fixed-copy path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.54`, `frames=538 elapsed=2.46s fps=218.60`, and `frames=538 elapsed=2.46s fps=218.99`, well below the accepted fixed-copy checkpoint.
 - Learning: The cloned output tensors are still useful for overlap/lifetime isolation. Borrowing graph-owned buffers perturbs graph-cache ownership and stream scheduling enough to dominate the saved clone work. Keep the cloned outputs.
+
+### Current Post-Cleanup Nsight Profile
+
+- Request: Capture a fresh Nsight Systems profile after reverting the rejected borrowed-output experiment, keeping pipeline depth fixed at `2`.
+- Profile: Nsight Systems capture `/tmp/rfdetr_fixed7_current_20260523_090332.nsys-rep` exported to `/tmp/rfdetr_fixed7_current_20260523_090332.sqlite`; CSV summaries are `/tmp/rfdetr_fixed7_current_20260523_090332_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_fixed7_current_20260523_090332_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_fixed7_current_20260523_090332_stats_cuda_api_sum.csv`. Under profiler, depth `2` measured `frames=538 elapsed=2.30s fps=234.15`.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `3992.289 us`, p90 `4054.714 us`, p95 `4062.176 us`, p99 `4107.568 us`; graph end-to-next-start gap was p50 `40.639 us`, p90 `41.740 us`, p95 `41.951 us`, p99 `42.417 us`, mean `40.584 us`. GPU work inside that gap covered p50 `35.295 us`, leaving only p50 `5.280 us` idle.
+- Learning: The cleaned-up accepted path still has the desired timeline shape: the next CUDA graph starts almost immediately after the previous graph ends. Remaining throughput is constrained by the TensorRT graph replay itself, with only a few microseconds of idle gap.
+
+### Rejected: Interactive Local TRT Rebuild From ONNX
+
+- Hypothesis: Since the run is now bottlenecked by the TensorRT graph replay, rebuilding the available ONNX package locally on the Tesla T4 with TensorRT `10.12.0.36` and FP16 tactics might produce a faster engine than the packaged T4 plan.
+- Change tested: Downloaded the ONNX package `5362b72bfb9f01d2e0b8cba2048d932c` to `/tmp/rfdetr_onnx_pkg_5362b72bfb9f01d2e0b8cba2048d932c` and started an isolated TensorRT Python build in `/tmp/rfdetr_trt_rebuild_t4_fp16_opt5` with static input shape `1x3x312x312`, FP16 enabled, workspace `4 GiB`, and builder optimization level `5`. The accepted model-cache package was not modified.
+- Result: The builder parsed the ONNX graph cleanly, but tactic selection was still CPU-bound after roughly 9.5 minutes and had not produced an engine, so the temporary build process was terminated. No correctness or FPS benchmark was possible.
+- Learning: A local tactic rebuild is the right class of experiment for the remaining bottleneck, but full optimization-level builds are too slow for the interactive benchmark loop. Keep the packaged T4 FP16 engine for this checkpoint; any engine rebuild should be run as an offline build job and benchmarked separately once serialized.
