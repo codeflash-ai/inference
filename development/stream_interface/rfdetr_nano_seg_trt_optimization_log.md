@@ -1554,3 +1554,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_TRT_BOX_MASK_LOGITS_OUTPUT_CLONE=true`, cloned TensorRT output buffer `0`, then `2`, then `1`, and returned results in the original output order. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.31s fps=232.66`, below the accepted fixed-copy band.
 - Learning: Reordering the same graph-stream D2D clones does not reduce the critical graph-to-graph interval. Keep the original boxes/logits/mask order.
+
+### Rejected: TensorRT Graph-Stream Sigmoid Logits
+
+- Hypothesis: The accepted TensorRT graph stream clones the small logits output and postprocess later launches a separate sigmoid kernel. Computing `sigmoid()` directly from the graph-owned logits on the graph stream could replace the logits D2D clone with the actual postprocess tensor and remove the later sigmoid launch.
+- Change tested: Temporary gated code only; with `RFDETR_TRT_GRAPH_SIGMOID_LOGITS=true`, CUDA graph capture and cache-hit replay returned `[boxes.clone(), logits.sigmoid(), masks.clone()]`, and RFDETR dense postprocess skipped its normal logits sigmoid. Pipeline depth remained fixed at `2`.
+- Correctness: Compared the gated path against the accepted path on all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=233.69`, repeat `frames=538 elapsed=2.34s fps=230.14`, below the accepted fixed-copy band.
+- Learning: The graph-stream logits clone is small enough that replacing it with sigmoid work on the graph stream perturbs the critical schedule rather than improving it. Keep the accepted logits clone plus postprocess-stream sigmoid.
