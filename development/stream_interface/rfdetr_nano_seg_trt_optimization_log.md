@@ -1451,3 +1451,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_SKIP_CUDA_CONTEXT_ON_GRAPH_HIT=1`, `RFDetrForInstanceSegmentationTRT.forward(...)` kept the model lock but skipped the PyCUDA context manager when the static graph-cache key was already present. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: first run `frames=538 elapsed=2.30s fps=234.21`, repeat `frames=538 elapsed=2.33s fps=230.89`, not stable enough to keep over the accepted fixed-copy band.
 - Learning: Context push/pop is below the limiter or helps maintain predictable CUDA context state across worker threads. Keep the original context manager on forward.
+
+### Rejected: Borrow TensorRT Mask Output With Release Event
+
+- Hypothesis: The accepted CUDA graph path clones the full `100x78x78` TensorRT mask output every frame even though the workflow normally resizes only the first 7 selected detections. Returning a borrowed graph-owned mask output while cloning only boxes/logits could remove the large D2D mask clone if the next graph replay waits for postprocess to finish reading the mask.
+- Change tested: Temporary gated code only; with `RFDETR_BORROW_TRT_MASK_OUTPUT=1`, cache-hit replay cloned only the first two TensorRT outputs, returned the graph-owned mask tensor with graph-state metadata, recorded a release event after RFDETR postprocess, and waited on that event before the next graph replay could overwrite the mask buffer. Pipeline depth remained fixed at `2`.
+- Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=231.40`, below the accepted fixed-copy band.
+- Learning: The large mask clone also decouples the next TensorRT graph replay from postprocess. Replacing it with an event dependency lengthens the critical path more than it saves in D2D copy time. Keep the full output clone path.
