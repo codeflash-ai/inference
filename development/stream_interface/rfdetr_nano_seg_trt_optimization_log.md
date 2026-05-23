@@ -2226,3 +2226,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed. This only changes Triton launch geometry after class selection and box decoding; class IDs and boxes are unchanged by construction, and the mask math is the same.
 - Result on requested command: `num_warps=1` measured `frames=538 elapsed=2.21s fps=243.91`, `frames=538 elapsed=2.21s fps=243.81`, and `frames=538 elapsed=2.21s fps=243.53`. After restoring the accepted `num_warps=2`, same-session runs measured `frames=538 elapsed=2.21s fps=243.28` and then `frames=538 elapsed=2.20s fps=244.52`.
 - Learning: One warp is not a stable improvement and loses to the restored two-warp launch once the session returns to the accepted band. Keep `num_warps=2`.
+
+### Rejected: UUID Hex Strings For Workflow IDs
+
+- Hypothesis: The RFDETR workflow fast path creates one inference UUID per frame and one detection UUID per detection via `str(uuid.uuid4())`. Using `uuid.uuid4().hex` could avoid UUID string formatting with hyphens and reduce CPU materialization overhead without changing model predictions.
+- Change tested: Temporary code only; changed frame-level inference IDs and per-detection IDs in the RFDETR workflow conversion path from `str(uuid.uuid4())` to `uuid.uuid4().hex`. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. The change only affects opaque workflow identifiers after prediction construction; classes, boxes, confidence, and masks are untouched.
+- Result on requested command: `.hex` IDs measured `frames=538 elapsed=2.20s fps=244.40` and `frames=538 elapsed=2.21s fps=243.31`; after reverting to the original string UUID format, same-session baseline measured `frames=538 elapsed=2.21s fps=243.66`.
+- Learning: UUID string formatting is not a stable limiter in the accepted graph-bound run. Keep the existing hyphenated UUID behavior.
