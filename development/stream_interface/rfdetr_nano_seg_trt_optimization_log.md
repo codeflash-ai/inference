@@ -236,3 +236,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Deferred workflow postprocess vs default exact-sized postprocess on all 538 frames matched detection counts, class IDs, and dense masks exactly; max box delta was `0.5` px due to packed float boxes instead of rounded int boxes.
 - Result on requested command: Two exact passes measured `frames=538 elapsed=3.08s fps=174.63` and `frames=538 elapsed=3.09s fps=174.32`, not better than the committed checkpoint.
 - Learning: The extra selector stores and altered code generation offset the small D2H-call reduction. Keep the simpler separate tensors unless a future fused CPU conversion removes more overhead.
+
+### Rejected: Disable TRT CUDA Graph Replay
+
+- Hypothesis: CUDA graph replay clones graph output buffers every frame, contributing visible D2D copy time. Running the standard TensorRT async path could avoid those clones and be competitive after postprocess fusion.
+- Change tested: No code change; ran the requested command with `ENABLE_AUTO_CUDA_GRAPHS_FOR_TRT_BACKEND=False`.
+- Result on requested command: `frames=538 elapsed=3.11s fps=173.27`, below the committed CUDA graph path.
+- Learning: TRT graph replay still wins overall; the graph-launch reduction is more valuable than removing output-buffer clone traffic.
