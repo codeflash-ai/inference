@@ -2268,3 +2268,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Result: Direct `execute_async_v3(...)` measured `4.311606 ms` per enqueue (`231.93 fps`). CUDA graph replay-only measured `4.052506 ms` per replay (`246.76 fps`).
 - Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.72` immediately after the diagnostic.
 - Learning: The current accepted workflow is within roughly `1.2%` of the pure TensorRT graph replay ceiling for this serialized plan on the observed T4. The remaining non-engine overhead is only a few dozen microseconds per frame, consistent with Nsight's roughly `40 us` graph-to-graph tail. Meaningful additional FPS now requires a faster correctness-equivalent TensorRT engine/tactic/export; Python, D2H, and postprocess micro-tweaks have very little headroom left.
+
+### Rejected: TensorRT Runtime Max Threads Sweep
+
+- Hypothesis: TensorRT `Runtime.max_threads` can be set before deserializing the engine. If it affected graph execution context internals or host-side graph launch preparation, tuning it might improve the accepted CUDA graph replay ceiling without changing model math.
+- Diagnostic: Ran the same accepted-engine graph-only harness with `runtime.max_threads` set to `1`, `2`, `4`, `8`, and `16` before deserializing `/tmp/cache/shared-blobs/bc173a2cfda9a10af2bc411885e9fec3`. This measured only a CUDA graph containing `execute_async_v3(...)`; pipeline depth was not varied and depth `3` was not tested.
+- Result: `max_threads=1` measured `4.054766 ms` (`246.62 fps`), `2` measured `4.076955 ms` (`245.28 fps`), `4` measured `4.087345 ms` (`244.66 fps`), `8` measured `4.094583 ms` (`244.23 fps`), and `16` measured `4.104315 ms` (`243.65 fps`). The default runtime value is already `1`.
+- Full workflow sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.73` after the diagnostic.
+- Learning: TensorRT runtime thread count is not an optimization lever for this accepted plan. The default is already the fastest measured setting for the graph-only ceiling, and larger values regress slightly. No code change was kept.
