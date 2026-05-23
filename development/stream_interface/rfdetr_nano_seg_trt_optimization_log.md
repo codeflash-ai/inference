@@ -921,3 +921,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the modified deferred fused path against the exact PyTorch postprocess on all 538 frames: count distribution `{1: 15, 2: 104, 3: 164, 4: 145, 5: 74, 6: 14, 7: 22}`, `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.42s fps=222.75`, `frames=538 elapsed=2.45s fps=219.78`, and `frames=538 elapsed=2.42s fps=222.13`, below the accepted 7-row best band.
 - Learning: The extra vectorized class-map load and mask computation are not worth the shorter top-k loop for this tensor shape. Keep the simpler selector.
+
+### Rejected: Skip Null Watchdog And Empty Status Updates
+
+- Hypothesis: The default `InferencePipeline` uses `NullPipelineWatchdog`, but the hot loop still calls no-op watchdog hooks and sends per-frame DEBUG status updates to the no-op status handler. Skipping the default null handler and returning early when no status handlers are registered could reduce CPU handoff time before the next graph launch.
+- Change tested: Temporary code only; did not append `NullPipelineWatchdog.on_status_update`, skipped model-start/model-ready watchdog calls when the watchdog was null, and made `send_inference_pipeline_status_update(...)` return immediately for an empty handler list. Pipeline depth remained fixed at `2`.
+- Correctness: This only removed no-op observer calls for the default-null watchdog case; prediction objects and model execution were unchanged.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.41s fps=223.26`, `frames=538 elapsed=2.43s fps=221.67`, and `frames=538 elapsed=2.43s fps=221.29`, not stable enough to keep over the accepted 7-row checkpoint.
+- Learning: The no-op observer path is below the noise floor, or the added branches perturb scheduling enough to offset the saved calls. Keep the existing observer behavior.
