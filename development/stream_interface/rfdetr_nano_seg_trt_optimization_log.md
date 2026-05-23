@@ -1829,3 +1829,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; changed `ClassesReMapping.class_mapping` from `torch.int64` to `torch.int32` while keeping `remaining_class_ids` as `int64`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: The first pass measured `frames=538 elapsed=2.31s fps=232.91`, and a warmed repeat measured `frames=538 elapsed=2.21s fps=243.11`, below the clean accepted sanity run in the same session at `frames=538 elapsed=2.21s fps=243.49`.
 - Learning: Class-map load width is not a limiter for the fused selector. The original `int64` mapping is safer for the generic PyTorch fallback paths and remains at least as fast end to end.
+
+### Rejected: GPU Exclusive Process Compute Mode
+
+- Hypothesis: The accepted depth-2 run is TensorRT graph-body bound and sensitive to GPU scheduling. Switching the T4 from default compute mode to `EXCLUSIVE_PROCESS` before launching the benchmark might reduce context scheduling overhead or background interference.
+- Change tested: External runtime setting only; confirmed and killed a stale benchmark process that was holding a CUDA context, set `nvidia-smi -c EXCLUSIVE_PROCESS`, ran the requested benchmark with pipeline depth fixed at `2`, then restored compute mode with `nvidia-smi -c DEFAULT`.
+- Result on requested command: `frames=538 elapsed=2.22s fps=242.77`, below the accepted warmed band.
+- Learning: Compute-mode isolation does not improve this single-process workload. Keep the default compute mode; the remaining limiter is still the TensorRT CUDA graph body plus the small required post-graph tail.
