@@ -553,3 +553,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the generic execution engine against the fast runner on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.49s fps=215.79`, below the current checkpoint.
 - Learning: Per-detection UUID generation is not the limiting CPU cost in this path, or the changed string construction perturbs allocation enough to lose. Keep the existing detection UUID behavior.
+
+### Rejected: GPU Normalize Resized RFDETR Input
+
+- Hypothesis: The latest profile shows the steady float32 H2D input copy costs about `188 us/frame` (`1168128` bytes per frame). Copying the resized uint8 HWC image to GPU and using a fused Triton kernel to produce normalized float32 CHW input could replace that with a 4x smaller H2D transfer plus GPU work.
+- Change tested: Temporary code only; for CUDA single-image RFDETR preprocessing, copied the PIL-resized uint8 image through a pinned uint8 buffer and launched a Triton HWC-uint8-to-normalized-CHW kernel on the preprocessing stream.
+- Correctness: Compared the new GPU-normalize path against the previous CPU-normalize path on 120 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_tensor_delta=4.76837158203125e-07`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.58s fps=208.79`, far below the current checkpoint.
+- Learning: On this T4 workload, the extra device allocation, uint8 copy path, and normalization kernel cost more than the saved H2D bandwidth. Keep the CPU vectorized normalization into pinned float32.
