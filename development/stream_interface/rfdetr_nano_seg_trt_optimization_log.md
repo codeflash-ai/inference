@@ -410,3 +410,35 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; skipped the postprocess current-stream wait and wrapped local workflow conversion in `torch.cuda.stream(model._model._post_process_stream)`.
 - Result on requested command: after fixing a temporary helper-name typo, depth `2` measured `frames=538 elapsed=2.65s fps=202.97`.
 - Learning: The synchronization still has to happen before CPU predictions are materialized, and moving those copies onto the postprocess stream made the normal run slower. Keep the postprocess wait at the model boundary.
+
+### Rejected: Skip RFDETR Output Record Stream In Fast Path
+
+- Hypothesis: The fast RFDETR TRT dense-mask workflow path waits for postprocess before returning to CPU conversion, so `record_stream(...)` on the three TensorRT output clones might be redundant allocator bookkeeping.
+- Change tested: Temporary code only; skipped `result_element.record_stream(self._post_process_stream)` when `defer_cuda_stream_sync=True`.
+- Correctness: Compared exact-sized postprocess against deferred fused postprocess on 160 frames with the fast-path flags: counts, classes, and boxes matched exactly.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.60s fps=206.61`, below the current `210.18` FPS checkpoint.
+- Learning: The explicit allocator stream handoff is still worth keeping; removing it likely shifts synchronization or allocator pressure elsewhere.
+
+### Rejected: Pooled TensorRT CUDA Graph Output Copies
+
+- Hypothesis: CUDA graph replay clones every TensorRT output each frame. Replacing those per-frame clone allocations with a two-slot reusable output-copy pool could preserve overlap while reducing allocator and CUDA event churn.
+- Change tested: Temporary code only; added a tuple lease around pooled output-copy buffers and released the slot from RFDETR postprocess after its stream consumed the raw TensorRT outputs.
+- Correctness: After preserving the lease wrapper through RFDETR `forward(...)`, compared exact-sized postprocess against deferred fused postprocess on 120 frames: counts, classes, and boxes matched exactly.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.62s fps=205.23`, below the current checkpoint.
+- Learning: The extra Python lease, event, and slot bookkeeping costs more than the clone allocations it avoids. The TensorRT output clone path is not worth changing this way.
+
+### Rejected: Fuse RFDETR Sigmoid Into Triton Selector
+
+- Hypothesis: The fast fused postprocess path still launches a PyTorch sigmoid kernel over logits before the Triton selector scans the same scores. Computing sigmoid inside the selector could remove one kernel launch and one intermediate tensor.
+- Change tested: Temporary code only; passed raw logits to `_select_topk_boxes_kernel` and computed `1 / (1 + exp(-logit))` in Triton before top-k selection. The fallback path still materialized `logits_sigmoid` only if fused selection was unavailable.
+- Correctness: Compared the fused path against the non-fused PyTorch fallback on 160 frames by monkeypatching the fused selector off for the reference. Counts, classes, and boxes matched exactly.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.60s fps=206.54`, below the current `210.18` FPS checkpoint.
+- Learning: The extra Triton `exp` work inside the selector costs more than the standalone PyTorch sigmoid kernel in this shape. Keep the sigmoid as a separate highly optimized PyTorch elementwise kernel.
+
+### Rejected: Blocked-Detection Triton Mask Resize
+
+- Hypothesis: `_resize_selected_masks_kernel` launches a program for every detection row and pixel tile, including no-op rows beyond the selected count. Handling multiple detection rows per program could reduce Triton program count and improve the largest custom kernel.
+- Change tested: Temporary code only; changed the mask resize kernel to process `block_detections` rows by `block_size` pixels per program. Tried `block_detections=4, block_size=128` and then `block_detections=2, block_size=128`.
+- Correctness: The `4x128` variant matched the non-fused PyTorch fallback on 120 frames: counts, classes, and boxes matched exactly.
+- Result on requested command: `4x128` measured `frames=538 elapsed=2.59s fps=207.68`; `2x128` measured `frames=538 elapsed=2.60s fps=207.12`, both below the current checkpoint.
+- Learning: The reduced program count does not compensate for the larger vector/register footprint on this T4 workload. The original one-detection, 256-pixel tile remains better.
