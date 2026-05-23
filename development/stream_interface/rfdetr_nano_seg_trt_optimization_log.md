@@ -1408,3 +1408,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary code only; dispatched to a separate `_resize_selected_masks_4x_kernel(...)` when `input_height * 4 == output_height` and `input_width * 4 == output_width`. Pipeline depth remained fixed at `2`.
 - Result on requested command: first run `frames=538 elapsed=2.29s fps=234.83`, repeat `frames=538 elapsed=2.31s fps=232.92`, not stable enough to keep over the accepted fixed-copy band.
 - Learning: The generic resize arithmetic is not the throughput limiter at depth `2`; graph spacing is dominated by TensorRT graph replay plus the required input/output copies and selector/sigmoid tail. Keep the generic resize kernel.
+
+### Profile: Accepted Depth-2 Graph Gap After 4x Resize Rejection
+
+- Request: Collect another Nsight Systems report for the current accepted implementation while keeping pipeline depth fixed at `2`.
+- Profile: `/tmp/rfdetr_depth2_accepted_20260523_130220.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_accepted_20260523_130220.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_accepted_20260523_130220_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_130220_stats_cuda_gpu_mem_time_sum.csv`, `/tmp/rfdetr_depth2_accepted_20260523_130220_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.33s fps=230.90`.
+- Graph spacing: The capture includes `538` CUDA graph traces. After skipping the first 100 launches, CUDA graph duration was p50 `4102.399 us`, p90 `4116.422 us`, p95 `4123.113 us`, p99 `4152.967 us`, mean `4078.093 us`; graph end-to-next-start gap was p50 `40.863 us`, p90 `42.220 us`, p95 `42.528 us`, p99 `43.401 us`, mean `41.820 us`. Busy work inside the gap was p50 `35.263 us`, mean `35.769 us`; idle inside the gap was p50 `5.471 us`, mean `6.051 us`.
+- Learning: Depth `2` remains effectively constrained by the TensorRT CUDA graph. The remaining median idle bubble between graph launches is about `5.5 us`, and the graph-to-graph gap remains low and consistent.
