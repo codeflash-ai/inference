@@ -1784,3 +1784,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: This setting does not change model math or tensor values.
 - Result on requested command: `1` measured `243.06` FPS, `2` measured `244.31` FPS, `8` measured `243.64` FPS, and `32` measured `243.07` FPS.
 - Learning: CUDA connection count does not improve the accepted warmed graph path. Keep the default CUDA scheduling environment.
+
+### Rejected: Two-State Direct Postprocess Graph Output Pool
+
+- Hypothesis: The earlier direct-postprocess-on-graph-output experiment failed because a single shared graph output buffer could be overwritten while another depth-2 worker still needed it. Capturing a shared two-state CUDA graph pool before the first output could let one state feed fused postprocess while the other state replays the next frame, avoiding the full raw mask-output clone without unsafe borrowing.
+- Change tested: Temporary env-gated code only; extended the TensorRT CUDA graph cache to hold a two-state pool when `RFDETR_TRT_THREAD_LOCAL_DIRECT_POSTPROCESS=True`, ran fused RFDETR postprocess on a separate postprocess stream, and made each producer graph stream wait for its postprocess stream before that state could be reused. Pipeline depth remained fixed at `2`.
+- Correctness: After fixing the producer-stream handoff, the full-video comparison against the accepted cloned-output path passed over all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`, with `max_count=7`.
+- Result on requested command: An intermediate broken stream-wait version produced an invalid `285.71 FPS` but failed correctness badly (`bad_counts=76`, `bad_classes=77`, `bad_masks=537`, `bad_boxes_gt5=175`). The corrected version was stable and correct but not faster: `243.79`, `242.70`, and `242.31` FPS.
+- Learning: Safely borrowing TensorRT graph outputs requires enough stream ordering that the raw-output clone removal no longer improves the depth-2 workflow. Removed the temporary graph-pool/direct-postprocess code.
