@@ -479,7 +479,7 @@ class InferencePipeline:
         video_source_properties: Optional[Dict[str, float]] = None,
         workflow_init_parameters: Optional[Dict[str, Any]] = None,
         workflows_thread_pool_workers: int = 4,
-        max_inflight_workflow_batches: int = 3,
+        max_inflight_workflow_batches: int = 2,
         cancel_thread_pool_tasks_on_exit: bool = True,
         video_metadata_input_name: str = "video_metadata",
         batch_collection_timeout: Optional[float] = None,
@@ -946,8 +946,7 @@ class InferencePipeline:
                 next_dispatched_batch = 0
                 for video_frames in self._generate_frames():
                     while (
-                        len(pending_predictions)
-                        >= self._inference_thread_pool_workers
+                        len(pending_predictions) >= self._inference_thread_pool_workers
                     ):
                         predictions, predicted_video_frames = pending_predictions.pop(
                             next_dispatched_batch

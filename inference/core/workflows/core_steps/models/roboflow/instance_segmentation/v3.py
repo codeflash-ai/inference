@@ -377,10 +377,13 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             **inference_kwargs,
         )
         predictions = model.predict(pre_processed_images, **inference_kwargs)
+        post_process_kwargs = model.map_inference_kwargs(inference_kwargs)
+        if model._model.__class__.__name__ == "RFDetrForInstanceSegmentationTRT":
+            post_process_kwargs["defer_fused_postprocess_count"] = True
         detections = model._model.post_process(
             predictions,
             preprocessing_metadata,
-            **model.map_inference_kwargs(inference_kwargs),
+            **post_process_kwargs,
         )
         predictions = self._convert_inference_models_detections_to_sv_detections(
             model=model,
@@ -418,10 +421,24 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
     ) -> List[sv.Detections]:
         result = []
         for detections_element, metadata in zip(detections, preprocessing_metadata):
-            xyxy = detections_element.xyxy.detach().cpu().numpy()
-            confidence = detections_element.confidence.detach().cpu().numpy()
-            class_id = detections_element.class_id.detach().cpu().numpy()
-            masks = detections_element.mask.detach().cpu().numpy()
+            valid_count = None
+            if detections_element.image_metadata is not None:
+                valid_count = detections_element.image_metadata.get("valid_count")
+            if valid_count is not None:
+                valid_count = int(valid_count.detach().cpu().item())
+                xyxy_tensor = detections_element.xyxy[:valid_count]
+                confidence_tensor = detections_element.confidence[:valid_count]
+                class_id_tensor = detections_element.class_id[:valid_count]
+                mask_tensor = detections_element.mask[:valid_count]
+            else:
+                xyxy_tensor = detections_element.xyxy
+                confidence_tensor = detections_element.confidence
+                class_id_tensor = detections_element.class_id
+                mask_tensor = detections_element.mask
+            xyxy = xyxy_tensor.detach().cpu().numpy()
+            confidence = confidence_tensor.detach().cpu().numpy()
+            class_id = class_id_tensor.detach().cpu().numpy()
+            masks = mask_tensor.detach().cpu().numpy()
             class_names = np.array(
                 [
                     (

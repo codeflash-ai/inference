@@ -318,6 +318,9 @@ class RFDetrForInstanceSegmentationTRT(
                     threshold=confidence_filter.get_threshold(self.class_names),
                     num_classes=len(self.class_names),
                     classes_re_mapping=self._classes_re_mapping,
+                    defer_fused_postprocess_count=kwargs.get(
+                        "defer_fused_postprocess_count", False
+                    ),
                 )
             else:
                 results = post_process_instance_segmentation_results_to_rle_masks(

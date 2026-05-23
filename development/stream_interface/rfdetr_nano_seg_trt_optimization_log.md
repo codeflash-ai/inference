@@ -181,3 +181,19 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the temporary selector against the previous top-k selector on raw TRT outputs for all 538 frames from `vehicles_312px.mp4`: detection counts matched, class IDs matched exactly, max box delta was `0` px, confidences matched exactly, and dense masks matched exactly.
 - Result on requested command: Two exact passes measured `frames=538 elapsed=3.49s fps=154.33` and `frames=538 elapsed=3.49s fps=153.98`, below the current best committed path.
 - Learning: Even with exact outputs, the extra CUDA `nonzero`/candidate-selection work and synchronization risk do not beat PyTorch's current global top-k path end-to-end. A profitable version likely needs a fused CUDA/Triton kernel that thresholds, remaps, compacts, and gathers boxes/masks in one pass without host-visible candidate counting.
+
+### Fused RFDETR Dense Postprocess And Pipeline Rebalance
+
+- Hypothesis: Nsight Systems still showed RFDETR PyTorch postprocess kernels (`topk`, radix sort/indexing, mask resize) after the direct workflow fast path. Fusing top-score selection, class remapping, box decode, and workflow mask resize should reduce postprocess kernel launch overhead and shift the best workflow pipeline depth.
+- Change:
+  - Added a gated Triton RFDETR dense postprocess path for the benchmark-shape case: scalar threshold, one image, no padding, no static crop, dense masks. The general PyTorch path remains the fallback.
+  - The fused selector walks global scores in descending order only until the next score falls below threshold, preserving the old top-k/filter semantics without always materializing 100 selections.
+  - For the local workflow RFDETR TRT fast path, the selected count stays on GPU through a Triton mask resize and is copied only at the existing NumPy conversion boundary; public model postprocess still returns exact-sized tensors by default.
+  - Changed the workflow default `max_inflight_workflow_batches` from `3` to `2` after retuning.
+- Correctness:
+  - Default postprocess vs previous PyTorch selector on all 538 frames: detection counts matched, class IDs exact, max box delta `0` px, confidences exact, dense masks exact.
+  - Deferred workflow postprocess mode vs default exact-sized postprocess on all 538 frames: detection counts matched, class IDs exact, max box delta `0` px, dense masks exact.
+- Micro-result: Synchronized dense postprocess over 240 cached raw TRT outputs improved from `2.055 ms/frame` to `0.408 ms/frame`.
+- Pipeline tuning: With the deferred fused path, depth `3` measured `frames=538 elapsed=3.44s fps=156.61`; depth `2` measured `frames=538 elapsed=3.10s fps=173.39`.
+- Result on requested command: `frames=538 elapsed=3.07s fps=175.12`.
+- Learning: Once postprocess count synchronization and mask resize were moved to the workflow conversion boundary, the optimal pipeline depth dropped from `3` to `2`; the third in-flight worker became extra contention instead of useful overlap.

@@ -16,6 +16,10 @@ from inference_models.models.common.roboflow.post_processing import (
 )
 from inference_models.models.common.rle_utils import torch_mask_to_coco_rle
 from inference_models.models.rfdetr.class_remapping import ClassesReMapping
+from inference_models.models.rfdetr.fused_postprocess import (
+    fused_resize_selected_masks,
+    fused_select_topk_boxes,
+)
 from inference_models.models.rfdetr.post_processor import select_topk_predictions
 from inference_models.utils.file_system import read_json
 
@@ -128,6 +132,7 @@ def post_process_instance_segmentation_results(
     threshold: Union[float, torch.Tensor],
     num_classes: int,
     classes_re_mapping: Optional[ClassesReMapping],
+    defer_fused_postprocess_count: bool = False,
 ) -> List[InstanceDetections]:
     logits_sigmoid = torch.nn.functional.sigmoid(logits)
     results = []
@@ -137,6 +142,18 @@ def post_process_instance_segmentation_results(
     for image_bboxes, image_logits, image_masks, image_meta in zip(
         bboxes, logits_sigmoid, masks, pre_processing_meta
     ):
+        fused_result = _try_fused_instance_segmentation_post_process(
+            image_bboxes=image_bboxes,
+            image_logits=image_logits,
+            image_masks=image_masks,
+            image_meta=image_meta,
+            threshold=threshold,
+            classes_re_mapping=classes_re_mapping,
+            defer_count=defer_fused_postprocess_count,
+        )
+        if fused_result is not None:
+            results.append(fused_result)
+            continue
         confidence, top_classes, image_bboxes, query_indices = select_topk_predictions(
             logits_sigmoid=image_logits,
             bboxes_cxcywh=image_bboxes,
@@ -211,6 +228,88 @@ def post_process_instance_segmentation_results(
         )
         results.append(detections)
     return results
+
+
+def _try_fused_instance_segmentation_post_process(
+    image_bboxes: torch.Tensor,
+    image_logits: torch.Tensor,
+    image_masks: torch.Tensor,
+    image_meta: PreProcessingMetadata,
+    threshold: Union[float, torch.Tensor],
+    classes_re_mapping: Optional[ClassesReMapping],
+    defer_count: bool = False,
+) -> Optional[InstanceDetections]:
+    if isinstance(threshold, torch.Tensor) or classes_re_mapping is None:
+        return None
+    if (
+        image_meta.pad_left != 0
+        or image_meta.pad_top != 0
+        or image_meta.pad_right != 0
+        or image_meta.pad_bottom != 0
+        or image_meta.static_crop_offset.offset_x != 0
+        or image_meta.static_crop_offset.offset_y != 0
+        or image_meta.nonsquare_intermediate_size is not None
+        or image_meta.original_size.width != image_meta.size_after_pre_processing.width
+        or image_meta.original_size.height
+        != image_meta.size_after_pre_processing.height
+    ):
+        return None
+    fused = fused_select_topk_boxes(
+        image_bboxes=image_bboxes,
+        image_logits=image_logits,
+        threshold=threshold,
+        inference_width=image_meta.inference_size.width,
+        inference_height=image_meta.inference_size.height,
+        scale_width=image_meta.scale_width,
+        scale_height=image_meta.scale_height,
+        original_width=image_meta.original_size.width,
+        original_height=image_meta.original_size.height,
+        class_mapping=classes_re_mapping.class_mapping,
+        return_cpu_count=not defer_count,
+    )
+    if fused is None:
+        return None
+    confidence, top_classes, selected_boxes, query_indices, selected_count = fused
+    if defer_count:
+        aligned_masks = fused_resize_selected_masks(
+            image_masks=image_masks,
+            query_indices=query_indices,
+            count=selected_count,
+            output_height=image_meta.original_size.height,
+            output_width=image_meta.original_size.width,
+        )
+        if aligned_masks is None:
+            return None
+        return InstanceDetections(
+            xyxy=selected_boxes.round().int(),
+            confidence=confidence,
+            class_id=top_classes.int(),
+            mask=aligned_masks,
+            image_metadata={"valid_count": selected_count},
+        )
+    if selected_count == 0:
+        aligned_masks = torch.empty(
+            size=(0, image_meta.original_size.height, image_meta.original_size.width),
+            dtype=torch.bool,
+            device=image_bboxes.device,
+        )
+    else:
+        selected_masks = image_masks[query_indices]
+        aligned_masks = (
+            functional.resize(
+                selected_masks,
+                [image_meta.original_size.height, image_meta.original_size.width],
+                interpolation=functional.InterpolationMode.BILINEAR,
+            )
+            .gt_(0.0)
+            .to(dtype=torch.bool)
+        )
+    return InstanceDetections(
+        xyxy=selected_boxes.round().int(),
+        confidence=confidence,
+        class_id=top_classes.int(),
+        mask=aligned_masks,
+    )
 
 
 def post_process_instance_segmentation_results_to_rle_masks(
