@@ -1792,3 +1792,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: After fixing the producer-stream handoff, the full-video comparison against the accepted cloned-output path passed over all `538` frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`, with `max_count=7`.
 - Result on requested command: An intermediate broken stream-wait version produced an invalid `285.71 FPS` but failed correctness badly (`bad_counts=76`, `bad_classes=77`, `bad_masks=537`, `bad_boxes_gt5=175`). The corrected version was stable and correct but not faster: `243.79`, `242.70`, and `242.31` FPS.
 - Learning: Safely borrowing TensorRT graph outputs requires enough stream ordering that the raw-output clone removal no longer improves the depth-2 workflow. Removed the temporary graph-pool/direct-postprocess code.
+
+### Rejected: Exact-Count D2H Detection Copy
+
+- Hypothesis: The RFDETR fast conversion path always copies `7` mask rows from CUDA to pinned CPU memory, even when a frame has fewer valid detections. Copying the count first and then copying only `valid_count` rows could reduce D2H bytes for common 4-5 detection frames.
+- Change tested: Temporary env-gated code only; with `RFDETR_EXACT_D2H_DETECTION_COPY=True`, copied and synchronized the count before copying xyxy/confidence/class/mask rows, then copied only the valid rows. Pipeline depth remained fixed at `2`.
+- Correctness: This changes only how many already-resized selected rows are copied to CPU, not model math.
+- Result on requested command: `frames=538 elapsed=2.80s fps=192.39`, then `frames=538 elapsed=2.82s fps=190.70`.
+- Learning: The extra count synchronization is far more expensive than the saved mask-copy bytes. Keep the accepted single synchronization that copies the fixed 7-row pinned buffers.
