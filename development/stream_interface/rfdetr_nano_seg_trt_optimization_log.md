@@ -788,3 +788,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the alternate mask copy against the forced `.cpu().numpy()` fallback on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=217.17`, below the pinned-conversion checkpoint.
 - Learning: The isolated NumPy copy micro-benchmark does not predict full pipeline behavior; keep the direct ndarray `.copy()` path.
+
+### Rejected: Internal Single-Image RFDETR Preprocess Fast Path
+
+- Hypothesis: The RFDETR TRT workflow always passes a one-element image list to preprocessing. Handling that case before the generic list-normalization loop could avoid list copying, per-frame append bookkeeping, and the final `len(tensors)` branch while preserving the same image object and preprocessing math.
+- Change tested: Temporary code only; added a guarded `len(images) == 1` branch in `pre_process_network_input(...)` that directly preprocesses the single image, transfers it to the target device, records the pinned-copy event, and returns `unsqueeze(0)` plus a one-element metadata list.
+- Correctness: Compared the list fast path against the existing generic single-frame 4D NumPy batch path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`, `max_tensor_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.84` and `frames=538 elapsed=2.47s fps=217.64`, below the pinned-conversion checkpoint.
+- Learning: The generic loop overhead is not meaningful, and adding another top-level branch/function path likely perturbs Python scheduling. Keep the existing preprocessing control flow.
