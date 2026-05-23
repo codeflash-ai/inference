@@ -888,3 +888,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.44s fps=220.31` and `frames=538 elapsed=2.44s fps=220.10`, below the committed float-box checkpoint.
 - Learning: The extra `exp` work inside the selector is still more expensive than the standalone PyTorch sigmoid kernel in the full pipeline. Keep sigmoid outside the selector.
+
+### Rejected: Avoid Query-Index Zero Fill After Float Boxes
+
+- Hypothesis: The selector still allocates `query_indices` with `torch.zeros(...)`, producing a small `FillFunctor<int>` kernel. This lost before deferred float boxes, but after removing box rounding the kernel mix changed enough to retest `torch.empty(...)`.
+- Change tested: Temporary code only; changed the `query_indices` allocation in `fused_select_topk_boxes(...)` from `torch.zeros(...)` to `torch.empty(...)` on top of the committed float-box path.
+- Correctness: Compared the limited deferred path against the exact-sized rounded path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.5`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.43s fps=221.38`, `frames=538 elapsed=2.40s fps=223.81`, and `frames=538 elapsed=2.45s fps=219.46`; still too noisy and unstable to keep.
+- Learning: Removing the zero fill can produce a fast run but also worsens low outliers. Keep the deterministic zero-filled query-index tensor.
