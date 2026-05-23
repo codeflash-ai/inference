@@ -707,3 +707,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared fused selector output against the PyTorch fallback on 120 frames including masks: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=1.1920928955078125e-07`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.53` and `frames=538 elapsed=2.49s fps=215.82`, below the current `219.03` FPS checkpoint.
 - Learning: The selector is already doing enough reduction work that adding sigmoid math slows it down more than the separate PyTorch sigmoid costs. Keep sigmoid outside the selector.
+
+### Rejected: Compact Borrowed TRT Masks Before Next Graph
+
+- Hypothesis: CUDA graph replay clones all TensorRT outputs, including the fixed `(100, 78, 78)` mask tensor, before the graph stream can accept the next replay. The video usually keeps only about 5 detections, so borrowing graph outputs, selecting boxes, compacting only selected masks, and then resizing from the compact buffer could reduce graph-to-graph spacing.
+- Change tested: Temporary code only; added a guarded no-clone CUDA graph output path, a Triton gather kernel for selected masks, a compact-mask resize kernel, and enabled the path only in the RFDETR TRT workflow fast path with pipeline depth `2`.
+- Correctness: Compared compact borrowed outputs against the cloned-output fused path on 120 frames: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.48s fps=216.53`, below the current `219.03` FPS checkpoint.
+- Learning: Replacing the full mask clone with selector/gather stream choreography adds enough pre-next-graph work to lose throughput. The existing clone is cheaper than the synchronization structure needed to borrow graph outputs safely.
