@@ -1904,3 +1904,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: External process environment only; ran the requested benchmark with `CUDA_CACHE_DISABLE=1`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
 - Result on requested command: `frames=538 elapsed=2.20s fps=244.53`, compared with the same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
 - Learning: Disabling the CUDA cache is not useful for the accepted warmed graph path. The serialized engine already reaches the same graph-bound steady-state behavior with the default cache policy.
+
+### Rejected: RFDETR Normalization Lookup Table
+
+- Hypothesis: RFDETR CPU preprocessing still performs per-pixel uint8-to-float normalization with one multiply and one add per channel. Precomputing a `3 x 256` float32 normalization lookup table and filling each output channel with `np.take(..., out=...)` could reduce CPU producer work while preserving exact model inputs.
+- Change tested: Temporary code only; changed `_pil_image_to_normalized_tensor(...)` to fetch normalized float32 values from a thread-local LUT instead of using `np.multiply(...)` plus in-place bias. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: The LUT values matched the existing float32 multiply/add formula exactly for all `256` possible uint8 inputs across all three channels (`array_equal=True`, `max_diff=0.0`).
+- Result on requested command: first LUT run measured `frames=538 elapsed=2.20s fps=244.65`; repeat measured `frames=538 elapsed=2.21s fps=242.98`, below the recent same-session default baseline of `frames=538 elapsed=2.19s fps=245.20`.
+- Learning: The LUT gather path is not faster end to end. The existing vectorized multiply/add normalization is already efficient and better for the current depth-2 producer/GPU balance. Reverted to the accepted ufunc normalization path.
