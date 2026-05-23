@@ -355,3 +355,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared cached-constant preprocessing against the prior ufunc-fill formula on all 538 frames: max tensor diff `0.0000000000`, so classes and boxes are unchanged.
 - Result on requested command: isolated depth `2` runs measured `frames=538 elapsed=2.58s fps=208.14` and `frames=538 elapsed=2.58s fps=208.26`.
 - Learning: At this point, even small per-frame Python/NumPy allocations are visible in the two-frame pipeline balance.
+
+### Rejected: Double-Buffered Pinned Preprocess Buffers
+
+- Hypothesis: The reusable pinned preprocessing buffer waits on the previous H2D copy before reusing host memory. Alternating between two pinned host buffers could let CPU normalization for the next frame proceed while the previous pinned copy is still in flight.
+- Change tested: Temporary code only; replaced the single thread-local pinned buffer with a two-buffer ping-pong and per-buffer CUDA copy events.
+- Correctness: Compared double-buffered preprocessing against the prior single-buffer formula on all 538 frames: max tensor diff `0.0000000000`.
+- Result on requested command: repeat runs measured `frames=538 elapsed=2.60s fps=206.93` and `frames=538 elapsed=2.60s fps=206.71`, below the single-buffer cached path.
+- Learning: The extra buffer/event bookkeeping outweighed any overlap benefit. The single reusable pinned buffer remains better for the current two-frame pipeline.
