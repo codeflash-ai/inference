@@ -2234,3 +2234,29 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: `py_compile` passed. The change only affects opaque workflow identifiers after prediction construction; classes, boxes, confidence, and masks are untouched.
 - Result on requested command: `.hex` IDs measured `frames=538 elapsed=2.20s fps=244.40` and `frames=538 elapsed=2.21s fps=243.31`; after reverting to the original string UUID format, same-session baseline measured `frames=538 elapsed=2.21s fps=243.66`.
 - Learning: UUID string formatting is not a stable limiter in the accepted graph-bound run. Keep the existing hyphenated UUID behavior.
+
+### Profile: Depth-2 Low-Bubble Nsight Systems Refresh
+
+- Request: Capture a fresh Nsight Systems report for user analysis while keeping the workflow pipeline depth fixed at `2`; depth `3` was not tested.
+- Profile: `/tmp/rfdetr_depth2_lowbubble_20260523_204849.nsys-rep`, exported SQLite `/tmp/rfdetr_depth2_lowbubble_20260523_204849.sqlite`, and CSV summaries `/tmp/rfdetr_depth2_lowbubble_20260523_204849_stats_cuda_gpu_kern_sum.csv`, `/tmp/rfdetr_depth2_lowbubble_20260523_204849_stats_cuda_gpu_mem_time_sum.csv`, and `/tmp/rfdetr_depth2_lowbubble_20260523_204849_stats_cuda_api_sum.csv`.
+- Result under profiler: `frames=538 elapsed=2.29s fps=234.43`.
+- Quick exported-data check: the profile contains `602` CUDA graph traces. After skipping `64` warmup launches plus `100` settling launches, graph duration was p50 `4066.704 us`, p90 `4131.826 us`, p95 `4134.941 us`, mean `4075.063 us`; graph end-to-next-start gap was p50 `40.543 us`, p90 `41.695 us`, p95 `42.156 us`, mean `40.703 us`; graph start-to-start interval was p50 `4107.584 us`, p90 `4172.229 us`, p95 `4175.436 us`, mean `4115.659 us`.
+- Gap decomposition after the same skip: busy work inside the graph-to-graph gap was p50 `35.039 us`, p90 `36.857 us`, p95 `37.280 us`, mean `35.284 us`; idle gap time was p50 `5.312 us`, p90 `6.093 us`, p95 `6.272 us`, mean `5.419 us`.
+- Non-profiled sanity run after restoring accepted code measured `frames=538 elapsed=2.20s fps=244.43`.
+- Learning: The accepted depth-2 run is already tightly graph-paced. The next TensorRT CUDA graph starts about `40.5 us` after the previous graph ends, and only about `5.3 us` of that gap is idle; the bottleneck remains the CUDA graph forward body plus a narrow real GPU postprocess/copy tail.
+
+### Rejected: Cached False Preprocessing Overrides Object
+
+- Hypothesis: `_try_run_rfdetr_trt_fast_path(...)` constructs `PreProcessingOverrides(False, False, False)` for every frame. Reusing a module-level frozen dataclass instance could remove a small Python allocation in the CPU producer path without changing preprocessing flags.
+- Change tested: Temporary code only; added a module-level `_RFDETR_PRE_PROCESSING_OVERRIDES` constant and passed it into RFDETR preprocessing. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. `PreProcessingOverrides` is a frozen dataclass with three boolean fields, so the reused object is immutable and semantically identical to constructing the same values per frame.
+- Result on requested command: depth-2 runs measured `frames=538 elapsed=2.20s fps=244.19` and `frames=538 elapsed=2.21s fps=243.44`.
+- Learning: This allocation is below the limiter in the current graph-bound path. The change did not improve throughput, so the per-frame explicit object construction was restored.
+
+### Rejected: Unrolled RFDETR Normalization Channel Writes
+
+- Hypothesis: CPU profiling showed `_pil_image_to_normalized_tensor(...)` as the largest remaining true CPU self-time. Unrolling the fixed three-channel normalization loop could remove minor Python loop/indexing overhead while preserving the exact same NumPy multiply/add operations.
+- Change tested: Temporary code only; replaced the three-iteration `for output_channel, input_channel in enumerate(channel_order)` loop with three explicit `np.multiply(..., out=normalized[i])` calls followed by the same in-place bias adds. Pipeline depth stayed fixed at `2`; depth `3` was not tested.
+- Correctness: `py_compile` passed. A deterministic local equivalence check over both channel orders and several uint8 sample images matched the original loop exactly with max diff `0`.
+- Result on requested command: unrolled depth-2 runs measured `frames=538 elapsed=2.20s fps=245.02` and `frames=538 elapsed=2.21s fps=243.87`; after reverting to the accepted loop, the immediate same-session baseline measured `frames=538 elapsed=2.21s fps=243.77`.
+- Learning: The first run was noise rather than a stable gain. Loop overhead in the normalization helper is not large enough to move the graph-bound steady state, so the simpler accepted loop remains.
