@@ -1465,3 +1465,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Change tested: Temporary gated code only; with `RFDETR_SELECTED_MASK_COPY=1`, cache-hit replay cloned boxes/logits but borrowed the graph-owned mask output, RFDETR fused postprocess copied the first `deferred_mask_resize_detection_limit` selected `78x78` masks into a compact buffer, recorded the graph-output release event, then resized compact rows with a no-query-index Triton kernel. Pipeline depth remained fixed at `2`.
 - Result on requested command with the gate enabled: `frames=538 elapsed=2.33s fps=230.85`, below the accepted fixed-copy band.
 - Learning: The added selected-copy kernel, compact-resize variant, and release-event dependency still cost more than the full mask clone's buffering benefit. Keep the accepted full TensorRT output clone path.
+
+### Rejected: Selector Iteration Cap
+
+- Hypothesis: The fused selector loops up to `100` global top-score iterations, but the benchmark has at most `7` detections per frame. Lowering the maximum iteration count could reduce selector latency while preserving outputs if no extra invalid high-score classes need to be skipped.
+- Change tested: Temporary gated code only; with `RFDETR_SELECTOR_MAX_ITERATIONS`, passed a smaller Triton constexpr loop bound to `_select_topk_boxes_kernel(...)`. Also probed the simpler raw-mask shortcut assumption and found selected query IDs ranged from `0` to `98`, with `38/538` frames selecting query IDs above `6`, so cloning only the first seven raw mask rows would be incorrect.
+- Correctness: Compared gated postprocess against accepted postprocess on all `538` frames. Caps `16`, `8`, and `7` all matched exactly: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: cap `16` measured `frames=538 elapsed=2.30s fps=233.68`; cap `8` measured `frames=538 elapsed=2.31s fps=233.31`; cap `7` measured `frames=538 elapsed=2.31s fps=233.37`, not better than the accepted fixed-copy band.
+- Learning: Even when the selector does fewer loop iterations, the end-to-end run remains constrained by the TensorRT CUDA graph and output-copy scheduling. Keep the original conservative `100`-iteration selector bound for general correctness.
