@@ -1201,3 +1201,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Prediction math and captured graph operations are unchanged; this only changes pre-capture warmup count.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.31s fps=232.82`, `frames=538 elapsed=2.31s fps=232.97`, and `frames=538 elapsed=2.32s fps=232.11`, below the accepted fixed-copy band.
 - Learning: One warmup enqueue is enough for this engine. Extra pre-capture warmup does not improve the steady captured graph and may perturb initialization/cache behavior. Keep the original single warmup.
+
+### Rejected: Deferred Postprocess Stream Copy
+
+- Hypothesis: The RFDETR TRT deferred fast path still waited for the postprocess stream on the current stream before CPU materialization. Passing the postprocess stream through `InstanceDetections.image_metadata` and enqueueing the fixed 7-row pinned D2H copies on that same stream could avoid adding a current-stream dependency and tighten the graph-to-graph tail.
+- Change tested: Temporary code only; when `defer_cuda_stream_sync=True`, `post_process(...)` stored `self._post_process_stream` in each detection metadata entry and skipped the current-stream wait. `_try_copy_limited_cuda_detection_tensors_to_pinned_numpy(...)` then copied count, xyxy, confidence, class IDs, and masks on that producer stream and synchronized the stream at the CPU conversion point. Pipeline depth remained fixed at `2`.
+- Correctness: Prediction math and copy ordering are unchanged; the experiment only moved the explicit synchronization point from the current stream to the producer stream used for postprocess and D2H copy.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.30s fps=233.72` and `frames=538 elapsed=2.32s fps=232.03`, below the accepted fixed-copy band. A mistakenly launched pair of concurrent benchmark repeats was killed and ignored.
+- Learning: The current-stream wait is not the limiter. The existing handoff keeps scheduling stable enough, and moving the D2H copies onto the postprocess stream does not reduce the already small graph-to-graph tail. Keep the accepted current-stream wait and fixed-copy path.
