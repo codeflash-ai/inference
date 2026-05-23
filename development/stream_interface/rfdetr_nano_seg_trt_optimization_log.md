@@ -667,3 +667,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared skip-sync against the normal synchronized path on all 538 frames: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`, `max_conf_delta=0`.
 - Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=218.19` and `frames=538 elapsed=2.50s fps=215.27`, below the current `219.03` FPS checkpoint.
 - Learning: The event synchronize is either already cheap when completed or helps maintain better copy/launch ordering. Keep the explicit pinned-buffer reuse synchronization.
+
+### Rejected: Skip Empty Class Filter Helper
+
+- Hypothesis: The benchmark workflow does not set `class_filter`, but the RFDETR workflow fast path still calls `filter_out_unwanted_classes_from_sv_detections_batch(...)`, which immediately returns when no filter is provided. Avoiding the no-op function call could shave a small amount of Python result-materialization overhead.
+- Change tested: Temporary code only; guarded calls to `filter_out_unwanted_classes_from_sv_detections_batch(...)` with `if class_filter:` in the inference-models and RFDETR TRT workflow fast paths.
+- Correctness: Compared the guarded path against the previous always-call behavior on all 538 frames through `InferencePipeline`: `bad_counts=0`, `bad_classes=0`, `max_box_delta=0`.
+- Result on requested command: depth `2` measured `frames=538 elapsed=2.47s fps=217.59` and `frames=538 elapsed=2.49s fps=215.87`, below the current `219.03` FPS checkpoint.
+- Learning: The no-op helper call is too small to matter, and the extra branch may perturb the tight path. Keep the simpler existing call.
