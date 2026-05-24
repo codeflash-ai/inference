@@ -2917,3 +2917,10 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared CUDA graph execution against standard non-graph TensorRT execution over all `538` frames after postprocess: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `243.82`, `243.81`, `242.68`, `242.93`, and `243.54` FPS, averaging about `243.36` FPS. This is within the accepted path's normal noise band and does not improve the current checkpoint.
 - Learning: TensorRT context profile emission and NVTX layer-name verbosity are not measurable FPS limiters for the accepted CUDA graph replay path. The experiment was reverted to keep the generic TRT helper behavior unchanged.
+
+### Diagnostic: Current TensorRT Graph Replay Ceiling
+
+- Hypothesis: Recent depth-2 nsys traces show only about `4-5 us` p50 true idle between graph replays. Measuring the replay-only path directly can quantify how much headroom remains outside the TensorRT graph body.
+- Diagnostic: Loaded one frame from `vehicles_312px.mp4`, preprocessed it once, captured the RFDETR TensorRT CUDA graph, then measured `1000` iterations with CUDA events on the graph stream. Pipeline depth was not varied and depth `3` was not tested.
+- Results: graph replay only measured `4.066539 ms` (`245.91 fps`); input copy plus graph replay measured `4.076774 ms` (`245.29 fps`); input copy plus graph replay plus output clones measured `4.105473 ms` (`243.58 fps`); the model `forward(...)` CUDA graph path measured `4.107662 ms` (`243.45 fps`).
+- Learning: The accepted workflow's normal `243-245 fps` range is already essentially at the TensorRT forward-path ceiling once required input handoff and output clones are included. Further local FPS gains need to reduce the TensorRT graph body or safely remove/replace output clone ownership, not tune CPU scheduling or Python dispatch.
