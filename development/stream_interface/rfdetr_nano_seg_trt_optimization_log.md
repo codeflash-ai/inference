@@ -2924,3 +2924,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Diagnostic: Loaded one frame from `vehicles_312px.mp4`, preprocessed it once, captured the RFDETR TensorRT CUDA graph, then measured `1000` iterations with CUDA events on the graph stream. Pipeline depth was not varied and depth `3` was not tested.
 - Results: graph replay only measured `4.066539 ms` (`245.91 fps`); input copy plus graph replay measured `4.076774 ms` (`245.29 fps`); input copy plus graph replay plus output clones measured `4.105473 ms` (`243.58 fps`); the model `forward(...)` CUDA graph path measured `4.107662 ms` (`243.45 fps`).
 - Learning: The accepted workflow's normal `243-245 fps` range is already essentially at the TensorRT forward-path ceiling once required input handoff and output clones are included. Further local FPS gains need to reduce the TensorRT graph body or safely remove/replace output clone ownership, not tune CPU scheduling or Python dispatch.
+
+### Diagnostic: Official Package Metadata Refresh After Graph-Ceiling Check
+
+- Hypothesis: Since local ONNX rebuilds and runtime knobs have not produced a correct faster graph body, a newer official T4 TensorRT package would be the most credible remaining graph-body optimization path.
+- Diagnostic: Re-queried the Roboflow weights provider through the local `inference_models` path for `rfdetr-seg-nano`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Result: The provider still resolves `rfdetr-seg-nano` to `coco-dataset-vdnr1/41` and exposes the same `6` packages: L4 TRT FP32 `3e3ddd85586b43e4fac6d319fb2927fd`, ONNX FP32 `5362b72bfb9f01d2e0b8cba2048d932c`, L4 TRT FP16 `89d1f41e2af4f4f3ffcdfb77e774d26a`, Torch FP32 `8b8da2fe824240522a39f3cde41aafae`, T4 TRT FP32 `bbc2cc23adf6f5e71a9241956081da96`, and T4 TRT FP16 `c70f32369a54d61e06ef4e6b56c82524`.
+- Sanity check: The accepted depth-2 benchmark command measured `frames=538 elapsed=2.20s fps=244.52` after the metadata refresh.
+- Learning: There is still no newer official T4 FP16 package to test. The accepted T4 FP16 engine remains the only correctness-equivalent package source, so additional graph-body gains still require a new official artifact or an exact export source for a correctness-preserving rebuild.
