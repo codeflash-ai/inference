@@ -2858,3 +2858,17 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Engine summary: The accepted T4 plan has `261` layers, `4` IO tensors, `4` TensorRT auxiliary streams, and about `18.29 MB` reported device memory. IO tensors are `input` `(1,3,312,312)` float, `dets` `(1,100,4)` float, `labels` `(1,100,91)` float, and mask output `4186` `(1,100,78,78)` float.
 - Layer-family counts: The inspector layer list contains `12` fused QKV attention matmuls, `16` `_gemm_mha_v2` layers, `12` attention-output matmuls, `14` Myelin FC layers, `12` MLP `fc2` matmuls, `20` full layernorm-style `__myl_MulAddCastMeanSubMulMeanAddSqrtDivMulCastMulAdd` layers, `4` partial layernorm/mean layers, `12` GELU/SiLU-style Myelin activation layers, `18` convolution layers, one TensorRT TopK layer, and one segmentation-head resize layer.
 - Learning: The graph-body bottleneck aligns with repeated transformer-block GEMM/MHA/layernorm families rather than a single postprocess or pipeline gap. The likely next high-impact attempts are engine/export/tactic changes or a much larger custom replacement of repeated transformer subgraphs; small Python-side cache and handoff changes are below measurement noise at the current depth-2 schedule.
+
+### Diagnostic: Current Official RFDETR Package Metadata
+
+- Hypothesis: A newer official T4 TensorRT package would be the safest remaining graph-body optimization path because local rebuilds from the public ONNX/Torch packages have repeatedly failed the accepted class/box/mask correctness gate.
+- Diagnostic: Re-queried the Roboflow weights provider for `rfdetr-seg-nano`; it still resolves to `coco-dataset-vdnr1/41` and exposes `6` packages.
+- Result: The current package list is unchanged: L4 TRT FP32 `3e3ddd85586b43e4fac6d319fb2927fd`, ONNX FP32 `5362b72bfb9f01d2e0b8cba2048d932c`, L4 TRT FP16 `89d1f41e2af4f4f3ffcdfb77e774d26a`, Torch FP32 `8b8da2fe824240522a39f3cde41aafae`, T4 TRT FP32 `bbc2cc23adf6f5e71a9241956081da96`, and T4 TRT FP16 `c70f32369a54d61e06ef4e6b56c82524`.
+- Learning: There is still no newer official T4 TensorRT artifact to test. The accepted T4 FP16 package remains the only known correctness-equivalent engine source, so further engine-level gains still need an exact accepted export source or a new official package.
+
+### Diagnostic: TensorRT Output Allocator Probe
+
+- Hypothesis: `IExecutionContext.set_output_allocator(...)` might expose an output-buffer ownership hook that could eventually remove or restructure the CUDA graph output clones without changing prediction tensors.
+- Diagnostic: Attached a Python `trt.IOutputAllocator` to the accepted execution context for outputs `dets`, `labels`, and `4186`, then ran one standard non-graph TensorRT forward on a benchmark frame. Pipeline depth was not varied and depth `3` was not tested.
+- Result: TensorRT called `notify_shape(...)` once and `reallocate_output_async(...)` once for each of the three outputs, reporting shapes `(1,100,4)`, `(1,100,91)`, and `(1,100,78,78)`. The probe returned the existing memory pointer, and the standard forward completed successfully.
+- Learning: The hook is active for ordinary `execute_async_v3`, but it does not solve the accepted CUDA graph replay lifetime problem by itself. A captured graph still needs fixed output addresses; changing those addresses per replay would require graph update or a different graph-state pool, and prior borrowed/pool variants lost. Do not treat output allocators alone as a clone-removal optimization for the current graph path.
