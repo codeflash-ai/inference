@@ -2909,3 +2909,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared CUDA graph execution against standard non-graph TensorRT execution over all `538` frames after postprocess: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `244.03`, `244.51`, `242.45`, `242.99`, and `243.97` FPS, averaging about `243.59` FPS. This is still within the accepted path's normal noise band and does not clearly improve the current checkpoint.
 - Learning: The query-index zero fill is not a measurable limiter at the current graph-bound point. The allocation was restored to the existing zeroed form because the change has no stable FPS benefit and the explicit initialization is more conservative for future consumers.
+
+### Rejected: Disable TensorRT Context Profile Emission
+
+- Hypothesis: The accepted TensorRT execution context reports `enqueue_emits_profile=True` and `nvtx_verbosity=LAYER_NAMES_ONLY` even without an attached profiler. Disabling profile emission and lowering NVTX verbosity on graph and non-graph contexts might reduce TensorRT enqueue/capture overhead or graph replay metadata work.
+- Change tested: Temporary code only; set `context.enqueue_emits_profile = False` and attempted to set `context.nvtx_verbosity = trt.ProfilingVerbosity.NONE` for standard and CUDA-graph TensorRT execution contexts. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: Compared CUDA graph execution against standard non-graph TensorRT execution over all `538` frames after postprocess: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `243.82`, `243.81`, `242.68`, `242.93`, and `243.54` FPS, averaging about `243.36` FPS. This is within the accepted path's normal noise band and does not improve the current checkpoint.
+- Learning: TensorRT context profile emission and NVTX layer-name verbosity are not measurable FPS limiters for the accepted CUDA graph replay path. The experiment was reverted to keep the generic TRT helper behavior unchanged.
