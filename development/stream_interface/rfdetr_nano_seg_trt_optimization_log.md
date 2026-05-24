@@ -2808,3 +2808,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `12.26-12.42 us` under NCU replay. Compute throughput was about `21.52-22.27%`, memory and DRAM throughput about `38.84-40.49%`, L2 throughput about `20.46-20.65%`, and L1/TEX throughput about `32.57-33.54%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.94` after the profile.
 - Learning: This exact Myelin layernorm tail is moderately occupied and DRAM-oriented. It is not the same problem as the register-heavy TensorRT GEMMs; removing it would require graph-level fusion or export/layout changes that reduce TensorRT-internal memory movement.
+
+### Profile: TensorRT Exact Myelin GELU/ERF Tail Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_DivCastErfCastAddMulMulReshTranAdd_0xc69f0a3834aa94ce6ae359f8c4d44526` as another high-cost Myelin aggregate at about `152 us/replay` across four graph nodes. Profiling the exact kernel can show whether this GELU/ERF transform is bandwidth-bound or another low-occupancy scheduling tail.
+- Profile: `/tmp/rfdetr_trt_myelin_erf_exact_graphnode_basic_ncu_20260524_002654.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_erf_exact_graphnode_basic_ncu_20260524_002654_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_erf_exact_graphnode_basic_ncu_20260524_002654_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact Myelin kernel name, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=5.26s fps=102.33`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `761`, block size `256`, `33` registers/thread, no dynamic or static shared memory, and `4.76` waves/SM. Theoretical occupancy is `100%`, achieved occupancy is about `89.31-89.46%`, and active warps/SM are about `28.58-28.63`.
+- Throughput: Duration was about `41.02-41.38 us` under NCU replay. Compute throughput was about `61.32-61.58%`, memory and DRAM throughput about `79.77-81.01%`, L2 throughput about `25.93-26.16%`, and L1/TEX throughput about `26.65-26.76%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.63` after the profile.
+- Learning: This exact Myelin GELU/ERF tail is broad, well occupied, and DRAM-heavy. It is a graph-level memory-movement/fusion opportunity inside TensorRT, not a local postprocess or pipeline scheduling problem.
