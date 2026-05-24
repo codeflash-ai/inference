@@ -2768,3 +2768,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `20.35-20.70 us` under NCU replay. Compute and memory throughput were both about `28.22-28.39%`, DRAM throughput about `24.16-24.61%`, L2 throughput about `10.01-10.19%`, and L1/TEX throughput about `46.41-46.69%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.20s fps=244.04` after the profile.
 - Learning: This Myelin add/transpose tail is not a severe single-block or partial-wave issue. It has moderate occupancy and moderate memory pressure, and it is TensorRT-internal graph-body work, so replacing it from Python would require changing the serialized engine boundary rather than the postprocess pipeline. It is lower priority than the repeated underfilled GEMM/MHA tactic family.
+
+### Profile: TensorRT Myelin Cast Tail Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows `__myl_Cast_0x3e286122172daaa85048151e7b4c1ac0` as another unprofiled TensorRT graph-body tail at about `20 us/replay`. Profiling it can determine whether this cast is a low-occupancy scheduling tail or a bandwidth-style Myelin transform.
+- Profile: `/tmp/rfdetr_trt_myelin_cast_tail_graphnode_basic_ncu_20260524_001347.ncu-rep`, details text `/tmp/rfdetr_trt_myelin_cast_tail_graphnode_basic_ncu_20260524_001347_details.txt`, raw CSV `/tmp/rfdetr_trt_myelin_cast_tail_graphnode_basic_ncu_20260524_001347_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact Myelin kernel name, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=14.14s fps=38.05`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `468`, block size `512`, `28` registers/thread, `8.45 KiB` static shared memory per block, no dynamic shared memory, and `5.85` waves/SM. Theoretical occupancy is `100%`, achieved occupancy is about `91.00-93.77%`, and active warps/SM are about `29.12-30.01`.
+- Throughput: Duration was about `34.72-35.36 us` under NCU replay. Compute throughput was about `40.68-41.29%`, memory and DRAM throughput about `61.16-61.63%`, L2 throughput about `23.68-24.11%`, and L1/TEX throughput about `55.71-56.30%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.22s fps=242.79` after the profile.
+- Learning: This Myelin cast tail is broad and well occupied, with significant DRAM traffic. It is not a local replacement candidate; avoiding it would require changing the TensorRT graph/export layout so the cast is fused away or no longer needed.
