@@ -12,10 +12,14 @@ from inference_models.models.common.roboflow.model_packages import (
 )
 from inference_models.models.common.roboflow.post_processing import (
     align_instance_segmentation_results,
-    align_instance_segmentation_results_to_rle_masks,
     rescale_image_detections,
 )
+from inference_models.models.common.rle_utils import torch_mask_to_coco_rle
 from inference_models.models.rfdetr.class_remapping import ClassesReMapping
+from inference_models.models.rfdetr.fused_postprocess import (
+    fused_resize_selected_masks,
+    fused_select_topk_boxes,
+)
 from inference_models.models.rfdetr.post_processor import select_topk_predictions
 from inference_models.utils.file_system import read_json
 
@@ -86,11 +90,8 @@ def post_process_object_detection_results(
         predicted_confidence = predicted_confidence[confidence_mask]
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
-        predicted_confidence, sorted_indices = torch.sort(
-            predicted_confidence, descending=True
-        )
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
@@ -131,6 +132,8 @@ def post_process_instance_segmentation_results(
     threshold: Union[float, torch.Tensor],
     num_classes: int,
     classes_re_mapping: Optional[ClassesReMapping],
+    defer_fused_postprocess_count: bool = False,
+    deferred_mask_resize_detection_limit: Optional[int] = None,
 ) -> List[InstanceDetections]:
     logits_sigmoid = torch.nn.functional.sigmoid(logits)
     results = []
@@ -140,6 +143,19 @@ def post_process_instance_segmentation_results(
     for image_bboxes, image_logits, image_masks, image_meta in zip(
         bboxes, logits_sigmoid, masks, pre_processing_meta
     ):
+        fused_result = _try_fused_instance_segmentation_post_process(
+            image_bboxes=image_bboxes,
+            image_logits=image_logits,
+            image_masks=image_masks,
+            image_meta=image_meta,
+            threshold=threshold,
+            classes_re_mapping=classes_re_mapping,
+            defer_count=defer_fused_postprocess_count,
+            deferred_mask_resize_detection_limit=deferred_mask_resize_detection_limit,
+        )
+        if fused_result is not None:
+            results.append(fused_result)
+            continue
         confidence, top_classes, image_bboxes, query_indices = select_topk_predictions(
             logits_sigmoid=image_logits,
             bboxes_cxcywh=image_bboxes,
@@ -169,10 +185,8 @@ def post_process_instance_segmentation_results(
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
         selected_masks = image_masks[confidence_mask]
-        confidence, sorted_indices = torch.sort(confidence, descending=True)
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
-        selected_masks = selected_masks[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
@@ -216,6 +230,104 @@ def post_process_instance_segmentation_results(
         )
         results.append(detections)
     return results
+
+
+def _try_fused_instance_segmentation_post_process(
+    image_bboxes: torch.Tensor,
+    image_logits: torch.Tensor,
+    image_masks: torch.Tensor,
+    image_meta: PreProcessingMetadata,
+    threshold: Union[float, torch.Tensor],
+    classes_re_mapping: Optional[ClassesReMapping],
+    defer_count: bool = False,
+    deferred_mask_resize_detection_limit: Optional[int] = None,
+) -> Optional[InstanceDetections]:
+    if isinstance(threshold, torch.Tensor) or classes_re_mapping is None:
+        return None
+    if (
+        image_meta.pad_left != 0
+        or image_meta.pad_top != 0
+        or image_meta.pad_right != 0
+        or image_meta.pad_bottom != 0
+        or image_meta.static_crop_offset.offset_x != 0
+        or image_meta.static_crop_offset.offset_y != 0
+        or image_meta.nonsquare_intermediate_size is not None
+        or image_meta.original_size.width != image_meta.size_after_pre_processing.width
+        or image_meta.original_size.height
+        != image_meta.size_after_pre_processing.height
+    ):
+        return None
+    fused = fused_select_topk_boxes(
+        image_bboxes=image_bboxes,
+        image_logits=image_logits,
+        threshold=threshold,
+        inference_width=image_meta.inference_size.width,
+        inference_height=image_meta.inference_size.height,
+        scale_width=image_meta.scale_width,
+        scale_height=image_meta.scale_height,
+        original_width=image_meta.original_size.width,
+        original_height=image_meta.original_size.height,
+        class_mapping=classes_re_mapping.class_mapping,
+        return_cpu_count=not defer_count,
+    )
+    if fused is None:
+        return None
+    confidence, top_classes, selected_boxes, query_indices, selected_count = fused
+    if defer_count:
+        aligned_masks = fused_resize_selected_masks(
+            image_masks=image_masks,
+            query_indices=query_indices,
+            count=selected_count,
+            output_height=image_meta.original_size.height,
+            output_width=image_meta.original_size.width,
+            detection_limit=deferred_mask_resize_detection_limit,
+        )
+        if aligned_masks is None:
+            return None
+        image_metadata = {"valid_count": selected_count}
+        if deferred_mask_resize_detection_limit is not None:
+            image_metadata.update(
+                {
+                    "mask_resize_detection_limit": min(
+                        int(deferred_mask_resize_detection_limit),
+                        aligned_masks.shape[0],
+                    ),
+                    "source_masks": image_masks,
+                    "query_indices": query_indices,
+                    "output_height": image_meta.original_size.height,
+                    "output_width": image_meta.original_size.width,
+                }
+            )
+        return InstanceDetections(
+            xyxy=selected_boxes,
+            confidence=confidence,
+            class_id=top_classes.int(),
+            mask=aligned_masks,
+            image_metadata=image_metadata,
+        )
+    if selected_count == 0:
+        aligned_masks = torch.empty(
+            size=(0, image_meta.original_size.height, image_meta.original_size.width),
+            dtype=torch.bool,
+            device=image_bboxes.device,
+        )
+    else:
+        selected_masks = image_masks[query_indices]
+        aligned_masks = (
+            functional.resize(
+                selected_masks,
+                [image_meta.original_size.height, image_meta.original_size.width],
+                interpolation=functional.InterpolationMode.BILINEAR,
+            )
+            .gt_(0.0)
+            .to(dtype=torch.bool)
+        )
+    return InstanceDetections(
+        xyxy=selected_boxes.round().int(),
+        confidence=confidence,
+        class_id=top_classes.int(),
+        mask=aligned_masks,
+    )
 
 
 def post_process_instance_segmentation_results_to_rle_masks(
@@ -264,10 +376,8 @@ def post_process_instance_segmentation_results_to_rle_masks(
         top_classes = top_classes[confidence_mask]
         selected_boxes = image_bboxes[confidence_mask]
         selected_masks = image_masks[confidence_mask]
-        confidence, sorted_indices = torch.sort(confidence, descending=True)
-        top_classes = top_classes[sorted_indices]
-        selected_boxes = selected_boxes[sorted_indices]
-        selected_masks = selected_masks[sorted_indices]
+        # select_topk_predictions returns scores sorted descending; the boolean
+        # filters above preserve that order.
         cxcy = selected_boxes[:, :2]
         wh = selected_boxes[:, 2:]
         xy_min = cxcy - 0.5 * wh
@@ -292,8 +402,7 @@ def post_process_instance_segmentation_results_to_rle_masks(
             image_meta.pad_bottom,
         )
         selected_boxes_xyxy = selected_boxes_xyxy_pct * denorm_size_whwh
-        aligned_boxes, rle_masks = [], []
-        for bbox, mask in align_instance_segmentation_results_to_rle_masks(
+        aligned_boxes, aligned_masks = align_instance_segmentation_results(
             image_bboxes=selected_boxes_xyxy,
             masks=selected_masks,
             padding=padding,
@@ -303,9 +412,8 @@ def post_process_instance_segmentation_results_to_rle_masks(
             size_after_pre_processing=image_meta.size_after_pre_processing,
             inference_size=denorm_size,
             static_crop_offset=image_meta.static_crop_offset,
-        ):
-            aligned_boxes.append(bbox)
-            rle_masks.append(mask)
+        )
+        rle_masks = [torch_mask_to_coco_rle(mask) for mask in aligned_masks]
         instances_masks = InstancesRLEMasks.from_coco_rle_masks(
             image_size=(
                 image_meta.original_size.height,
@@ -313,11 +421,10 @@ def post_process_instance_segmentation_results_to_rle_masks(
             ),
             masks=rle_masks,
         )
-        if len(aligned_boxes) > 0:
-            aligned_boxes_tensor = torch.stack(aligned_boxes, dim=0)
+        if aligned_boxes.shape[0] > 0:
             final_results.append(
                 InstanceDetections(
-                    xyxy=aligned_boxes_tensor.round().int(),
+                    xyxy=aligned_boxes.round().int(),
                     confidence=confidence,
                     class_id=top_classes.int(),
                     mask=instances_masks,

@@ -11,6 +11,7 @@ torch.Tensor inputs (advanced caller, float CHW [0, 1]):
     tensor F.resize → F.normalize
 """
 
+import threading
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
@@ -39,6 +40,9 @@ from inference_models.models.common.roboflow.pre_processing import (
     make_the_value_divisible,
     pre_process_numpy_image,
 )
+
+_PINNED_BUFFER_STORAGE = threading.local()
+_NORMALIZATION_STORAGE = threading.local()
 
 
 def pre_process_network_input(
@@ -117,15 +121,24 @@ def pre_process_network_input(
                 target_size=target_size,
                 input_color_mode=input_color_mode,
                 pre_processing_overrides=pre_processing_overrides,
+                use_pinned_output=(
+                    target_device.type == "cuda" and len(image_list) == 1
+                ),
             )
         else:
             raise TypeError(
                 f"Unsupported image input type for RFDETR pre-processing: {type(img)}"
             )
-        tensors.append(tensor.to(device=target_device))
+        non_blocking = target_device.type == "cuda" and tensor.is_pinned()
+        tensors.append(tensor.to(device=target_device, non_blocking=non_blocking))
+        if non_blocking:
+            _record_pinned_buffer_copy(target_device=target_device)
         metadata.append(meta)
 
-    batch = torch.stack(tensors).contiguous()
+    if len(tensors) == 1:
+        batch = tensors[0].unsqueeze(0).contiguous()
+    else:
+        batch = torch.stack(tensors).contiguous()
     return batch, metadata
 
 
@@ -136,6 +149,7 @@ def _pre_process_numpy(
     target_size: ImageDimensions,
     input_color_mode: Optional[ColorMode],
     pre_processing_overrides: Optional[PreProcessingOverrides],
+    use_pinned_output: bool,
 ) -> Tuple[torch.Tensor, PreProcessingMetadata]:
     """numpy / uint8-tensor branch: PIL chain matching training source-of-truth.
 
@@ -145,6 +159,7 @@ def _pre_process_numpy(
     `training_input_size` (matching training's SquareResize). Otherwise we stretch
     directly in a single PIL F.resize step.
     """
+    swap_tensor_channels = False
     if _needs_two_step_resize(network_input):
         intermediate_image, meta = _dataset_version_resize_uint8(
             image=image,
@@ -171,7 +186,9 @@ def _pre_process_numpy(
             width=image.shape[1], height=image.shape[0]
         )
         if input_color_mode != network_input.color_mode:
-            image = image[:, :, ::-1]
+            swap_tensor_channels = True
+        else:
+            swap_tensor_channels = False
         pil = Image.fromarray(np.ascontiguousarray(image))
         meta = _build_metadata(
             original_size=original_size,
@@ -180,10 +197,100 @@ def _pre_process_numpy(
             static_crop_offset=static_crop_offset,
         )
 
-    resized = TF.resize(pil, (target_size.height, target_size.width), antialias=True)
+    resized = pil.resize(
+        (target_size.width, target_size.height),
+        resample=Image.Resampling.BILINEAR,
+    )
+    tensor = _pil_image_to_normalized_tensor(
+        image=resized,
+        network_input=network_input,
+        swap_tensor_channels=swap_tensor_channels,
+        use_pinned_output=use_pinned_output,
+    )
+    if tensor is not None:
+        return tensor, meta
     tensor = TF.to_tensor(resized)
+    if swap_tensor_channels and tensor.shape[0] == 3:
+        tensor = tensor[[2, 1, 0], :, :]
     tensor = _apply_normalization(tensor, network_input)
     return tensor, meta
+
+
+def _pil_image_to_normalized_tensor(
+    image: Image.Image,
+    network_input: NetworkInputDefinition,
+    swap_tensor_channels: bool,
+    use_pinned_output: bool = False,
+) -> Optional[torch.Tensor]:
+    if not network_input.normalization or network_input.input_channels != 3:
+        return None
+    image_array = np.asarray(image)
+    if image_array.ndim != 3 or image_array.shape[2] != 3:
+        return None
+    multiplier, bias = _get_normalization_constants(network_input.normalization)
+    channel_order = (2, 1, 0) if swap_tensor_channels else (0, 1, 2)
+    shape = (3, image_array.shape[0], image_array.shape[1])
+    if use_pinned_output:
+        normalized_tensor = _get_pinned_normalized_buffer(shape=shape)
+        normalized = normalized_tensor.numpy()
+    else:
+        normalized_tensor = None
+        normalized = np.empty(shape, dtype=np.float32)
+    for output_channel, input_channel in enumerate(channel_order):
+        channel = normalized[output_channel]
+        np.multiply(
+            image_array[:, :, input_channel],
+            multiplier[output_channel],
+            out=channel,
+            casting="unsafe",
+        )
+        channel += bias[output_channel]
+    if normalized_tensor is not None:
+        return normalized_tensor
+    return torch.from_numpy(normalized)
+
+
+def _get_normalization_constants(
+    normalization: Tuple[List[float], List[float]],
+) -> Tuple[np.ndarray, np.ndarray]:
+    key = (tuple(normalization[0]), tuple(normalization[1]))
+    cached_key = getattr(_NORMALIZATION_STORAGE, "key", None)
+    if cached_key != key:
+        _NORMALIZATION_STORAGE.key = key
+        mean = np.asarray(normalization[0], dtype=np.float32)
+        std = np.asarray(normalization[1], dtype=np.float32)
+        _NORMALIZATION_STORAGE.multiplier = np.float32(1.0 / 255.0) / std
+        _NORMALIZATION_STORAGE.bias = -mean / std
+    return (
+        _NORMALIZATION_STORAGE.multiplier,
+        _NORMALIZATION_STORAGE.bias,
+    )
+
+
+def _get_pinned_normalized_buffer(
+    shape: Tuple[int, int, int],
+) -> torch.Tensor:
+    copy_event = getattr(_PINNED_BUFFER_STORAGE, "copy_event", None)
+    if copy_event is not None:
+        copy_event.synchronize()
+    buffer = getattr(_PINNED_BUFFER_STORAGE, "normalized_buffer", None)
+    if (
+        buffer is None
+        or tuple(buffer.shape) != shape
+        or buffer.dtype != torch.float32
+        or not buffer.is_pinned()
+    ):
+        buffer = torch.empty(shape, dtype=torch.float32, pin_memory=True)
+        _PINNED_BUFFER_STORAGE.normalized_buffer = buffer
+    return buffer
+
+
+def _record_pinned_buffer_copy(target_device: torch.device) -> None:
+    copy_event = getattr(_PINNED_BUFFER_STORAGE, "copy_event", None)
+    if copy_event is None:
+        copy_event = torch.cuda.Event()
+        _PINNED_BUFFER_STORAGE.copy_event = copy_event
+    copy_event.record(torch.cuda.current_stream(target_device))
 
 
 def _needs_two_step_resize(network_input: NetworkInputDefinition) -> bool:

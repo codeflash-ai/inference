@@ -1,10 +1,20 @@
+import threading
+import uuid
 from typing import List, Literal, Optional, Type, Union
 
+import numpy as np
+import supervision as sv
+import torch
 from pydantic import ConfigDict, Field, PositiveInt, model_validator
+from supervision.config import CLASS_NAME_DATA_FIELD
 
 from inference.core.entities.requests.inference import (
     InstanceSegmentationInferenceRequest,
 )
+from inference.core.models.inference_models_adapters import (
+    InferenceModelsInstanceSegmentationAdapter,
+)
+from inference_models.models.auto_loaders.entities import PreProcessingOverrides
 from inference.core.env import (
     HOSTED_INSTANCE_SEGMENTATION_URL,
     LOCAL_INFERENCE_API_URL,
@@ -20,7 +30,12 @@ from inference.core.workflows.core_steps.common.utils import (
     convert_inference_detections_batch_to_sv_detections,
     filter_out_unwanted_classes_from_sv_detections_batch,
 )
-from inference.core.workflows.execution_engine.constants import INFERENCE_ID_KEY
+from inference.core.workflows.execution_engine.constants import (
+    DETECTION_ID_KEY,
+    IMAGE_DIMENSIONS_KEY,
+    INFERENCE_ID_KEY,
+    PARENT_ID_KEY,
+)
 from inference.core.workflows.execution_engine.entities.base import (
     Batch,
     OutputDefinition,
@@ -59,6 +74,41 @@ You will need to set your Roboflow API key in your Inference environment to use 
 block. To learn more about setting your Roboflow API key, [refer to the Inference
 documentation](https://inference.roboflow.com/quickstart/configure_api_key/).
 """
+
+_RFDETR_CONVERSION_BUFFERS = threading.local()
+
+
+def _get_rfdetr_conversion_buffers(
+    count: int,
+    mask_shape: tuple,
+    xyxy_dtype: torch.dtype,
+    confidence_dtype: torch.dtype,
+    class_id_dtype: torch.dtype,
+    mask_dtype: torch.dtype,
+) -> tuple:
+    existing_key = getattr(_RFDETR_CONVERSION_BUFFERS, "key", None)
+    existing_capacity = getattr(_RFDETR_CONVERSION_BUFFERS, "capacity", 0)
+    requested_key = (
+        mask_shape,
+        xyxy_dtype,
+        confidence_dtype,
+        class_id_dtype,
+        mask_dtype,
+    )
+    if existing_key == requested_key and existing_capacity >= count:
+        return _RFDETR_CONVERSION_BUFFERS.buffers
+    capacity = max(count, existing_capacity)
+    buffers = (
+        torch.empty((capacity, 4), dtype=xyxy_dtype, pin_memory=True),
+        torch.empty((capacity,), dtype=confidence_dtype, pin_memory=True),
+        torch.empty((capacity,), dtype=class_id_dtype, pin_memory=True),
+        torch.empty((capacity,) + mask_shape, dtype=mask_dtype, pin_memory=True),
+        torch.empty((1,), dtype=torch.int32, pin_memory=True),
+    )
+    _RFDETR_CONVERSION_BUFFERS.key = requested_key
+    _RFDETR_CONVERSION_BUFFERS.capacity = capacity
+    _RFDETR_CONVERSION_BUFFERS.buffers = buffers
+    return buffers
 
 
 class BlockManifest(WorkflowBlockManifest):
@@ -301,6 +351,27 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
         disable_active_learning: Optional[bool],
         active_learning_target_dataset: Optional[str],
     ) -> BlockResult:
+        self._model_manager.add_model(
+            model_id=model_id,
+            api_key=self._api_key,
+        )
+        if disable_active_learning is True and active_learning_target_dataset is None:
+            direct_result = self._try_run_rfdetr_trt_fast_path(
+                images=images,
+                class_filter=class_filter,
+                model_id=model_id,
+                confidence=confidence,
+                class_agnostic_nms=class_agnostic_nms,
+                iou_threshold=iou_threshold,
+                max_detections=max_detections,
+                max_candidates=max_candidates,
+                mask_decode_mode=mask_decode_mode,
+                tradeoff_factor=tradeoff_factor,
+                disable_active_learning=disable_active_learning,
+                active_learning_target_dataset=active_learning_target_dataset,
+            )
+            if direct_result is not None:
+                return direct_result
         inference_images = [i.to_inference_format(numpy_preferred=True) for i in images]
         request = InstanceSegmentationInferenceRequest(
             api_key=self._api_key,
@@ -318,10 +389,16 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             tradeoff_factor=tradeoff_factor,
             source="workflow-execution",
         )
-        self._model_manager.add_model(
-            model_id=model_id,
-            api_key=self._api_key,
-        )
+        if disable_active_learning is True and active_learning_target_dataset is None:
+            direct_result = self._try_run_inference_models_fast_path(
+                images=images,
+                inference_images=inference_images,
+                request=request,
+                class_filter=class_filter,
+                model_id=model_id,
+            )
+            if direct_result is not None:
+                return direct_result
         predictions = self._model_manager.infer_from_request_sync(
             model_id=model_id, request=request
         )
@@ -335,6 +412,374 @@ class RoboflowInstanceSegmentationModelBlockV3(WorkflowBlock):
             predictions=predictions,
             class_filter=class_filter,
             model_id=model_id,
+        )
+
+    def _try_run_inference_models_fast_path(
+        self,
+        images: Batch[WorkflowImageData],
+        inference_images: List[dict],
+        request: InstanceSegmentationInferenceRequest,
+        class_filter: Optional[List[str]],
+        model_id: str,
+    ) -> Optional[BlockResult]:
+        model = self._model_manager[model_id]
+        if not isinstance(model, InferenceModelsInstanceSegmentationAdapter):
+            return None
+        inference_kwargs = request.model_dump()
+        inference_kwargs.pop("image", None)
+        is_rfdetr_trt = (
+            model._model.__class__.__name__ == "RFDetrForInstanceSegmentationTRT"
+        )
+        if is_rfdetr_trt and inference_kwargs.get("response_mask_format") != "rle":
+            inference_kwargs["defer_cuda_stream_sync"] = True
+        pre_processed_images, preprocessing_metadata = model.preprocess(
+            image=inference_images,
+            **inference_kwargs,
+        )
+        predictions = model.predict(pre_processed_images, **inference_kwargs)
+        post_process_kwargs = model.map_inference_kwargs(inference_kwargs)
+        if is_rfdetr_trt:
+            post_process_kwargs["defer_fused_postprocess_count"] = True
+        detections = model._model.post_process(
+            predictions,
+            preprocessing_metadata,
+            **post_process_kwargs,
+        )
+        predictions = self._convert_inference_models_detections_to_sv_detections(
+            model=model,
+            detections=detections,
+            preprocessing_metadata=preprocessing_metadata,
+            inference_id=request.id,
+        )
+        predictions = attach_prediction_type_info_to_sv_detections_batch(
+            predictions=predictions,
+            prediction_type="instance-segmentation",
+        )
+        predictions = filter_out_unwanted_classes_from_sv_detections_batch(
+            predictions=predictions,
+            classes_to_accept=class_filter,
+        )
+        predictions = attach_parents_coordinates_to_batch_of_sv_detections(
+            images=images,
+            predictions=predictions,
+        )
+        return [
+            {
+                "inference_id": request.id,
+                "predictions": prediction,
+                "model_id": model_id,
+            }
+            for prediction in predictions
+        ]
+
+    def _try_run_rfdetr_trt_fast_path(
+        self,
+        images: Batch[WorkflowImageData],
+        class_filter: Optional[List[str]],
+        model_id: str,
+        confidence: Union[None, float, Literal["best", "default"]],
+        class_agnostic_nms: Optional[bool],
+        iou_threshold: Optional[float],
+        max_detections: Optional[int],
+        max_candidates: Optional[int],
+        mask_decode_mode: Literal["accurate", "tradeoff", "fast"],
+        tradeoff_factor: Optional[float],
+        disable_active_learning: Optional[bool],
+        active_learning_target_dataset: Optional[str],
+    ) -> Optional[BlockResult]:
+        model = self._model_manager[model_id]
+        if not isinstance(model, InferenceModelsInstanceSegmentationAdapter):
+            return None
+        if model._model.__class__.__name__ != "RFDetrForInstanceSegmentationTRT":
+            return None
+        pre_processing_overrides = PreProcessingOverrides(
+            disable_contrast_enhancement=False,
+            disable_grayscale=False,
+            disable_static_crop=False,
+        )
+        pre_processed_images, preprocessing_metadata = model._model.pre_process(
+            images=[image.numpy_image for image in images],
+            input_color_format="bgr",
+            pre_processing_overrides=pre_processing_overrides,
+            defer_cuda_stream_sync=True,
+        )
+        predictions = model._model.forward(
+            pre_processed_images,
+            defer_cuda_stream_sync=True,
+        )
+        detections = model._model.post_process(
+            predictions,
+            preprocessing_metadata,
+            confidence=confidence,
+            mask_format="dense",
+            defer_cuda_stream_sync=True,
+            defer_fused_postprocess_count=True,
+            deferred_mask_resize_detection_limit=7,
+        )
+        inference_id = str(uuid.uuid4())
+        predictions = self._convert_inference_models_detections_to_sv_detections(
+            model=model,
+            detections=detections,
+            preprocessing_metadata=preprocessing_metadata,
+            inference_id=inference_id,
+        )
+        predictions = attach_prediction_type_info_to_sv_detections_batch(
+            predictions=predictions,
+            prediction_type="instance-segmentation",
+        )
+        predictions = filter_out_unwanted_classes_from_sv_detections_batch(
+            predictions=predictions,
+            classes_to_accept=class_filter,
+        )
+        predictions = attach_parents_coordinates_to_batch_of_sv_detections(
+            images=images,
+            predictions=predictions,
+        )
+        return [
+            {
+                "inference_id": inference_id,
+                "predictions": prediction,
+                "model_id": model_id,
+            }
+            for prediction in predictions
+        ]
+
+    @staticmethod
+    def _convert_inference_models_detections_to_sv_detections(
+        model: InferenceModelsInstanceSegmentationAdapter,
+        detections,
+        preprocessing_metadata,
+        inference_id: Optional[str],
+    ) -> List[sv.Detections]:
+        result = []
+        for detections_element, metadata in zip(detections, preprocessing_metadata):
+            valid_count = None
+            if detections_element.image_metadata is not None:
+                valid_count = detections_element.image_metadata.get("valid_count")
+            if valid_count is not None:
+                fixed_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_limited_cuda_detection_tensors_to_pinned_numpy(
+                    detections_element=detections_element,
+                )
+                if fixed_arrays is not None:
+                    xyxy, confidence, class_id, masks = fixed_arrays
+                else:
+                    valid_count = int(valid_count.detach().cpu().item())
+                    xyxy_tensor = detections_element.xyxy[:valid_count]
+                    confidence_tensor = detections_element.confidence[:valid_count]
+                    class_id_tensor = detections_element.class_id[:valid_count]
+                    recovered_masks = RoboflowInstanceSegmentationModelBlockV3._recover_limited_rfdetr_masks(
+                        detections_element=detections_element,
+                        valid_count=valid_count,
+                    )
+                    if recovered_masks is None:
+                        recovered_masks = detections_element.mask
+                    mask_tensor = recovered_masks[:valid_count]
+                    pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
+                        xyxy_tensor=xyxy_tensor,
+                        confidence_tensor=confidence_tensor,
+                        class_id_tensor=class_id_tensor,
+                        mask_tensor=mask_tensor,
+                        valid_count=valid_count,
+                    )
+                    if pinned_arrays is not None:
+                        xyxy, confidence, class_id, masks = pinned_arrays
+                    else:
+                        xyxy = xyxy_tensor.detach().cpu().numpy()
+                        confidence = confidence_tensor.detach().cpu().numpy()
+                        class_id = class_id_tensor.detach().cpu().numpy()
+                        masks = mask_tensor.detach().cpu().numpy()
+            else:
+                xyxy_tensor = detections_element.xyxy
+                confidence_tensor = detections_element.confidence
+                class_id_tensor = detections_element.class_id
+                mask_tensor = detections_element.mask
+                pinned_arrays = RoboflowInstanceSegmentationModelBlockV3._try_copy_cuda_detection_tensors_to_pinned_numpy(
+                    xyxy_tensor=xyxy_tensor,
+                    confidence_tensor=confidence_tensor,
+                    class_id_tensor=class_id_tensor,
+                    mask_tensor=mask_tensor,
+                    valid_count=valid_count,
+                )
+                if pinned_arrays is not None:
+                    xyxy, confidence, class_id, masks = pinned_arrays
+                else:
+                    xyxy = xyxy_tensor.detach().cpu().numpy()
+                    confidence = confidence_tensor.detach().cpu().numpy()
+                    class_id = class_id_tensor.detach().cpu().numpy()
+                    masks = mask_tensor.detach().cpu().numpy()
+            class_names = np.array(
+                [
+                    (
+                        model.class_names[int(class_id_element)]
+                        if 0 <= int(class_id_element) < len(model.class_names)
+                        else str(int(class_id_element))
+                    )
+                    for class_id_element in class_id
+                ]
+            )
+            sv_detections = sv.Detections(
+                xyxy=xyxy,
+                mask=masks,
+                confidence=confidence,
+                class_id=class_id,
+                data={CLASS_NAME_DATA_FIELD: class_names},
+            )
+            sv_detections[DETECTION_ID_KEY] = np.array(
+                [str(uuid.uuid4()) for _ in range(len(sv_detections))]
+            )
+            sv_detections[PARENT_ID_KEY] = np.array([""] * len(sv_detections))
+            sv_detections[IMAGE_DIMENSIONS_KEY] = np.array(
+                [[metadata.original_size.height, metadata.original_size.width]]
+                * len(sv_detections)
+            )
+            if inference_id is not None:
+                sv_detections[INFERENCE_ID_KEY] = np.array(
+                    [inference_id] * len(sv_detections)
+                )
+            result.append(sv_detections)
+        return result
+
+    @staticmethod
+    def _recover_limited_rfdetr_masks(
+        detections_element,
+        valid_count: int,
+    ) -> Optional[torch.Tensor]:
+        image_metadata = detections_element.image_metadata
+        if image_metadata is None:
+            return None
+        mask_resize_detection_limit = image_metadata.get("mask_resize_detection_limit")
+        if mask_resize_detection_limit is None or valid_count <= int(
+            mask_resize_detection_limit
+        ):
+            return None
+        source_masks = image_metadata.get("source_masks")
+        query_indices = image_metadata.get("query_indices")
+        count = image_metadata.get("valid_count")
+        output_height = image_metadata.get("output_height")
+        output_width = image_metadata.get("output_width")
+        if (
+            source_masks is None
+            or query_indices is None
+            or count is None
+            or output_height is None
+            or output_width is None
+        ):
+            return None
+        from inference_models.models.rfdetr.fused_postprocess import (
+            fused_resize_selected_masks,
+        )
+
+        return fused_resize_selected_masks(
+            image_masks=source_masks,
+            query_indices=query_indices,
+            count=count,
+            output_height=output_height,
+            output_width=output_width,
+        )
+
+    @staticmethod
+    def _try_copy_cuda_detection_tensors_to_pinned_numpy(
+        xyxy_tensor: torch.Tensor,
+        confidence_tensor: torch.Tensor,
+        class_id_tensor: torch.Tensor,
+        mask_tensor: torch.Tensor,
+        valid_count: Optional[int],
+    ) -> Optional[tuple]:
+        if valid_count is None or not xyxy_tensor.is_cuda or not mask_tensor.is_cuda:
+            return None
+        if (
+            not confidence_tensor.is_cuda
+            or not class_id_tensor.is_cuda
+            or mask_tensor.ndim != 3
+        ):
+            return None
+        try:
+            buffers = _get_rfdetr_conversion_buffers(
+                count=max(valid_count, 1),
+                mask_shape=tuple(mask_tensor.shape[1:]),
+                xyxy_dtype=xyxy_tensor.dtype,
+                confidence_dtype=confidence_tensor.dtype,
+                class_id_dtype=class_id_tensor.dtype,
+                mask_dtype=mask_tensor.dtype,
+            )
+        except RuntimeError:
+            return None
+        xyxy_buffer, confidence_buffer, class_id_buffer, mask_buffer, _ = buffers
+        if valid_count:
+            xyxy_buffer[:valid_count].copy_(xyxy_tensor, non_blocking=True)
+            confidence_buffer[:valid_count].copy_(confidence_tensor, non_blocking=True)
+            class_id_buffer[:valid_count].copy_(class_id_tensor, non_blocking=True)
+            mask_buffer[:valid_count].copy_(mask_tensor, non_blocking=True)
+            torch.cuda.current_stream(xyxy_tensor.device).synchronize()
+        return (
+            xyxy_buffer[:valid_count].numpy().copy(),
+            confidence_buffer[:valid_count].numpy().copy(),
+            class_id_buffer[:valid_count].numpy().copy(),
+            mask_buffer[:valid_count].numpy().copy(),
+        )
+
+    @staticmethod
+    def _try_copy_limited_cuda_detection_tensors_to_pinned_numpy(
+        detections_element,
+    ) -> Optional[tuple]:
+        image_metadata = detections_element.image_metadata
+        if image_metadata is None:
+            return None
+        count_tensor = image_metadata.get("valid_count")
+        mask_resize_detection_limit = image_metadata.get("mask_resize_detection_limit")
+        if count_tensor is None or mask_resize_detection_limit is None:
+            return None
+        copy_count = int(mask_resize_detection_limit)
+        xyxy_tensor = detections_element.xyxy
+        confidence_tensor = detections_element.confidence
+        class_id_tensor = detections_element.class_id
+        mask_tensor = detections_element.mask
+        if (
+            copy_count <= 0
+            or not xyxy_tensor.is_cuda
+            or not confidence_tensor.is_cuda
+            or not class_id_tensor.is_cuda
+            or not mask_tensor.is_cuda
+            or mask_tensor.ndim != 3
+            or mask_tensor.shape[0] < copy_count
+        ):
+            return None
+        try:
+            buffers = _get_rfdetr_conversion_buffers(
+                count=copy_count,
+                mask_shape=tuple(mask_tensor.shape[1:]),
+                xyxy_dtype=xyxy_tensor.dtype,
+                confidence_dtype=confidence_tensor.dtype,
+                class_id_dtype=class_id_tensor.dtype,
+                mask_dtype=mask_tensor.dtype,
+            )
+        except RuntimeError:
+            return None
+        (
+            xyxy_buffer,
+            confidence_buffer,
+            class_id_buffer,
+            mask_buffer,
+            count_buffer,
+        ) = buffers
+        count_buffer.copy_(count_tensor, non_blocking=True)
+        xyxy_buffer[:copy_count].copy_(xyxy_tensor[:copy_count], non_blocking=True)
+        confidence_buffer[:copy_count].copy_(
+            confidence_tensor[:copy_count], non_blocking=True
+        )
+        class_id_buffer[:copy_count].copy_(
+            class_id_tensor[:copy_count], non_blocking=True
+        )
+        mask_buffer[:copy_count].copy_(mask_tensor[:copy_count], non_blocking=True)
+        torch.cuda.current_stream(xyxy_tensor.device).synchronize()
+        valid_count = int(count_buffer.item())
+        if valid_count > copy_count:
+            return None
+        return (
+            xyxy_buffer[:valid_count].numpy().copy(),
+            confidence_buffer[:valid_count].numpy().copy(),
+            class_id_buffer[:valid_count].numpy().copy(),
+            mask_buffer[:valid_count].numpy().copy(),
         )
 
     def run_remotely(

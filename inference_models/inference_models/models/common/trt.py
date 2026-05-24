@@ -435,6 +435,8 @@ def infer_from_trt_engine(
     outputs: List[str],
     stream: Optional[torch.cuda.Stream] = None,
     trt_cuda_graph_cache: Optional[TRTCudaGraphCache] = None,
+    synchronize: bool = True,
+    cuda_graph_replay_warmup_count: int = 0,
 ) -> List[torch.Tensor]:
     """Run inference using a TensorRT engine, optionally with CUDA graph acceleration.
 
@@ -570,8 +572,10 @@ def infer_from_trt_engine(
             input_name=input_name,
             outputs=outputs,
             trt_cuda_graph_cache=trt_cuda_graph_cache,
+            cuda_graph_replay_warmup_count=cuda_graph_replay_warmup_count,
         )
-    stream.synchronize()
+    if synchronize:
+        stream.synchronize()
     return results
 
 
@@ -584,6 +588,7 @@ def _infer_from_trt_engine(
     input_name: str,
     outputs: List[str],
     trt_cuda_graph_cache: Optional[TRTCudaGraphCache] = None,
+    cuda_graph_replay_warmup_count: int = 0,
 ) -> List[torch.Tensor]:
     if trt_config.static_batch_size is not None:
         min_batch_size = trt_config.static_batch_size
@@ -601,6 +606,7 @@ def _infer_from_trt_engine(
         min_batch_size=min_batch_size,
         max_batch_size=max_batch_size,
         trt_cuda_graph_cache=trt_cuda_graph_cache,
+        cuda_graph_replay_warmup_count=cuda_graph_replay_warmup_count,
     )
 
 
@@ -614,6 +620,7 @@ def _infer_from_trt_engine_with_batch_size_boundaries(
     min_batch_size: int,
     max_batch_size: int,
     trt_cuda_graph_cache: Optional[TRTCudaGraphCache] = None,
+    cuda_graph_replay_warmup_count: int = 0,
 ) -> List[torch.Tensor]:
     if pre_processed_images.shape[0] <= max_batch_size:
         reminder = min_batch_size - pre_processed_images.shape[0]
@@ -637,6 +644,7 @@ def _infer_from_trt_engine_with_batch_size_boundaries(
             input_name=input_name,
             outputs=outputs,
             trt_cuda_graph_cache=trt_cuda_graph_cache,
+            cuda_graph_replay_warmup_count=cuda_graph_replay_warmup_count,
         )
         if reminder > 0:
             results = [r[:-reminder] for r in results]
@@ -667,6 +675,7 @@ def _infer_from_trt_engine_with_batch_size_boundaries(
             input_name=input_name,
             outputs=outputs,
             trt_cuda_graph_cache=trt_cuda_graph_cache,
+            cuda_graph_replay_warmup_count=cuda_graph_replay_warmup_count,
         )
         if reminder > 0:
             results = [r[:-reminder] for r in results]
@@ -683,6 +692,7 @@ def _execute_trt_engine(
     input_name: str,
     outputs: List[str],
     trt_cuda_graph_cache: Optional[TRTCudaGraphCache] = None,
+    cuda_graph_replay_warmup_count: int = 0,
 ) -> List[torch.Tensor]:
     if trt_cuda_graph_cache is not None:
         input_shape = tuple(pre_processed_images.shape)
@@ -698,6 +708,7 @@ def _execute_trt_engine(
                 device=device,
                 input_name=input_name,
                 outputs=outputs,
+                cuda_graph_replay_warmup_count=cuda_graph_replay_warmup_count,
             )
             trt_cuda_graph_cache[cache_key] = trt_cuda_graph
             return results
@@ -705,11 +716,13 @@ def _execute_trt_engine(
         else:
             trt_cuda_graph_state = trt_cuda_graph_cache[cache_key]
             stream = trt_cuda_graph_state.cuda_stream
+            caller_stream = torch.cuda.current_stream(device)
+            stream.wait_stream(caller_stream)
             with torch.cuda.stream(stream):
                 trt_cuda_graph_state.input_buffer.copy_(pre_processed_images)
                 trt_cuda_graph_state.cuda_graph.replay()
                 results = [buf.clone() for buf in trt_cuda_graph_state.output_buffers]
-            stream.synchronize()
+            caller_stream.wait_stream(stream)
             return results
 
     else:
@@ -752,6 +765,7 @@ def _capture_cuda_graph(
     device: torch.device,
     input_name: str,
     outputs: List[str],
+    cuda_graph_replay_warmup_count: int = 0,
 ) -> Tuple[List[torch.Tensor], TRTCudaGraphState]:
     # Each CUDA graph needs its own execution context. Sharing a single context
     # across graphs for different input shapes causes TRT to reallocate internal
@@ -813,6 +827,8 @@ def _capture_cuda_graph(
     # in order to avoid drift of results - it's better to replay to get the results
     with torch.cuda.stream(stream):
         cuda_graph.replay()
+        for _ in range(max(int(cuda_graph_replay_warmup_count), 0)):
+            cuda_graph.replay()
         results = [buf.clone() for buf in output_buffers]
     stream.synchronize()
 
