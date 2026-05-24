@@ -2901,3 +2901,11 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Correctness: Compared CUDA graph execution against standard non-graph TensorRT execution over all `538` frames after postprocess: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
 - Result on requested command: depth `2` measured `244.43`, `243.11`, `243.22`, `243.18`, and `243.26` FPS, averaging about `243.44` FPS. This is within the accepted path's normal noise band and does not improve the current checkpoint.
 - Learning: `record_stream` bookkeeping is not a measurable limiter at the current graph-bound point. Keeping it preserves the conservative cross-stream tensor lifetime pattern used by the model without sacrificing FPS, so the experiment was reverted.
+
+### Rejected: Avoid Zero-Filling Fused Selector Query Indices
+
+- Hypothesis: `fused_select_topk_boxes(...)` initializes the `query_indices` output with `torch.zeros(...)`, even though consumed entries are written by `_select_topk_boxes_kernel` before use and all consumers are bounded by the selected-count tensor. Switching this allocation to `torch.empty(...)` might remove a tiny CUDA memset or allocator initialization from the graph-to-graph handoff.
+- Change tested: Temporary code only; changed the CUDA `query_indices` allocation in `fused_select_topk_boxes(...)` from `torch.zeros(...)` to `torch.empty(...)`. Pipeline depth remained fixed at `2`; depth `3` was not tested.
+- Correctness: Compared CUDA graph execution against standard non-graph TensorRT execution over all `538` frames after postprocess: `bad_counts=0`, `bad_classes=0`, `bad_masks=0`, `bad_boxes_gt5=0`, `max_box_delta=0.0`, `max_conf_delta=0.0`.
+- Result on requested command: depth `2` measured `244.03`, `244.51`, `242.45`, `242.99`, and `243.97` FPS, averaging about `243.59` FPS. This is still within the accepted path's normal noise band and does not clearly improve the current checkpoint.
+- Learning: The query-index zero fill is not a measurable limiter at the current graph-bound point. The allocation was restored to the existing zeroed form because the change has no stable FPS benefit and the explicit initialization is more conservative for future consumers.
