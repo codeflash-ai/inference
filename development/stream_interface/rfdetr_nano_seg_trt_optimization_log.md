@@ -2778,3 +2778,13 @@ Hardware observed: Tesla T4, CUDA driver 580.159.04, PyTorch 2.6.0+cu124.
 - Throughput: Duration was about `34.72-35.36 us` under NCU replay. Compute throughput was about `40.68-41.29%`, memory and DRAM throughput about `61.16-61.63%`, L2 throughput about `23.68-24.11%`, and L1/TEX throughput about `55.71-56.30%`.
 - Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.22s fps=242.79` after the profile.
 - Learning: This Myelin cast tail is broad and well occupied, with significant DRAM traffic. It is not a local replacement candidate; avoiding it would require changing the TensorRT graph/export layout so the cast is fused away or no longer needed.
+
+### Profile: TensorRT Smaller MHA Nsight Compute Snapshot
+
+- Hypothesis: The current graph-node trace shows a second MHA kernel, `_gemm_mha_v2_0x5b02928230f6ad2b25b3a387bdc36a22`, at about `24 us/replay` aggregated across four graph nodes. Profiling it can check whether the smaller MHA family shares the same partial-wave TensorRT tactic geometry as the dominant MHA kernel.
+- Profile: `/tmp/rfdetr_trt_mha_small_graphnode_basic_ncu_20260524_001635.ncu-rep`, details text `/tmp/rfdetr_trt_mha_small_graphnode_basic_ncu_20260524_001635_details.txt`, raw CSV `/tmp/rfdetr_trt_mha_small_graphnode_basic_ncu_20260524_001635_raw.csv`. The NCU command used graph profiling mode `node`, matched the exact MHA kernel name, skipped `100` matching launches, collected `3` profiled launches with the `basic` set, and kept pipeline depth fixed at `2`; depth `3` was not tested.
+- Result under NCU overhead: `frames=538 elapsed=5.16s fps=104.27`, profiling overhead only and not comparable to normal benchmark FPS.
+- Findings: The sampled launches use grid size `32`, block size `128`, `96` registers/thread, `18.43 KiB` dynamic shared memory per block, no static shared memory, and only `0.27` waves/SM. Theoretical occupancy is `37.50%`, but achieved occupancy is only about `13.38-13.74%`, with active warps/SM about `4.28-4.40`.
+- Throughput: Duration was about `10.91-11.14 us` under NCU replay. Compute throughput was about `11.07-11.35%`, memory throughput about `11.97-12.26%`, DRAM throughput about `6.28-6.42%`, L2 throughput about `5.65-5.77%`, and L1/TEX throughput about `23.93-24.52%`.
+- Non-profiled sanity check: The accepted depth-2 command measured `frames=538 elapsed=2.21s fps=243.90` after the profile.
+- Learning: The smaller MHA node has the same small-grid/register/shared-memory-limited shape as the dominant MHA and GEMM families. It is too small to matter alone, but it strengthens the conclusion that the remaining graph-body bottleneck is TensorRT tactic geometry across many nodes rather than a single removable wrapper or postprocess kernel.
