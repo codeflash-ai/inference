@@ -316,10 +316,21 @@ def create_array(indices: np.ndarray) -> Optional[list]:
     if indices.size == 0:
         return None
     result = []
-    max_idx = indices[:, 0].max() + 1
+    # Use np.unique to avoid searching 'max' if indices[:,0] is not zero-based and for direct iteration
+    first_col = indices[:, 0]
+    unique_idxs = np.unique(first_col)
+    idx_map = {idx: [] for idx in unique_idxs}
+    # Efficiently group rows by their first column index without repeated slicing
+    for i, idx in enumerate(first_col):
+        idx_map[idx].append(i)
+    max_idx = unique_idxs.max() + 1
     for idx in range(max_idx):
-        idx_selector = indices[:, 0] == idx
-        indices_subset = indices[idx_selector][:, 1:]
+        if idx in idx_map:
+            idx_indices = idx_map[idx]
+            # Use array slicing instead of boolean indexing
+            indices_subset = indices[idx_indices][:, 1:]
+        else:
+            indices_subset = np.empty((0, indices.shape[1] - 1), dtype=indices.dtype)
         inner_array = create_array(indices_subset)
         if (
             inner_array is None
