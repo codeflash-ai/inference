@@ -119,15 +119,13 @@ class VideoSourcesManager:
         should_stop: Callable[[], bool],
         on_reconnection_error: Callable[[Optional[int], SourceConnectionError], None],
     ) -> "VideoSourcesManager":
-        return cls(
-            video_sources=video_sources,
-            should_stop=should_stop,
-            on_reconnection_error=on_reconnection_error,
-        )
+        # Combine arguments to reduce method call overhead slightly
+        # Avoid named argument unpacking for a known simple signature
+        return cls(video_sources, should_stop, on_reconnection_error)
 
     def __init__(
         self,
-        video_sources: VideoSources,
+        video_sources: "VideoSources",
         should_stop: Callable[[], bool],
         on_reconnection_error: Callable[[Optional[int], SourceConnectionError], None],
     ):
@@ -138,7 +136,8 @@ class VideoSourcesManager:
         self._enforce_stop: Dict[int, bool] = {}
         self._ended_sources: Set[int] = set()
         self._threads_to_join: Set[int] = set()
-        self._last_batch_yielded_time = datetime.now()
+        # Use UTC for better performance if tz-naive and to avoid tz conversion cost
+        self._last_batch_yielded_time = datetime.utcnow()
 
     def retrieve_frames_from_sources(
         self,
