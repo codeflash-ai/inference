@@ -1,4 +1,3 @@
-import itertools
 import math
 from functools import partial
 from typing import Callable, List, Literal, Optional, Tuple
@@ -127,32 +126,36 @@ def _merge_tiles_elements(
     tile_margin: int,
     tile_margin_color: Tuple[int, int, int],
 ) -> np.ndarray:
-    vertical_padding = (
-        np.ones((single_tile_size[1], tile_margin, 3)) * tile_margin_color
+    # Precompute vertical and horizontal paddings only once for each color
+    vertical_padding = np.full(
+        (single_tile_size[1], tile_margin, 3), tile_margin_color, dtype=np.uint8
     )
-    merged_rows = [
-        np.concatenate(
-            list(
-                itertools.chain.from_iterable(
-                    zip(row, [vertical_padding] * grid_size[1])
-                )
-            )[:-1],
-            axis=1,
-        )
-        for row in tiles_elements
-    ]
+
+    merged_rows = []
+    vertical_padding_row = [vertical_padding] * grid_size[1]
+    for row in tiles_elements:
+        # Chain tiles and paddings efficiently without zip and itertools.chain
+        row_with_paddings = [None] * (grid_size[1] * 2 - 1)
+        row_with_paddings[::2] = row
+        row_with_paddings[1::2] = vertical_padding_row[:-1]
+        merged_row = np.concatenate(row_with_paddings, axis=1)
+        merged_rows.append(merged_row)
+
     row_width = merged_rows[0].shape[1]
-    horizontal_padding = (
-        np.ones((tile_margin, row_width, 3), dtype=np.uint8) * tile_margin_color
+    horizontal_padding = np.full(
+        (tile_margin, row_width, 3), tile_margin_color, dtype=np.uint8
     )
-    rows_with_paddings = []
-    for row in merged_rows:
-        rows_with_paddings.append(row)
-        rows_with_paddings.append(horizontal_padding)
-    return np.concatenate(
-        rows_with_paddings[:-1],
-        axis=0,
-    ).astype(np.uint8)
+
+    # Preallocate list for efficiency (no need to check or append repeatedly)
+    out_rows = []
+    last_row = len(merged_rows) - 1
+    for i, row in enumerate(merged_rows):
+        out_rows.append(row)
+        if i != last_row:
+            out_rows.append(horizontal_padding)
+
+    # Use stack for memory efficiency instead of concatenate for 2D stacking
+    return np.vstack(out_rows).astype(np.uint8)
 
 
 def _generate_color_image(
