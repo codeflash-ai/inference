@@ -23,6 +23,8 @@ from inference.core.workflows.execution_engine.introspection.blocks_loader impor
     load_workflow_blocks,
 )
 
+_WORKFLOW_ID_RE = re.compile(r"^[\w\-]+$")
+
 logger = logging.getLogger(__name__)
 
 workflow_local_dir = Path(MODEL_CACHE_DIR) / "workflow" / "local"
@@ -343,7 +345,7 @@ async def delete_workflow(workflow_id: str):
     Delete a workflow's JSON file from disk.
     Protected by CSRF token check.
     """
-    if not re.match(r"^[\w\-]+$", workflow_id):
+    if not _WORKFLOW_ID_RE.match(workflow_id):
         return JSONResponse({"error": "invalid id"}, status_code=HTTP_400_BAD_REQUEST)
     if workflow_id in _RESERVED_WORKFLOW_IDS:
         return JSONResponse(
