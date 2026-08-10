@@ -53,7 +53,7 @@ def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
             m_uint8 = m_bool.view(np.uint8)
 
         # Quickly skip empty masks
-        if not np.any(m_uint8):
+        if not m_uint8.any():
             segments.append(np.zeros((0, 2), dtype=np.float32))
             continue
 
@@ -109,9 +109,14 @@ def mask2poly(mask: np.ndarray) -> np.ndarray:
     """
     contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     if contours:
-        contours = np.array(
-            contours[np.array([len(x) for x in contours]).argmax()]
-        ).reshape(-1, 2)
+        max_len = -1
+        max_contour = None
+        for contour in contours:
+            contour_len = len(contour)
+            if contour_len > max_len:
+                max_len = contour_len
+                max_contour = contour
+        contours = max_contour.reshape(-1, 2)
     else:
         contours = np.zeros((0, 2))
     return contours.astype("float32")
