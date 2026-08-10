@@ -253,11 +253,14 @@ class ExecutionCache:
     def is_step_output_declared(self, selector: Any) -> bool:
         if not is_step_output_selector(selector_or_value=selector):
             return False
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        # Only perform split operations once
+        s = selector if isinstance(selector, str) else str(selector)
+        split_result = s.split(".")
+        step_selector = ".".join(split_result[:2])
+        step_name = split_result[1]
         if not self.contains_step(step_name=step_name):
             return False
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = split_result[-1]
         return self._cache_content[step_name].is_property_defined(
             property_name=property_name
         )
@@ -384,7 +387,8 @@ class NonBatchStepCache:
         cache_content: Dict[str, Any],
     ):
         self._step_name = step_name
-        self._outputs = {o.name for o in outputs}
+        # Use set constructor directly (slightly more memory-efficient)
+        self._outputs = set(o.name for o in outputs)
         self._cache_content = cache_content
 
     def register_outputs(self, outputs: Dict[str, Any]):

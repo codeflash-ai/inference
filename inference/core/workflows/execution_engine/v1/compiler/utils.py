@@ -61,10 +61,15 @@ def is_step_selector(selector_or_value: Any) -> bool:
 def is_step_output_selector(selector_or_value: Any) -> bool:
     if not is_selector(selector_or_value=selector_or_value):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 3
-    )
+    s = selector_or_value
+    if not isinstance(
+        s, str
+    ):  # For safety, though is_selector only checks str(selector_or_value)
+        s = str(s)
+    if not s.startswith("$steps."):
+        return False
+    split_result = s.split(".")
+    return len(split_result) == 3
 
 
 def get_step_selector_from_its_output(step_output_selector: str) -> str:
