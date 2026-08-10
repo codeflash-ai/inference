@@ -95,6 +95,15 @@ def build_operations_chain(
 ) -> Callable[[T, Dict[str, Any]], V]:
     if not len(operations):
         return identity  # return identity function
+    
+    # Fast path for single operation to avoid partial overhead
+    if len(operations) == 1:
+        operation_function = build_operation(
+            operation_definition=operations[0],
+            execution_context=f"{execution_context}[0]",
+        )
+        return lambda value, global_parameters=None: operation_function(value, global_parameters=global_parameters)
+    
     operations_functions = []
     for operation_id, operation_definition in enumerate(operations):
         operation_context = f"{execution_context}[{operation_id}]"
