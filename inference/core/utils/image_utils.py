@@ -13,6 +13,9 @@ import pybase64
 import requests
 import tldextract
 from _io import _IOBase
+from line_profiler import profile as codeflash_line_profile
+
+codeflash_line_profile.enable(output_prefix="/tmp/codeflash_8p0z4d9w/baseline_lprof")
 from PIL import Image
 from requests import RequestException
 from tldextract.tldextract import ExtractResult
@@ -36,6 +39,10 @@ from inference.core.exceptions import (
 )
 from inference.core.utils.function import deprecated
 from inference.core.utils.requests import api_key_safe_raise_for_status
+
+_IMREAD_FLAGS_WITH_ORIENT = cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+
+_IMREAD_FLAGS_NO_ORIENT = cv2.IMREAD_COLOR
 
 BASE64_DATA_TYPE_PATTERN = re.compile(r"^data:image\/[a-z]+;base64,")
 
@@ -104,6 +111,7 @@ def load_image(
     return np_image, is_bgr
 
 
+@codeflash_line_profile
 def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     """Choose the appropriate OpenCV image decoding flags.
 
@@ -113,10 +121,10 @@ def choose_image_decoding_flags(disable_preproc_auto_orient: bool) -> int:
     Returns:
         int: OpenCV image decoding flags.
     """
-    cv_imread_flags = cv2.IMREAD_COLOR
+    # Use precomputed flags for faster selection
     if disable_preproc_auto_orient:
-        cv_imread_flags = cv_imread_flags | cv2.IMREAD_IGNORE_ORIENTATION
-    return cv_imread_flags
+        return _IMREAD_FLAGS_WITH_ORIENT
+    return _IMREAD_FLAGS_NO_ORIENT
 
 
 def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]]:
@@ -132,21 +140,27 @@ def extract_image_payload_and_type(value: Any) -> Tuple[Any, Optional[ImageType]
         Tuple[Any, Optional[ImageType]]: A tuple containing the extracted image data and the corresponding image type.
     """
     image_type = None
-    if issubclass(type(value), InferenceRequestImage):
+    t = type(value)
+    if t is InferenceRequestImage:
         image_type = value.type
         value = value.value
-    elif issubclass(type(value), dict):
+    elif t is dict:
         image_type = value.get("type")
         value = value.get("value")
-    allowed_payload_types = {e.value for e in ImageType}
+    # Precompute allowed_payload_types once for efficiency
+    # Assume ImageType is an enumeration.
+    # It is safe to use a static variable or function attribute for repeated usage.
+    # However, since this function doesn't show contextual repeated calls, we use a local variable for thread safety.
+    allowed_payload_types = ImageType._value2member_map_
     if image_type is None:
         return value, image_type
-    if image_type.lower() not in allowed_payload_types:
+    image_type_lower = image_type.lower()
+    if image_type_lower not in allowed_payload_types:
         raise InvalidImageTypeDeclared(
-            message=f"Declared image type: {image_type.lower()} which is not in allowed types: {allowed_payload_types}.",
+            message=f"Declared image type: {image_type_lower} which is not in allowed types: {set(allowed_payload_types.keys())}.",
             public_message="Image declaration contains not recognised image type.",
         )
-    return value, ImageType(image_type.lower())
+    return value, allowed_payload_types[image_type_lower]
 
 
 def load_image_with_known_type(
