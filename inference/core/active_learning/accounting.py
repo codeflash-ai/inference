@@ -66,12 +66,10 @@ def get_matching_labeling_batch(
         The matching labeling batch if found, None otherwise.
 
     """
-    matching_batch = None
     for labeling_batch in all_labeling_batches:
         if labeling_batch["name"] == batch_name:
-            matching_batch = labeling_batch
-            break
-    return matching_batch
+            return labeling_batch
+    return None
 
 
 def get_images_in_labeling_jobs_of_specific_batch(
@@ -89,8 +87,6 @@ def get_images_in_labeling_jobs_of_specific_batch(
 
     """
 
-    matching_jobs = []
-    for labeling_job in all_labeling_jobs:
-        if batch_id in labeling_job["sourceBatch"]:
-            matching_jobs.append(labeling_job)
-    return sum(job["numImages"] for job in matching_jobs)
+    return sum(
+        job["numImages"] for job in all_labeling_jobs if batch_id in job["sourceBatch"]
+    )
