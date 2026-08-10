@@ -27,8 +27,21 @@ class TelemetrySettings(BaseSettings):
 
     @model_validator(mode="after")
     def check_values(cls, inst: TelemetrySettings):
-        inst.flush_interval = min(max(inst.flush_interval, 10), 300)
-        inst.queue_size = min(max(inst.queue_size, 10), 10000)
+        # Use clamp logic with conditional expressions for faster bounds checking
+        fi = inst.flush_interval
+        qs = inst.queue_size
+
+        # Clamp values without calling min/max repeatedly
+        if fi < 10:
+            inst.flush_interval = 10
+        elif fi > 300:
+            inst.flush_interval = 300
+
+        if qs < 10:
+            inst.queue_size = 10
+        elif qs > 10000:
+            inst.queue_size = 10000
+
         return inst
 
 
