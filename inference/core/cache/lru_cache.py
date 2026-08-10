@@ -17,16 +17,15 @@ class LRUCache:
             self.cache.popitem(last=False)
 
     def get(self, key):
-        try:
-            value = self.cache.pop(key)
-            self.cache[key] = value
+        value = self.cache.get(key)
+        if value is not None:
+            # Move accessed key to end to maintain LRU order
+            self.cache.move_to_end(key)
             return value
-        except KeyError:
-            return None
+        return None
 
     def set(self, key, value):
-        try:
-            self.cache.pop(key)
-        except KeyError:
-            self.enforce_size()
+        if self.cache.pop(key, None) is None:
+            while len(self.cache) >= self.capacity:
+                self.cache.popitem(last=False)
         self.cache[key] = value
