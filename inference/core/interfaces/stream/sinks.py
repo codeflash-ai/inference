@@ -562,7 +562,7 @@ class InMemoryBufferSink:
         self._buffer.append((predictions, video_frame))
 
     def empty(self) -> bool:
-        return len(self._buffer) == 0
+        return not self._buffer
 
     def consume_prediction(
         self,
