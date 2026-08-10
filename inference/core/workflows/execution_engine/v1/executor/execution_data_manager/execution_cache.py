@@ -66,7 +66,7 @@ class ExecutionCache:
         compatible_with_batches: bool,
         outputs: List[OutputDefinition],
     ) -> None:
-        if self.contains_step(step_name=step_name):
+        if step_name in self._cache_content:
             return None
         if compatible_with_batches:
             step_cache = BatchStepCache.init(
@@ -364,6 +364,19 @@ class BatchStepCache:
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
 
+    @classmethod
+    def _fast_init(
+        cls, step_name: str, outputs: List[OutputDefinition]
+    ) -> "BatchStepCache":
+        # Use built-in dict as values instead of an extra lambda every time (minor perf, avoids lambda call overhead).
+        # defaultdict(dict) is more efficient than defaultdict(lambda: defaultdict()),
+        # since only one-level defaulting is typically needed and it avoids repeated function calls.
+        # If you must nest, it's better to do explicit assignment later instead.
+        cache_content: DefaultDict[str, DefaultDict[DynamicBatchIndex, Any]] = (
+            defaultdict(dict)
+        )
+        return cls(step_name=step_name, outputs=outputs, cache_content=cache_content)
+
 
 class NonBatchStepCache:
 
@@ -412,3 +425,14 @@ class NonBatchStepCache:
 
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
+
+    @classmethod
+    def _fast_init(
+        cls, step_name: str, outputs: List[OutputDefinition]
+    ) -> "NonBatchStepCache":
+        # dict() is already optimal for this use case.
+        return cls(
+            step_name=step_name,
+            outputs=outputs,
+            cache_content={},
+        )
