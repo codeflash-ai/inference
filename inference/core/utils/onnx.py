@@ -6,6 +6,8 @@ import onnxruntime as ort
 if TYPE_CHECKING:
     import torch
 
+_TRANSLATION_TABLE = {ord("["): None, ord("]"): None, ord("'"): None, ord(" "): None}
+
 ImageMetaType = Union[np.ndarray, "torch.Tensor"]
 
 
@@ -23,7 +25,7 @@ def get_onnxruntime_execution_providers(value: str) -> List[str]:
     """
     if len(value) == 0:
         return []
-    value = value.replace("[", "").replace("]", "").replace("'", "").replace(" ", "")
+    value = value.translate(_TRANSLATION_TABLE)
     return value.split(",")
 
 
