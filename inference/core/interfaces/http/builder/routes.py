@@ -23,6 +23,12 @@ from inference.core.workflows.execution_engine.introspection.blocks_loader impor
     load_workflow_blocks,
 )
 
+_base_path = Path(__file__).parent
+
+_file_path = _base_path / "editor.html"
+
+_editor_html = ""
+
 logger = logging.getLogger(__name__)
 
 workflow_local_dir = Path(MODEL_CACHE_DIR) / "workflow" / "local"
@@ -98,10 +104,8 @@ async def builder_edit(workflow_id: str):
     Args:
         workflow_id (str): The ID of the workflow to be edited.
     """
-    base_path = Path(__file__).parent
-    file_path = base_path / "editor.html"
-    content = file_path.read_text(encoding="utf-8")
-    content = content.replace("{{BUILDER_ORIGIN}}", BUILDER_ORIGIN)
+    # Avoid repeated disk reads by using cached HTML template
+    content = _editor_html.replace("{{BUILDER_ORIGIN}}", BUILDER_ORIGIN)
     content = content.replace("{{CSRF}}", csrf)
 
     return HTMLResponse(content)
