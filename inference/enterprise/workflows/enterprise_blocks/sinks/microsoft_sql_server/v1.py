@@ -405,9 +405,9 @@ class MicrosoftSQLServerSinkBlockV1(WorkflowBlock):
                 raise ValueError("All items in data list must be dictionaries")
 
             if len(data) > 1:
-                first_keys = set(data[0].keys())
+                first_keys = data[0].keys()
                 for idx, item in enumerate(data[1:], 1):
-                    if set(item.keys()) != first_keys:
+                    if item.keys() != first_keys:
                         raise ValueError(
                             f"Dictionary at index {idx} has different keys than the first dictionary"
                         )
