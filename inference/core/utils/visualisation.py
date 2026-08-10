@@ -73,7 +73,12 @@ def draw_bbox(
     color: Tuple[int, ...],
     thickness: int,
 ) -> np.ndarray:
-    left_top, right_bottom = bbox_to_points(box=box)
+    # Inline bbox_to_points logic for efficiency and to avoid extra function calls
+    x, y, w, h = box.x, box.y, box.width, box.height
+    hw = w * 0.5
+    hh = h * 0.5
+    left_top = (int(x - hw), int(y - hh))
+    right_bottom = (int(x + hw), int(y + hh))
     return cv2.rectangle(
         image,
         left_top,
