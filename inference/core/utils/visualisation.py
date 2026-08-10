@@ -17,6 +17,7 @@ from inference.core.entities.responses.inference import (
     Point,
 )
 from inference.core.utils.image_utils import encode_image_to_jpeg_bytes, load_image_rgb
+from functools import lru_cache
 
 
 def draw_detection_predictions(
@@ -33,10 +34,9 @@ def draw_detection_predictions(
     colors: Dict[str, str],
 ) -> bytes:
     image = load_image_rgb(inference_request.image)
+    color_lookup = _build_color_lookup(colors)
     for box in inference_response.predictions:
-        color = tuple(
-            int(colors.get(box.class_name, "#4892EA")[i : i + 2], 16) for i in (1, 3, 5)
-        )
+        color = color_lookup.get(box.class_name, color_lookup["__default__"])
         image = draw_bbox(
             image=image,
             box=box,
@@ -63,7 +63,8 @@ def draw_detection_predictions(
                 box=box,
                 color=color,
             )
-    image_bgr = image[:, :, ::-1]
+    # Convert RGB to BGR by swapping channels efficiently
+    image_bgr = image[:, :, [2, 1, 0]]
     return encode_image_to_jpeg_bytes(image=image_bgr)
 
 
@@ -89,7 +90,10 @@ def draw_instance_segmentation_points(
     color: Tuple[int, ...],
     thickness: int,
 ) -> np.ndarray:
-    points_array = np.array([(int(p.x), int(p.y)) for p in points], np.int32)
+    points_array = np.empty((len(points), 2), dtype=np.int32)
+    for idx, p in enumerate(points):
+        points_array[idx, 0] = int(p.x)
+        points_array[idx, 1] = int(p.y)
     if len(points) > 2:
         image = cv2.polylines(
             image,
@@ -129,18 +133,8 @@ def draw_labels(
         text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
     )
     button_size = (text_width + 20, text_height + 20)
-    button_img = np.full(
-        (button_size[1], button_size[0], 3), color[::-1], dtype=np.uint8
-    )
-    cv2.putText(
-        button_img,
-        text,
-        (10, 10 + text_height),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (255, 255, 255),
-        1,
-    )
+    # Use cached button image per color and text
+    button_img = _cached_button_img(button_size, color, text)
     end_x = min(x1 + button_size[0], image.shape[1])
     end_y = min(y1 + button_size[1], image.shape[0])
     image[y1:end_y, x1:end_x] = button_img[: end_y - y1, : end_x - x1]
@@ -155,3 +149,46 @@ def bbox_to_points(
     y1 = int(box.y - box.height / 2)
     y2 = int(box.y + box.height / 2)
     return (x1, y1), (x2, y2)
+
+
+def _hex_to_bgr(hex_color: str) -> Tuple[int, int, int]:
+    # Convert hex like "#4892EA" to BGR tuple used in OpenCV
+    return tuple(int(hex_color[i : i + 2], 16) for i in (5, 3, 1))
+
+
+def _build_color_lookup(
+    colors: Dict[str, str], default: str = "#4892EA"
+) -> Dict[str, Tuple[int, int, int]]:
+    # Precompute hex-to-BGR for all relevant class names
+    lookup = {}
+    seen = set()
+    for cname, col in colors.items():
+        if cname not in seen:
+            lookup[cname] = _hex_to_bgr(col)
+            seen.add(cname)
+    # Default color for missing/incomplete classes
+    lookup["__default__"] = _hex_to_bgr(default)
+    return lookup
+
+
+@lru_cache(maxsize=256)
+def _cached_button_img(
+    button_size: Tuple[int, int], color: Tuple[int, int, int], text: str
+) -> np.ndarray:
+    # Cache rendered button images for a given size, color, and text combination
+    button_img = np.full(
+        (button_size[1], button_size[0], 3), color[::-1], dtype=np.uint8
+    )
+    (text_width, text_height), _ = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+    )
+    cv2.putText(
+        button_img,
+        text,
+        (10, 10 + text_height),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 255),
+        1,
+    )
+    return button_img
