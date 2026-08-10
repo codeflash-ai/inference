@@ -31,6 +31,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_CACHED_OUTPUTS = [OutputDefinition(name="image", kind=[IMAGE_KIND])]
+
 LONG_DESCRIPTION = """
 The block wraps 
 [Stability AI outpainting API](https://platform.stability.ai/docs/api-reference#tag/Edit/paths/~1v2beta~1stable-image~1edit~1outpaint/post) and 
@@ -187,9 +189,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="image", kind=[IMAGE_KIND]),
-        ]
+        return _CACHED_OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
