@@ -315,11 +315,15 @@ def create_outputs_for_generated_lineage_outputs(
 def create_array(indices: np.ndarray) -> Optional[list]:
     if indices.size == 0:
         return None
-    result = []
+    # Preallocate result list for speed, using [None] as placeholder
     max_idx = indices[:, 0].max() + 1
-    for idx in range(max_idx):
-        idx_selector = indices[:, 0] == idx
-        indices_subset = indices[idx_selector][:, 1:]
+    result = [None] * max_idx
+
+    # Use np.argsort to bucket indices efficiently
+    idxs = indices[:, 0]
+    if max_idx == 1:
+        # Only one bucket, no need for sorting/grouping
+        indices_subset = indices[:, 1:]
         inner_array = create_array(indices_subset)
         if (
             inner_array is None
@@ -330,7 +334,33 @@ def create_array(indices: np.ndarray) -> Optional[list]:
                 level=indices.shape[-1] - 1,
                 accumulator=[],
             )
-        result.append(inner_array)
+        result[0] = inner_array
+        return result
+    # Fast bucket grouping using numpy functions
+    splits = np.where(np.diff(idxs) != 0)[0] + 1
+    index_groups = np.split(indices, splits)
+    # index_groups[i] corresponds to idx i (assuming order is 0..max_idx-1), fill empty where needed
+    # Build a mapping from encountered idx to its group, avoid O(N^2)
+    # As index_groups are in idx order as per numpy's split, but missing groups will be absent
+    encountered_idxs = [group[0, 0] for group in index_groups]
+    group_dict = dict(zip(encountered_idxs, index_groups))
+    for idx in range(max_idx):
+        group = group_dict.get(idx)
+        if group is not None:
+            indices_subset = group[:, 1:]
+        else:
+            indices_subset = np.empty((0, indices.shape[1] - 1), dtype=indices.dtype)
+        inner_array = create_array(indices_subset)
+        if (
+            inner_array is None
+            and sum(indices_subset.shape) > 0
+            and indices_subset.shape[0] == 0
+        ):
+            inner_array = create_empty_index_array(
+                level=indices.shape[-1] - 1,
+                accumulator=[],
+            )
+        result[idx] = inner_array
     return result
 
 
