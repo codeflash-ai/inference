@@ -5,7 +5,6 @@ from typing import Callable, List, Literal, Optional, Tuple
 
 import numpy as np
 
-from inference.core.models.utils.batching import create_batches
 from inference.core.utils.preprocess import letterbox_image
 
 MAX_COLUMNS_FOR_SINGLE_ROW_GRID = 3
@@ -101,16 +100,17 @@ def _generate_tiles(
     tile_margin_color: Tuple[int, int, int],
 ) -> np.ndarray:
     rows, columns = grid_size
-    tiles_elements = list(create_batches(sequence=images, batch_size=columns))
-    while len(tiles_elements[-1]) < columns:
-        tiles_elements[-1].append(
-            _generate_color_image(shape=single_tile_size, color=tile_padding_color)
+    # Compute number of image slots required
+    total_slots = rows * columns
+    n_images = len(images)
+    # Pad missing images (if any) in a single step, reducing repetitive list operations
+    if n_images < total_slots:
+        pad_img = _generate_color_image(
+            shape=single_tile_size, color=tile_padding_color
         )
-    while len(tiles_elements) < rows:
-        tiles_elements.append(
-            [_generate_color_image(shape=single_tile_size, color=tile_padding_color)]
-            * columns
-        )
+        images = images + [pad_img] * (total_slots - n_images)
+    # Slice images into batches efficiently (no batching generator overhead)
+    tiles_elements = [images[i * columns : (i + 1) * columns] for i in range(rows)]
     return _merge_tiles_elements(
         tiles_elements=tiles_elements,
         grid_size=grid_size,
