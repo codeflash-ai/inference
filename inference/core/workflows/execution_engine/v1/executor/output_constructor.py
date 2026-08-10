@@ -316,10 +316,24 @@ def create_array(indices: np.ndarray) -> Optional[list]:
     if indices.size == 0:
         return None
     result = []
-    max_idx = indices[:, 0].max() + 1
-    for idx in range(max_idx):
-        idx_selector = indices[:, 0] == idx
-        indices_subset = indices[idx_selector][:, 1:]
+    col0 = indices[:, 0]
+    max_idx = col0.max() + 1
+    # Group row indices by their first column value
+    # Instead of searching each time, build mapping once
+    # This speeds up repeated lookups as in the main loop.
+    group_indices = [[] for _ in range(max_idx)]
+    for row_idx, val in enumerate(col0):
+        group_indices[val].append(row_idx)
+    ncols = indices.shape[1]
+    for idx, row_ids in enumerate(group_indices):
+        if row_ids:
+            indices_subset = (
+                indices[row_ids, 1:]
+                if ncols > 1
+                else np.empty((len(row_ids), 0), dtype=indices.dtype)
+            )
+        else:
+            indices_subset = np.empty((0, ncols - 1), dtype=indices.dtype)
         inner_array = create_array(indices_subset)
         if (
             inner_array is None
@@ -327,7 +341,7 @@ def create_array(indices: np.ndarray) -> Optional[list]:
             and indices_subset.shape[0] == 0
         ):
             inner_array = create_empty_index_array(
-                level=indices.shape[-1] - 1,
+                level=ncols - 1,
                 accumulator=[],
             )
         result.append(inner_array)
