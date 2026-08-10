@@ -317,14 +317,15 @@ class WebRTCVideoFrameProducer(VideoFrameProducer):
         return self._video_transform_track._track_active
 
     def discover_source_properties(self) -> SourceProperties:
-        while not self._video_transform_track.incoming_stream_fps:
-            time.sleep(0.1)
+        video_track = self._video_transform_track
+        while not getattr(video_track, "incoming_stream_fps", None):
+            time.sleep(0.01)
         return SourceProperties(
             width=self._w,
             height=self._h,
             total_frames=-1,
             is_file=False,
-            fps=self._video_transform_track.incoming_stream_fps,
+            fps=video_track.incoming_stream_fps,
             is_reconnectable=False,
         )
 
