@@ -152,8 +152,8 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        parts = selector.split(".")
+        step_name = parts[1]
         if not self.step_outputs_batches(step_name=step_name):
             raise ExecutionEngineRuntimeError(
                 public_message=f"Error in execution engine. Attempted to get output in batch mode which is "
@@ -164,7 +164,7 @@ class ExecutionCache:
                 f"the problem - including workflow definition you use.",
                 context="workflow_execution | step_output_registration",
             )
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = parts[2]
         return self._cache_content[step_name].get_outputs(
             property_name=property_name,
             indices=batch_elements_indices,
@@ -253,11 +253,11 @@ class ExecutionCache:
     def is_step_output_declared(self, selector: Any) -> bool:
         if not is_step_output_selector(selector_or_value=selector):
             return False
-        step_selector = get_step_selector_from_its_output(step_output_selector=selector)
-        step_name = get_last_chunk_of_selector(selector=step_selector)
+        parts = selector.split(".")
+        step_name = parts[1]
         if not self.contains_step(step_name=step_name):
             return False
-        property_name = get_last_chunk_of_selector(selector=selector)
+        property_name = parts[2]
         return self._cache_content[step_name].is_property_defined(
             property_name=property_name
         )
@@ -334,14 +334,14 @@ class BatchStepCache:
         indices: List[DynamicBatchIndex],
         mask: Optional[Set[DynamicBatchIndex]] = None,
     ) -> List[Any]:
-        return [
-            (
-                self._cache_content.get(property_name, {}).get(index)
-                if mask is None or index in mask
-                else None
-            )
-            for index in indices
-        ]
+        prop_cache = self._cache_content.get(property_name, {})
+        if mask is None:
+            return [prop_cache.get(index) for index in indices]
+        else:
+            # No side effects, preserves old behavior
+            return [
+                prop_cache.get(index) if index in mask else None for index in indices
+            ]
 
     def get_all_outputs(
         self,
