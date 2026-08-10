@@ -18,6 +18,12 @@ from inference.core.workflows.execution_engine.entities.types import (
 )
 from inference.core.workflows.prototypes.block import BlockResult
 
+_MPL_CAPITALIZE_PALETTES = {
+    "Greys_R", "Purples_R", "Blues_R", "Greens_R", "Oranges_R",
+    "Reds_R", "Wistia", "Pastel1", "Pastel2", "Paired", "Accent",
+    "Dark2", "Set1", "Set2", "Set3",
+}
+
 
 class ColorableVisualizationManifest(PredictionsVisualizationManifest, ABC):
     color_palette: Union[
@@ -116,31 +122,17 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
     @classmethod
     def getPalette(self, color_palette, palette_size, custom_colors):
         if color_palette == "CUSTOM":
+            str_to_color_ref = str_to_color  # Local reference for slight speedup
             return sv.ColorPalette(
-                colors=[str_to_color(color) for color in custom_colors]
+                colors=[str_to_color_ref(color) for color in custom_colors]
             )
         elif hasattr(sv.ColorPalette, color_palette):
             return getattr(sv.ColorPalette, color_palette)
         else:
+            # Perform once, before conditionals
             palette_name = color_palette.replace("Matplotlib ", "")
 
-            if palette_name in [
-                "Greys_R",
-                "Purples_R",
-                "Blues_R",
-                "Greens_R",
-                "Oranges_R",
-                "Reds_R",
-                "Wistia",
-                "Pastel1",
-                "Pastel2",
-                "Paired",
-                "Accent",
-                "Dark2",
-                "Set1",
-                "Set2",
-                "Set3",
-            ]:
+            if palette_name in _MPL_CAPITALIZE_PALETTES:
                 palette_name = palette_name.capitalize()
             else:
                 palette_name = palette_name.lower()
