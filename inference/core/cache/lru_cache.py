@@ -17,9 +17,11 @@ class LRUCache:
             self.cache.popitem(last=False)
 
     def get(self, key):
+        cache = self.cache  # Local variable lookup is faster than attribute lookup
+        # Fast path using move_to_end (added in Python 3.2) avoids removal and reinsertion
         try:
-            value = self.cache.pop(key)
-            self.cache[key] = value
+            value = cache[key]
+            cache.move_to_end(key)
             return value
         except KeyError:
             return None
