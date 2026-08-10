@@ -14,10 +14,9 @@ class BranchingManager:
 
     def __init__(self, masks: Dict[str, Union[Set[DynamicBatchIndex], bool]]):
         self._masks = masks
-        self._batch_compatibility = {
-            branch_name: not isinstance(mask, bool)
-            for branch_name, mask in masks.items()
-        }
+        self._batch_compatibility = {}
+        for branch_name, mask in masks.items():
+            self._batch_compatibility[branch_name] = not isinstance(mask, bool)
 
     def register_batch_oriented_mask(
         self,
