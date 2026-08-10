@@ -50,12 +50,10 @@ def is_input_selector(selector_or_value: Any) -> bool:
 
 
 def is_step_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    sel_str = str(selector_or_value)
+    if not sel_str.startswith("$"):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 2
-    )
+    return sel_str.startswith("$steps.") and sel_str.count(".") == 1
 
 
 def is_step_output_selector(selector_or_value: Any) -> bool:
