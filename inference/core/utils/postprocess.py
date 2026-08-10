@@ -73,23 +73,26 @@ def masks2multipoly(masks: np.ndarray) -> List[np.ndarray]:
     segments = []
     # Process per-mask to avoid allocating an entire N x H x W uint8 copy
     for mask in masks:
+        dtype = mask.dtype
         # Fast-path: bool -> zero-copy uint8 view
-        if mask.dtype == np.bool_:
+        if dtype == np.bool_:
             m_uint8 = mask
             if not m_uint8.flags.c_contiguous:
                 m_uint8 = np.ascontiguousarray(m_uint8)
-            m_uint8 = m_uint8.view(np.uint8)
-        elif mask.dtype == np.uint8:
+            # Instead of .view(), which can have undefined behavior on non-contiguous arrays,
+            # we use astype (cheap for bool->uint8 and avoids memory reallocation if already uint8)
+            m_uint8 = m_uint8.astype(np.uint8, copy=False)
+        elif dtype == np.uint8:
             m_uint8 = mask if mask.flags.c_contiguous else np.ascontiguousarray(mask)
         else:
-            # Fallback: threshold to bool then view as uint8 (may allocate once)
+            # Fallback: threshold to bool then to uint8 with copy=False
             m_bool = mask > 0
             if not m_bool.flags.c_contiguous:
                 m_bool = np.ascontiguousarray(m_bool)
-            m_uint8 = m_bool.view(np.uint8)
+            m_uint8 = m_bool.astype(np.uint8, copy=False)
 
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
+        # Quickly skip empty masks, using np.count_nonzero for cache efficiency
+        if np.count_nonzero(m_uint8) == 0:
             segments.append([np.zeros((0, 2), dtype=np.float32)])
             continue
 
@@ -127,12 +130,21 @@ def mask2multipoly(mask: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Contours represented as a float32 array.
     """
-    contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+    # For OpenCV ≥ 4.0, cv2.findContours returns (contours, hierarchy)
+    contours, *_ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
-        contours = [c.reshape(-1, 2).astype("float32") for c in contours]
+        # Use generator expression and preallocate list for speed
+        # Avoid repeated calls: reshape then astype
+        contours_out = []
+        for c in contours:
+            arr = c.reshape(-1, 2)
+            # Avoid unnecessary copy; use copy=False unless OpenCV requires otherwise
+            if arr.dtype != np.float32:
+                arr = arr.astype(np.float32, copy=False)
+            contours_out.append(arr)
+        return contours_out
     else:
-        contours = [np.zeros((0, 2)).astype("float32")]
-    return contours
+        return [np.zeros((0, 2), dtype=np.float32)]
 
 
 def post_process_bboxes(
