@@ -88,16 +88,36 @@ def retrieve_init_parameters_values(
     explicit_init_parameters: Dict[str, Union[Any, Callable[[None], Any]]],
     initializers: Dict[str, Union[Any, Callable[[None], Any]]],
 ) -> Dict[str, Any]:
-    return {
-        block_init_parameter: retrieve_init_parameter_values(
-            block_name=block_name,
-            block_init_parameter=block_init_parameter,
-            block_source=block_source,
-            explicit_init_parameters=explicit_init_parameters,
-            initializers=initializers,
+    results: Dict[str, Any] = {}
+    full_prefix = f"{block_source}."
+    for block_init_parameter in block_init_parameters:
+        full_parameter_name = f"{full_prefix}{block_init_parameter}"
+        if full_parameter_name in explicit_init_parameters:
+            results[block_init_parameter] = explicit_init_parameters[
+                full_parameter_name
+            ]
+            continue
+        if full_parameter_name in initializers:
+            results[block_init_parameter] = call_if_callable(
+                initializers[full_parameter_name]
+            )
+            continue
+        if block_init_parameter in explicit_init_parameters:
+            results[block_init_parameter] = explicit_init_parameters[
+                block_init_parameter
+            ]
+            continue
+        if block_init_parameter in initializers:
+            results[block_init_parameter] = call_if_callable(
+                initializers[block_init_parameter]
+            )
+            continue
+        raise BlockInitParameterNotProvidedError(
+            public_message=f"Could not resolve init parameter {block_init_parameter} to initialise "
+            f"step `{block_name}` from plugin: {block_source}.",
+            context="workflow_compilation | steps_initialisation",
         )
-        for block_init_parameter in block_init_parameters
-    }
+    return results
 
 
 def retrieve_init_parameter_values(
