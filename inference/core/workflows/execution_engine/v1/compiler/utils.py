@@ -24,7 +24,8 @@ def get_input_parameters_selectors(inputs: List[InputType]) -> Set[str]:
 
 
 def construct_input_selector(input_name: str) -> str:
-    return f"$inputs.{input_name}"
+    # Use string concatenation for minimal overhead in tight loops
+    return "$inputs." + input_name
 
 
 def get_steps_selectors(steps: List[WorkflowBlockManifest]) -> Set[str]:
