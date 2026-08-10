@@ -194,13 +194,12 @@ def _get_matching_deserializers(
     defined_input: InputType,
     kinds_deserializers: Dict[str, Callable[[str, Any], Any]],
 ) -> List[Tuple[str, Callable[[str, Any], Any]]]:
-    matching_deserializers = []
-    for kind in defined_input.kind:
-        kind_name = _get_kind_name(kind=kind)
-        if kind_name not in kinds_deserializers:
-            continue
-        matching_deserializers.append((kind_name, kinds_deserializers[kind_name]))
-    return matching_deserializers
+    return [
+        (kind_name, kinds_deserializers[kind_name])
+        for kind in defined_input.kind
+        if (kind_name := kind.name if isinstance(kind, Kind) else kind)
+        in kinds_deserializers
+    ]
 
 
 def _get_kind_name(kind: Union[Kind, str]) -> str:
