@@ -21,10 +21,11 @@ def get_onnxruntime_execution_providers(value: str) -> List[str]:
     Returns:
         List[str]: A list of strings representing each execution provider.
     """
-    if len(value) == 0:
+    if not value:
         return []
-    value = value.replace("[", "").replace("]", "").replace("'", "").replace(" ", "")
-    return value.split(",")
+    # Faster using str.translate for multiple single-char removals
+    table = str.maketrans("", "", "[]' ")
+    return value.translate(table).split(",")
 
 
 def run_session_via_iobinding(
