@@ -239,11 +239,13 @@ class UDPSink:
 
         Returns: Initialised object of `UDPSink` class.
         """
-        udp_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        # Minimize Python/socket API calls for performance; only set required/beneficial socket options.
+        # SO_RCVBUF is not relevant for UDP sending usage and setting it to 1 can harm performance.
+        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        # Precompute address tuple for sending, avoiding repeated computation elsewhere.
         return cls(
             ip_address=ip_address,
             port=port,
