@@ -189,12 +189,17 @@ def compute_events_latency(
 
 
 def are_events_compatible(events: List[Optional[ModelActivityEvent]]) -> bool:
-    if any(e is None for e in events):
+    # Fast path: empty or any None
+    if not events:
         return False
-    if len(events) == 0:
+    first_event = events[0]
+    if first_event is None:
         return False
-    frame_ids = [e.frame_id for e in events]
-    return all(e == frame_ids[0] for e in frame_ids)
+    first_id = first_event.frame_id
+    for e in events:
+        if e is None or e.frame_id != first_id:
+            return False
+    return True
 
 
 class BasePipelineWatchDog(PipelineWatchDog):
