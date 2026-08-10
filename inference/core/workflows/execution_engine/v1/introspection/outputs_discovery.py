@@ -107,9 +107,17 @@ def determine_workflow_outputs_kinds(
     for output in outputs_definitions:
         output_name = output["name"]
         selector = output["selector"]
-        step_name, selected_property = extract_step_name_and_selected_property(
-            selector=selector,
-        )
+
+        # Inline extract_step_name_and_selected_property for speed
+        if not is_step_output_selector(selector_or_value=selector):
+            raise WorkflowDefinitionError(
+                public_message="Workflow definition invalid - output does not contain step selector.",
+                context="describing_workflow_outputs",
+            )
+        parts = selector.split(".")
+        step_name = parts[1]
+        selected_property = parts[2]
+
         if step_name not in step_name_to_block_type:
             raise WorkflowDefinitionError(
                 public_message=f"Could not find step referred in outputs (`{step_name}`) within Workflow steps.",
