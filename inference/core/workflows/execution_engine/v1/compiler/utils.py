@@ -17,10 +17,7 @@ NodeTypeVar = TypeVar("NodeTypeVar", bound=ExecutionGraphNode)
 
 
 def get_input_parameters_selectors(inputs: List[InputType]) -> Set[str]:
-    return {
-        construct_input_selector(input_name=input_definition.name)
-        for input_definition in inputs
-    }
+    return {f"$inputs.{input_definition.name}" for input_definition in inputs}
 
 
 def construct_input_selector(input_name: str) -> str:
