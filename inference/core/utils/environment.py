@@ -15,9 +15,10 @@ def safe_env_to_type(
     Converts env variable to specified type, but only if variable is set - otherwise default is returned.
     If `type_constructor` is not given - value of type str will be returned.
     """
-    if variable_name not in os.environ:
+    try:
+        variable_value = os.environ[variable_name]
+    except KeyError:
         return default_value
-    variable_value = os.environ[variable_name]
     if type_constructor is None:
         return variable_value
     return type_constructor(variable_value)
