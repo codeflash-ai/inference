@@ -21,9 +21,10 @@ def get_onnxruntime_execution_providers(value: str) -> List[str]:
     Returns:
         List[str]: A list of strings representing each execution provider.
     """
-    if len(value) == 0:
+    if not value:
         return []
-    value = value.replace("[", "").replace("]", "").replace("'", "").replace(" ", "")
+    trans_table = str.maketrans({"[": None, "]": None, "'": None, " ": None})
+    value = value.translate(trans_table)
     return value.split(",")
 
 
