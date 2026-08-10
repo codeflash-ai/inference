@@ -40,6 +40,10 @@ from inference.core.workflows.prototypes.block import (
 )
 from inference_sdk import InferenceHTTPClient
 
+_PREDICTIONS_OUTPUT = [
+    OutputDefinition(name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]),
+]
+
 
 class BlockManifest(WorkflowBlockManifest):
     # SmolVLM needs an image and a text prompt.
@@ -91,11 +95,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name="predictions", kind=[OBJECT_DETECTION_PREDICTION_KIND]
-            ),
-        ]
+        return _PREDICTIONS_OUTPUT
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
