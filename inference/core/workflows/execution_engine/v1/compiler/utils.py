@@ -59,16 +59,26 @@ def is_step_selector(selector_or_value: Any) -> bool:
 
 
 def is_step_output_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
-        return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 3
-    )
+    """
+    Checks if the selector_or_value is a "step output selector" of the form "$steps.<step>.<output>",
+    without incurring unnecessary list allocations.
+    """
+    s = str(selector_or_value)
+    # Fast-path: must start with $steps. and have exactly 2 dots (i.e., 3 segments)
+    return s.startswith("$steps.") and s.count(".") == 2 and s[0] == "$"
 
 
 def get_step_selector_from_its_output(step_output_selector: str) -> str:
-    return ".".join(step_output_selector.split(".")[:2])
+    """
+    Extracts "$steps.<step>" from "$steps.<step>.<output>" efficiently.
+    """
+    first_dot = step_output_selector.find(".")
+    if first_dot == -1:
+        return step_output_selector
+    second_dot = step_output_selector.find(".", first_dot + 1)
+    if second_dot == -1:
+        return step_output_selector
+    return step_output_selector[:second_dot]
 
 
 def get_nodes_of_specific_category(
