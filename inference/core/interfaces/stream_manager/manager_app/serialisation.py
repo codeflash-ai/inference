@@ -16,11 +16,12 @@ from inference.core.interfaces.stream_manager.manager_app.entities import (
 
 
 def serialise_to_json(obj: Any) -> Any:
-    if isinstance(obj, (datetime, date)):
+    obj_type = type(obj)
+    if obj_type is datetime or obj_type is date:
         return obj.isoformat()
-    if issubclass(type(obj), Enum):
+    if issubclass(obj_type, Enum):
         return obj.value
-    raise TypeError(f"Type {type(obj)} not serializable")
+    raise TypeError(f"Type {obj_type} not serializable")
 
 
 def describe_error(
