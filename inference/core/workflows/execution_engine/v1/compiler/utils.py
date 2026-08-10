@@ -113,7 +113,10 @@ def is_output_node(execution_graph: DiGraph, node: str) -> bool:
 
 
 def is_selector(selector_or_value: Any) -> bool:
-    return str(selector_or_value).startswith("$")
+    # Fast-path for strings, avoids unnecessary str conversion
+    if isinstance(selector_or_value, str):
+        return selector_or_value.startswith("$")
+    return False
 
 
 def identify_lineage(lineage: List[str]) -> int:
