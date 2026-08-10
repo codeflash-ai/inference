@@ -261,8 +261,10 @@ class WebRTCPipelineWatchDog(BasePipelineWatchDog):
     def __init__(self, webrtc_peer_connection: RTCPeerConnection):
         super().__init__()
         self._webrtc_peer_connection = webrtc_peer_connection
+        self._debug_severity_value = UpdateSeverity.DEBUG.value
 
     def on_status_update(self, status_update: StatusUpdate) -> None:
-        if status_update.severity.value <= UpdateSeverity.DEBUG.value:
+        severity_value = status_update.severity.value
+        if severity_value <= self._debug_severity_value:
             return None
         self._stream_updates.append(status_update)
