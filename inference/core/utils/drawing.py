@@ -102,15 +102,24 @@ def _generate_tiles(
 ) -> np.ndarray:
     rows, columns = grid_size
     tiles_elements = list(create_batches(sequence=images, batch_size=columns))
+
+    # Cache padding image to avoid repeated generation
+    padding_image = None
+
     while len(tiles_elements[-1]) < columns:
-        tiles_elements[-1].append(
-            _generate_color_image(shape=single_tile_size, color=tile_padding_color)
-        )
+        if padding_image is None:
+            padding_image = _generate_color_image(
+                shape=single_tile_size, color=tile_padding_color
+            )
+        tiles_elements[-1].append(padding_image)
+
     while len(tiles_elements) < rows:
-        tiles_elements.append(
-            [_generate_color_image(shape=single_tile_size, color=tile_padding_color)]
-            * columns
-        )
+        if padding_image is None:
+            padding_image = _generate_color_image(
+                shape=single_tile_size, color=tile_padding_color
+            )
+        tiles_elements.append([padding_image] * columns)
+
     return _merge_tiles_elements(
         tiles_elements=tiles_elements,
         grid_size=grid_size,

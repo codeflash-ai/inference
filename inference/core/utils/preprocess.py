@@ -5,16 +5,13 @@ import cv2
 import numpy as np
 from skimage.exposure import rescale_intensity
 
-from inference.core.env import (
-    DISABLE_PREPROC_CONTRAST,
-    DISABLE_PREPROC_GRAYSCALE,
-    DISABLE_PREPROC_STATIC_CROP,
-    USE_PYTORCH_FOR_PREPROCESSING,
-)
+from inference.core.env import (DISABLE_PREPROC_CONTRAST,
+                                DISABLE_PREPROC_GRAYSCALE,
+                                DISABLE_PREPROC_STATIC_CROP,
+                                USE_PYTORCH_FOR_PREPROCESSING)
 
 if USE_PYTORCH_FOR_PREPROCESSING:
     import torch
-
 
 from inference.core.exceptions import PreProcessingError
 from inference.core.utils.onnx import ImageMetaType
