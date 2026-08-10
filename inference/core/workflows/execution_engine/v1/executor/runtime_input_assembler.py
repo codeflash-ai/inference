@@ -155,10 +155,14 @@ def assemble_single_element_of_batch_oriented_input(
 ) -> Any:
     if value is None:
         return None
-    matching_deserializers = _get_matching_deserializers(
-        defined_input=defined_input,
-        kinds_deserializers=kinds_deserializers,
-    )
+    # Inline _get_matching_deserializers for efficiency
+    matching_deserializers = []
+    for kind in defined_input.kind:
+        # Inline _get_kind_name - avoid function call overhead
+        kind_name = kind.name if hasattr(kind, "name") else kind
+        if kind_name not in kinds_deserializers:
+            continue
+        matching_deserializers.append((kind_name, kinds_deserializers[kind_name]))
     if not matching_deserializers:
         return value
     parameter_identifier = defined_input.name
