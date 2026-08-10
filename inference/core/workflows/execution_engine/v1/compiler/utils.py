@@ -68,7 +68,7 @@ def is_step_output_selector(selector_or_value: Any) -> bool:
 
 
 def get_step_selector_from_its_output(step_output_selector: str) -> str:
-    return ".".join(step_output_selector.split(".")[:2])
+    return ".".join(step_output_selector.split(".", 2)[:2])
 
 
 def get_nodes_of_specific_category(
