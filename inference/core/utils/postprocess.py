@@ -451,14 +451,15 @@ def post_process_polygons(
     Returns:
         list of list of tuple: A list of shifted and scaled polygons.
     """
-    (crop_shift_x, crop_shift_y), origin_shape = get_static_crop_dimensions(
+    # Compute static crop parameters once
+    (crop_shift_x, crop_shift_y), cropped_shape = get_static_crop_dimensions(
         origin_shape, preproc
     )
-    new_polys = []
+
     if resize_method == "Stretch to":
-        width_ratio = origin_shape[1] / infer_shape[1]
-        height_ratio = origin_shape[0] / infer_shape[0]
-        new_polys = scale_polygons(
+        width_ratio = cropped_shape[1] / infer_shape[1]
+        height_ratio = cropped_shape[0] / infer_shape[0]
+        scaled_polys = scale_polygons(
             polygons=polys,
             x_scale=width_ratio,
             y_scale=height_ratio,
@@ -468,16 +469,24 @@ def post_process_polygons(
         "Fit (white edges) in",
         "Fit (grey edges) in",
     }:
-        new_polys = undo_image_padding_for_predicted_polygons(
+        scaled_polys = undo_image_padding_for_predicted_polygons(
             polygons=polys,
             infer_shape=infer_shape,
-            origin_shape=origin_shape,
+            origin_shape=cropped_shape,
         )
-    shifted_polys = []
-    for poly in new_polys:
-        poly = [(p[0] + crop_shift_x, p[1] + crop_shift_y) for p in poly]
-        shifted_polys.append(poly)
-    return shifted_polys
+    else:
+        scaled_polys = []
+
+    # Combine shift efficiently
+    if crop_shift_x == 0 and crop_shift_y == 0:
+        # No shift required, just return scaled_polys directly for efficiency
+        return scaled_polys
+
+    # Shift polygons (faster using list comprehensions)
+    return [
+        [(x + crop_shift_x, y + crop_shift_y) for (x, y) in poly]
+        for poly in scaled_polys
+    ]
 
 
 def scale_polygons(
@@ -485,11 +494,8 @@ def scale_polygons(
     x_scale: float,
     y_scale: float,
 ) -> List[List[Tuple[float, float]]]:
-    result = []
-    for poly in polygons:
-        poly = [(p[0] * x_scale, p[1] * y_scale) for p in poly]
-        result.append(poly)
-    return result
+    # Using list comprehensions for speed.
+    return [[(x * x_scale, y * y_scale) for x, y in poly] for poly in polygons]
 
 
 def undo_image_padding_for_predicted_polygons(
@@ -497,16 +503,16 @@ def undo_image_padding_for_predicted_polygons(
     origin_shape: Tuple[int, int],
     infer_shape: Tuple[int, int],
 ) -> List[List[Tuple[float, float]]]:
+    # Precompute scale and padding.
     scale = min(infer_shape[0] / origin_shape[0], infer_shape[1] / origin_shape[1])
     inter_w = int(origin_shape[1] * scale)
     inter_h = int(origin_shape[0] * scale)
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    result = []
-    for poly in polygons:
-        poly = [((p[0] - pad_x) / scale, (p[1] - pad_y) / scale) for p in poly]
-        result.append(poly)
-    return result
+    return [
+        [((x - pad_x) / scale, (y - pad_y) / scale) for x, y in poly]
+        for poly in polygons
+    ]
 
 
 def get_static_crop_dimensions(
@@ -535,17 +541,17 @@ def get_static_crop_dimensions(
             )
         else:
             x_min, y_min, x_max, y_max = 0, 0, 1, 1
-        crop_shift_x, crop_shift_y = (
-            round(x_min * orig_shape[1]),
-            round(y_min * orig_shape[0]),
-        )
+
+        crop_shift_x = round(x_min * orig_shape[1])
+        crop_shift_y = round(y_min * orig_shape[0])
         cropped_percent_x = x_max - x_min
         cropped_percent_y = y_max - y_min
-        orig_shape = (
+
+        cropped_shape = (
             round(orig_shape[0] * cropped_percent_y),
             round(orig_shape[1] * cropped_percent_x),
         )
-        return (crop_shift_x, crop_shift_y), orig_shape
+        return (crop_shift_x, crop_shift_y), cropped_shape
     except KeyError as error:
         raise PostProcessingError(
             f"Could not find a proper configuration key {error} in post-processing."
