@@ -352,22 +352,34 @@ def generate_kinds_union(search_results: List[SelectorSearchResult]) -> Set[str]
     if not search_results:
         return set()
     reference_result = search_results[0]
+    ref_kinds = reference_result.compatible_kinds
+    wildcard_name = WILDCARD_KIND.name
+    # Precompute if reference has wildcard so we can avoid redundant checks in the loop
+    ref_has_wildcard = wildcard_name in ref_kinds
     kinds_union = set()
+    # Use local variables to make attribute access slightly faster in tight loop
     for result in search_results:
-        if not kinds_are_matching(
-            x=result.compatible_kinds, y=reference_result.compatible_kinds
+        result_kinds = result.compatible_kinds
+        # Fast-path wildcard membership, with short-circuit.
+        if (
+            ref_has_wildcard
+            or wildcard_name in result_kinds
+            or (not result_kinds.isdisjoint(ref_kinds))
         ):
+            kinds_union.update(result_kinds)
+        else:
             raise WorkflowDefinitionError(
-                public_message=f"Workflow definition invalid - input element: `{reference_result.selector}` "
-                f"is used in two steps: `{reference_result.step_name}` and `{result.step_name}`. "
-                f"Those steps expect incompatible type of data requiring `{reference_result.selector}` "
-                f"to be of different type at the same time. "
-                f"`{reference_result.step_name}.{reference_result.property_name}` requires: "
-                f"{reference_result.compatible_kinds} and `{result.step_name}.{result.property_name}` "
-                f"requires: `{result.compatible_kinds}`",
+                public_message=(
+                    f"Workflow definition invalid - input element: `{reference_result.selector}` "
+                    f"is used in two steps: `{reference_result.step_name}` and `{result.step_name}`. "
+                    f"Those steps expect incompatible type of data requiring `{reference_result.selector}` "
+                    f"to be of different type at the same time. "
+                    f"`{reference_result.step_name}.{reference_result.property_name}` requires: "
+                    f"{reference_result.compatible_kinds} and `{result.step_name}.{result.property_name}` "
+                    f"requires: `{result.compatible_kinds}`"
+                ),
                 context="describing_workflow_inputs",
             )
-        kinds_union.update(result.compatible_kinds)
     return kinds_union
 
 
