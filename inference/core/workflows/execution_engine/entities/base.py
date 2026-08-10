@@ -130,7 +130,7 @@ class Batch(Generic[B]):
                 "from size of the data."
             )
 
-        return cls(content=content, indices=indices)
+        return cls(content, indices)
 
     def __init__(self, content: List[B], indices: Optional[List[Tuple[int, ...]]]):
         self._content = content
