@@ -210,11 +210,15 @@ def stretch_bboxes(
 ) -> np.ndarray:
     scale_height = origin_shape[0] / infer_shape[0]
     scale_width = origin_shape[1] / infer_shape[1]
-    return scale_bboxes(
-        bboxes=predicted_bboxes,
-        scale_x=scale_width,
-        scale_y=scale_height,
+    # Avoid unnecessary function call overhead, directly scale with np.multiply and broadcasting
+    # The scales array matches [x_min, y_min, x_max, y_max]
+    scales = np.array(
+        [scale_width, scale_height, scale_width, scale_height],
+        dtype=predicted_bboxes.dtype,
     )
+    # Use out argument to multiply in-place for improved efficiency and cache locality
+    np.multiply(predicted_bboxes, scales, out=predicted_bboxes)
+    return predicted_bboxes
 
 
 def undo_image_padding_for_predicted_boxes(
