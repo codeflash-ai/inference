@@ -22,6 +22,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEF = OutputDefinition(name="stitched_image", kind=[IMAGE_KIND])
+
 OUTPUT_KEY: str = "stitched_image"
 LONG_DESCRIPTION = """
 Stitch two overlapping images together into a single panoramic image using SIFT (Scale Invariant Feature Transform) feature matching and homography-based image alignment, automatically detecting common features, calculating geometric transformations, and blending images to create seamless panoramic compositions from overlapping scenes.
@@ -123,9 +125,8 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name=OUTPUT_KEY, kind=[IMAGE_KIND]),
-        ]
+        # Always return a new list, but reuse the cached OutputDefinition instance to avoid repeated construction
+        return [_OUTPUT_DEF]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
