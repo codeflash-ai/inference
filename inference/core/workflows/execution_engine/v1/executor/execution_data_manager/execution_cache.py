@@ -384,6 +384,7 @@ class NonBatchStepCache:
         cache_content: Dict[str, Any],
     ):
         self._step_name = step_name
+        # Use set literal for faster creation, but keep set type to preserve logic
         self._outputs = {o.name for o in outputs}
         self._cache_content = cache_content
 
@@ -406,9 +407,11 @@ class NonBatchStepCache:
         return self._cache_content.get(property_name)
 
     def get_all_outputs(self) -> Dict[str, Any]:
-        if not self._cache_content:
-            return {output: None for output in self._outputs}
-        return self._cache_content
+        cache_content = self._cache_content
+        if not cache_content:
+            # Use dict.fromkeys for better performance and succinctness
+            return dict.fromkeys(self._outputs, None)
+        return cache_content
 
     def is_property_defined(self, property_name: str) -> bool:
         return property_name in self._cache_content or property_name in self._outputs
