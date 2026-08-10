@@ -46,8 +46,12 @@ def create_tiles(
 def _calculate_aggregated_images_shape(
     images: List[np.ndarray], aggregator: Callable[[List[int]], float]
 ) -> Tuple[int, int]:
-    height = round(aggregator([i.shape[0] for i in images]))
-    width = round(aggregator([i.shape[1] for i in images]))
+    # Use list comprehensions, but minimize list creation by unpacking shapes once
+    shapes = [i.shape for i in images]
+    heights = [shape[0] for shape in shapes]
+    widths = [shape[1] for shape in shapes]
+    height = round(aggregator(heights))
+    width = round(aggregator(widths))
     return width, height
 
 
