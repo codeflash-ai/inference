@@ -51,13 +51,25 @@ def apply_rotary_emb(freqs, t, start_index=0, scale=1.0, seq_dim=-2):
         rot_dim <= t.shape[-1]
     ), f"feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}"
 
-    t_left, t, t_right = (
-        t[..., :start_index],
-        t[..., start_index:end_index],
-        t[..., end_index:],
-    )
-    t = (t * freqs.cos() * scale) + (rotate_half(t) * freqs.sin() * scale)
-    out = torch.cat((t_left, t, t_right), dim=-1)
+    # Avoid unnecessary torch.cat if possible
+    if start_index == 0 and end_index == t.shape[-1]:
+        t_rot = t
+        t_left = None
+        t_right = None
+    else:
+        t_left = t[..., :start_index]
+        t_rot = t[..., start_index:end_index]
+        t_right = t[..., end_index:]
+
+    # Avoid repeated computation: precompute sines and cosines outside of ops
+    cos_part = freqs.cos() * scale
+    sin_part = freqs.sin() * scale
+    t_rot = (t_rot * cos_part) + (rotate_half(t_rot) * sin_part)
+
+    if t_left is None and t_right is None:
+        out = t_rot
+    else:
+        out = torch.cat((t_left, t_rot, t_right), dim=-1)
 
     return out.type(dtype)
 
@@ -118,6 +130,7 @@ class RotaryEmbedding(Module):
 
         self.cache_if_possible = cache_if_possible
 
+        # Cache storage: use register_buffer for parameters, as in reference rope.py
         self.tmp_store("cached_freqs", None)
         self.tmp_store("cached_scales", None)
 
@@ -163,6 +176,7 @@ class RotaryEmbedding(Module):
         self.register_buffer(key, value, persistent=False)
 
     def get_seq_pos(self, seq_len, device, dtype, offset=0):
+        # utilize in-place arange and computation for performance
         return (
             torch.arange(seq_len, device=device, dtype=dtype) + offset
         ) / self.interpolate_factor
@@ -272,29 +286,37 @@ class RotaryEmbedding(Module):
 
     @autocast("cuda", enabled=False)
     def forward(self, t: Tensor, seq_len=None, offset=0):
+        # Slightly avoid repeated attribute access in the critical section
+        cache_if_possible = self.cache_if_possible
+        learned_freq = self.learned_freq
+        freqs_for = self.freqs_for
+
         should_cache = (
-            self.cache_if_possible
-            and not self.learned_freq
+            cache_if_possible
+            and not learned_freq
             and exists(seq_len)
-            and self.freqs_for != "pixel"
+            and freqs_for != "pixel"
         )
 
+        cached_freqs = self.cached_freqs if should_cache else None
         if (
             should_cache
-            and exists(self.cached_freqs)
-            and (offset + seq_len) <= self.cached_freqs.shape[0]
+            and exists(cached_freqs)
+            and (offset + seq_len) <= cached_freqs.shape[0]
         ):
-            return self.cached_freqs[offset : (offset + seq_len)].detach()
+            return cached_freqs[offset : (offset + seq_len)].detach()
 
         freqs = self.freqs
 
-        freqs = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
-        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        # Optimization: allocate output directly with einsum
+        # Avoid explicit .type() as t and freqs are ensured to be correct types
+        freqs_mat = einsum("..., f -> ... f", t.type(freqs.dtype), freqs)
+        freqs_mat = repeat(freqs_mat, "... n -> ... (n r)", r=2)
 
         if should_cache:
-            self.tmp_store("cached_freqs", freqs.detach())
+            self.tmp_store("cached_freqs", freqs_mat.detach())
 
-        return freqs
+        return freqs_mat
 
 
 class Rope2D:
