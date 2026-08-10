@@ -108,12 +108,15 @@ def static_crop_should_be_applied(
     preprocessing_config: dict,
     disable_preproc_static_crop: bool,
 ) -> bool:
-    return (
-        STATIC_CROP_KEY in preprocessing_config.keys()
+    # Use direct 'in' on dict, not dict.keys()
+    if (
+        STATIC_CROP_KEY in preprocessing_config
         and not DISABLE_PREPROC_STATIC_CROP
         and not disable_preproc_static_crop
         and preprocessing_config[STATIC_CROP_KEY][ENABLED_KEY]
-    )
+    ):
+        return True
+    return False
 
 
 def take_static_crop(image: np.ndarray, crop_parameters: Dict[str, int]) -> np.ndarray:
