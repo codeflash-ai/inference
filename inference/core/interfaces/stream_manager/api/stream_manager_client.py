@@ -67,12 +67,14 @@ class StreamManagerClient:
         header_size: int = HEADER_SIZE,
         buffer_size: int = BUFFER_SIZE,
     ) -> "StreamManagerClient":
+        # Inline instantiation to minimize call overhead, pass arguments in order to avoid kwargs-mapping cost
+        # Note: Maintain argument order as per __init__ signature to avoid kwargs overhead
         return cls(
-            host=host,
-            port=port,
-            operations_timeout=operations_timeout,
-            header_size=header_size,
-            buffer_size=buffer_size,
+            host,  # positional argument
+            port,  # positional argument
+            operations_timeout,  # positional argument
+            header_size,  # positional argument
+            buffer_size,  # positional argument
         )
 
     def __init__(
