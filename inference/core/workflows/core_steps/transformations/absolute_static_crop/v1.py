@@ -20,6 +20,10 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+
+# Precompute the constant list once at class level for efficiency.
+_IMAGES_PARAM: List[str] = ["images"]
+
 LONG_DESCRIPTION = """
 Extract a fixed rectangular region from input images using absolute pixel coordinates specified by center point and dimensions, creating consistent crops from the same image location across all inputs for region-of-interest extraction and fixed-area analysis workflows.
 
@@ -99,7 +103,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def get_parameters_accepting_batches(cls) -> List[str]:
-        return ["images"]
+        return _IMAGES_PARAM
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
