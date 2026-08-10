@@ -535,10 +535,8 @@ def get_static_crop_dimensions(
             )
         else:
             x_min, y_min, x_max, y_max = 0, 0, 1, 1
-        crop_shift_x, crop_shift_y = (
-            round(x_min * orig_shape[1]),
-            round(y_min * orig_shape[0]),
-        )
+        crop_shift_x = round(x_min * orig_shape[1])
+        crop_shift_y = round(y_min * orig_shape[0])
         cropped_percent_x = x_max - x_min
         cropped_percent_y = y_max - y_min
         orig_shape = (
@@ -583,9 +581,7 @@ def post_process_keypoints(
     Returns:
         list of list of list: predictions with post-processed keypoints
     """
-    # Get static crop params
     scaled_predictions = []
-    # Loop through batches
     for i, batch_predictions in enumerate(predictions):
         if len(batch_predictions) == 0:
             scaled_predictions.append([])
@@ -603,11 +599,7 @@ def post_process_keypoints(
                 infer_shape=infer_shape,
                 origin_shape=origin_shape,
             )
-        elif (
-            resize_method == "Fit (black edges) in"
-            or resize_method == "Fit (white edges) in"
-            or resize_method == "Fit (grey edges) in"
-        ):
+        elif resize_method.startswith("Fit (") and resize_method.endswith(" in"):
             keypoints = undo_image_padding_for_predicted_keypoints(
                 keypoints=keypoints,
                 infer_shape=infer_shape,
@@ -629,11 +621,14 @@ def stretch_keypoints(
     infer_shape: Tuple[int, int],
     origin_shape: Tuple[int, int],
 ) -> np.ndarray:
+    # Optimize by using numpy broadcasting for all keypoints at once
+    num_keypoints = keypoints.shape[1] // 3
     scale_width = origin_shape[1] / infer_shape[1]
     scale_height = origin_shape[0] / infer_shape[0]
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] *= scale_width
-        keypoints[:, keypoint_id * 3 + 1] *= scale_height
+    # Slice all X
+    keypoints[:, : num_keypoints * 3 : 3] *= scale_width
+    # Slice all Y
+    keypoints[:, 1 : num_keypoints * 3 : 3] *= scale_height
     return keypoints
 
 
@@ -643,17 +638,20 @@ def undo_image_padding_for_predicted_keypoints(
     origin_shape: Tuple[int, int],
 ) -> np.ndarray:
     # Undo scaling and padding from letterbox resize preproc operation
+    num_keypoints = keypoints.shape[1] // 3
     scale = min(infer_shape[0] / origin_shape[0], infer_shape[1] / origin_shape[1])
     inter_w = int(origin_shape[1] * scale)
     inter_h = int(origin_shape[0] * scale)
 
     pad_x = (infer_shape[1] - inter_w) / 2
     pad_y = (infer_shape[0] - inter_h) / 2
-    for coord_id in range(keypoints.shape[1] // 3):
-        keypoints[:, coord_id * 3] -= pad_x
-        keypoints[:, coord_id * 3] /= scale
-        keypoints[:, coord_id * 3 + 1] -= pad_y
-        keypoints[:, coord_id * 3 + 1] /= scale
+    # Broadcast operation for all coordinates
+    keypoints[:, : num_keypoints * 3 : 3] = (
+        keypoints[:, : num_keypoints * 3 : 3] - pad_x
+    ) / scale
+    keypoints[:, 1 : num_keypoints * 3 : 3] = (
+        keypoints[:, 1 : num_keypoints * 3 : 3] - pad_y
+    ) / scale
     return keypoints
 
 
@@ -661,13 +659,12 @@ def clip_keypoints_coordinates(
     keypoints: np.ndarray,
     origin_shape: Tuple[int, int],
 ) -> np.ndarray:
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] = np.round(
-            np.clip(keypoints[:, keypoint_id * 3], a_min=0, a_max=origin_shape[1])
-        )
-        keypoints[:, keypoint_id * 3 + 1] = np.round(
-            np.clip(keypoints[:, keypoint_id * 3 + 1], a_min=0, a_max=origin_shape[0])
-        )
+    # Optimize by broadcasting np.clip and np.round for all keypoints at once
+    num_keypoints = keypoints.shape[1] // 3
+    x = np.clip(keypoints[:, : num_keypoints * 3 : 3], 0, origin_shape[1])
+    y = np.clip(keypoints[:, 1 : num_keypoints * 3 : 3], 0, origin_shape[0])
+    keypoints[:, : num_keypoints * 3 : 3] = np.round(x)
+    keypoints[:, 1 : num_keypoints * 3 : 3] = np.round(y)
     return keypoints
 
 
@@ -676,9 +673,10 @@ def shift_keypoints(
     shift_x: Union[int, float],
     shift_y: Union[int, float],
 ) -> np.ndarray:
-    for keypoint_id in range(keypoints.shape[1] // 3):
-        keypoints[:, keypoint_id * 3] += shift_x
-        keypoints[:, keypoint_id * 3 + 1] += shift_y
+    # Optimize by broadcasting addition for all keypoints at once
+    num_keypoints = keypoints.shape[1] // 3
+    keypoints[:, : num_keypoints * 3 : 3] += shift_x
+    keypoints[:, 1 : num_keypoints * 3 : 3] += shift_y
     return keypoints
 
 
