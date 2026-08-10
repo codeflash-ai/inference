@@ -250,19 +250,15 @@ def grab_input_selectors_defined_for_step(
 ) -> List[str]:
     list_allowed = selector_definition.is_list_element
     dict_allowed = selector_definition.is_dict_element
-    detected_input_selectors = []
     value = getattr(block_manifest, property_name)
+    # Fast-path for list/dict: avoid double-checking single value fallback
     if list_allowed and isinstance(value, list):
-        for selector in value:
-            if is_input_selector(selector_or_value=selector):
-                detected_input_selectors.append(selector)
+        return [s for s in value if is_input_selector(s)]
     if dict_allowed and isinstance(value, dict):
-        for selector in value.values():
-            if is_input_selector(selector_or_value=selector):
-                detected_input_selectors.append(selector)
-    if is_input_selector(selector_or_value=value):
-        detected_input_selectors.append(value)
-    return detected_input_selectors
+        return [s for s in value.values() if is_input_selector(s)]
+    if is_input_selector(value):
+        return [value]
+    return []
 
 
 def prepare_search_results_for_detected_selectors(
