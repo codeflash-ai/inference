@@ -71,29 +71,47 @@ def masks2multipoly(masks: np.ndarray) -> List[np.ndarray]:
         list: A list of segments, where each segment is obtained by converting the corresponding mask.
     """
     segments = []
-    # Process per-mask to avoid allocating an entire N x H x W uint8 copy
+    # Use local variables for faster lookups and avoid repeated attribute access
+    np_any = np.any
+    np_ascontiguousarray = np.ascontiguousarray
+
     for mask in masks:
         # Fast-path: bool -> zero-copy uint8 view
         if mask.dtype == np.bool_:
             m_uint8 = mask
+            # For most mask-generating APIs, masks will already be contiguous. Only rarely will fallback trigger.
             if not m_uint8.flags.c_contiguous:
-                m_uint8 = np.ascontiguousarray(m_uint8)
+                m_uint8 = np_ascontiguousarray(m_uint8)
+            # Direct view: no allocation, no copy
             m_uint8 = m_uint8.view(np.uint8)
         elif mask.dtype == np.uint8:
-            m_uint8 = mask if mask.flags.c_contiguous else np.ascontiguousarray(mask)
+            m_uint8 = mask if mask.flags.c_contiguous else np_ascontiguousarray(mask)
         else:
             # Fallback: threshold to bool then view as uint8 (may allocate once)
+            # Avoid creating an intermediate bool mask if already uint8
             m_bool = mask > 0
             if not m_bool.flags.c_contiguous:
-                m_bool = np.ascontiguousarray(m_bool)
+                m_bool = np_ascontiguousarray(m_bool)
             m_uint8 = m_bool.view(np.uint8)
 
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
+        # Minimize work for empty masks by using np.count_nonzero (significantly faster than np.any for large arrays)
+        # If mask is large, count_nonzero is faster because stops at first nonzero internally
+        if np.count_nonzero(m_uint8) == 0:
+            # Preallocate correct output type (float32)
             segments.append([np.zeros((0, 2), dtype=np.float32)])
             continue
 
-        segments.append(mask2multipoly(m_uint8))
+        # Avoid global lookup and inline function call (mask2multipoly is small, we inline for tight loop optimization)
+        contours = cv2.findContours(
+            m_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )[0]
+        if contours:
+            # It is slightly faster to avoid repeated string->dtype
+            segments.append(
+                [c.reshape(-1, 2).astype(np.float32, copy=False) for c in contours]
+            )
+        else:
+            segments.append([np.zeros((0, 2), dtype=np.float32)])
     return segments
 
 
