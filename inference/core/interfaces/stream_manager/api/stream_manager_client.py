@@ -67,13 +67,7 @@ class StreamManagerClient:
         header_size: int = HEADER_SIZE,
         buffer_size: int = BUFFER_SIZE,
     ) -> "StreamManagerClient":
-        return cls(
-            host=host,
-            port=port,
-            operations_timeout=operations_timeout,
-            header_size=header_size,
-            buffer_size=buffer_size,
-        )
+        return cls(host, port, operations_timeout, header_size, buffer_size)
 
     def __init__(
         self,
