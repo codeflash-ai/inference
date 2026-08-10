@@ -390,10 +390,12 @@ def preprocess_segmentation_masks(
     shape: Tuple[int, int],
 ) -> np.ndarray:
     c, mh, mw = protos.shape  # CHW
-    masks = protos.astype(np.float32)
-    masks = masks.reshape((c, -1))
+    if protos.dtype == np.float32:
+        masks = protos.reshape((c, -1))
+    else:
+        masks = protos.astype(np.float32, copy=False).reshape((c, -1))
     masks = masks_in @ masks
-    masks = sigmoid(masks)
+    masks = _sigmoid_inplace(masks)
     masks = masks.reshape((-1, mh, mw))
     gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
     pad = (mw - shape[1] * gain) / 2, (mh - shape[0] * gain) / 2  # wh padding
@@ -695,3 +697,11 @@ def sigmoid(x: Union[float, np.ndarray]) -> Union[float, np.number, np.ndarray]:
         float or numpy.ndarray: The computed sigmoid value(s).
     """
     return 1 / (1 + np.exp(-x))
+
+
+def _sigmoid_inplace(x: np.ndarray) -> np.ndarray:
+    np.negative(x, out=x)
+    np.exp(x, out=x)
+    np.add(x, 1, out=x)
+    np.reciprocal(x, out=x)
+    return x
