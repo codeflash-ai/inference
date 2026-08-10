@@ -133,16 +133,24 @@ def assemble_nested_batch_oriented_input(
             f"dimensionality level.",
             context="workflow_execution | runtime_input_validation",
         )
+    # Optimization: use list comprehension with preallocated local variables for speed, avoid repeated attribute lookups
+    next_depth = current_depth + 1
+    did = defined_input
+    kd = kinds_deserializers
+    pll = prevent_local_images_loading
+    idf = identifier
+    length = len(value)
+    # Use range(len(value)) instead of enumerate for a slight speedup
     return [
         assemble_nested_batch_oriented_input(
-            current_depth=current_depth + 1,
-            defined_input=defined_input,
-            value=element,
-            kinds_deserializers=kinds_deserializers,
-            prevent_local_images_loading=prevent_local_images_loading,
-            identifier=f"{identifier}.[{idx}]",
+            current_depth=next_depth,
+            defined_input=did,
+            value=value[idx],
+            kinds_deserializers=kd,
+            prevent_local_images_loading=pll,
+            identifier=f"{idf}.[{idx}]",
         )
-        for idx, element in enumerate(value)
+        for idx in range(length)
     ]
 
 
@@ -155,15 +163,16 @@ def assemble_single_element_of_batch_oriented_input(
 ) -> Any:
     if value is None:
         return None
-    matching_deserializers = _get_matching_deserializers(
-        defined_input=defined_input,
-        kinds_deserializers=kinds_deserializers,
-    )
+    # Improvement: inline _get_matching_deserializers for single-pass lookup to avoid repeated kind_name calculation
+    matching_deserializers = []
+    for kind in defined_input.kind:
+        kind_name = kind.name if hasattr(kind, "name") else str(kind)
+        deserializer = kinds_deserializers.get(kind_name)
+        if deserializer is not None:
+            matching_deserializers.append((kind_name, deserializer))
     if not matching_deserializers:
         return value
-    parameter_identifier = defined_input.name
-    if identifier is not None:
-        parameter_identifier = identifier
+    parameter_identifier = identifier if identifier is not None else defined_input.name
     errors = []
     for kind, deserializer in matching_deserializers:
         try:
@@ -178,12 +187,16 @@ def assemble_single_element_of_batch_oriented_input(
             return deserializer(parameter_identifier, value)
         except Exception as error:
             errors.append((kind, error))
+    # Maintain construction, but join errors faster
+    error_lines = []
+    error_lines_append = error_lines.append  # localize for micro-optimization
+    for kind, error in errors:
+        error_lines_append(f"\nKind: `{kind}` - Error: {error}")
     error_message = (
         f"Failed to assemble `{parameter_identifier}`. "
         f"Could not successfully use any deserializer for declared kinds. Details: "
+        + "".join(error_lines)
     )
-    for kind, error in errors:
-        error_message = f"{error_message}\nKind: `{kind}` - Error: {error}"
     raise RuntimeInputError(
         public_message=error_message,
         context="workflow_execution | runtime_input_validation",
