@@ -127,7 +127,7 @@ class VideoSourcesManager:
 
     def __init__(
         self,
-        video_sources: VideoSources,
+        video_sources: "VideoSources",
         should_stop: Callable[[], bool],
         on_reconnection_error: Callable[[Optional[int], SourceConnectionError], None],
     ):
@@ -139,6 +139,8 @@ class VideoSourcesManager:
         self._ended_sources: Set[int] = set()
         self._threads_to_join: Set[int] = set()
         self._last_batch_yielded_time = datetime.now()
+        # Cache the all_sources length for fast all_sources_ended checks
+        self._all_sources_count: int = len(self._video_sources.all_sources)
 
     def retrieve_frames_from_sources(
         self,
@@ -175,7 +177,8 @@ class VideoSourcesManager:
         return batch_frames
 
     def all_sources_ended(self) -> bool:
-        return len(self._ended_sources) >= len(self._video_sources.all_sources)
+        # Use the cached count for the all_sources length for performance
+        return len(self._ended_sources) >= self._all_sources_count
 
     def join_all_reconnection_threads(self, include_not_finished: bool = False) -> None:
         for source_ord in copy(self._threads_to_join):
