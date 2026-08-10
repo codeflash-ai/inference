@@ -401,16 +401,24 @@ class MicrosoftSQLServerSinkBlockV1(WorkflowBlock):
             if not data:
                 raise ValueError("Empty list provided for insert operation")
 
-            if not all(isinstance(item, dict) for item in data):
-                raise ValueError("All items in data list must be dictionaries")
+            # Fast-path for single-item list: skip unnecessary checks
+            if len(data) == 1:
+                if not isinstance(data[0], dict):
+                    raise ValueError("All items in data list must be dictionaries")
+                return data
 
-            if len(data) > 1:
-                first_keys = set(data[0].keys())
-                for idx, item in enumerate(data[1:], 1):
-                    if set(item.keys()) != first_keys:
-                        raise ValueError(
-                            f"Dictionary at index {idx} has different keys than the first dictionary"
-                        )
+            # Efficiently check all items are dicts
+            for item in data:
+                if not isinstance(item, dict):
+                    raise ValueError("All items in data list must be dictionaries")
+
+            # Minimal allocations: cache first key set
+            first_keys = set(data[0].keys())
+            for idx, item in enumerate(data[1:], 1):
+                if set(item.keys()) != first_keys:
+                    raise ValueError(
+                        f"Dictionary at index {idx} has different keys than the first dictionary"
+                    )
 
             return data
 
