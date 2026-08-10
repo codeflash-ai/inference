@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, deque
 from queue import Queue
 from typing import List, Optional, Set
 
@@ -28,23 +28,25 @@ def traverse_graph_ensuring_parents_are_reached_first(
 def assign_max_distances_from_start(
     graph: nx.DiGraph, start_node: str, distance_key: str = "distance"
 ) -> nx.DiGraph:
-    nodes_to_consider = Queue()
-    nodes_to_consider.put(start_node)
-    while nodes_to_consider.qsize() > 0:
-        node_to_consider = nodes_to_consider.get()
+    nodes_to_consider = deque()
+    nodes_to_consider.append(start_node)
+    while nodes_to_consider:
+        node_to_consider = nodes_to_consider.popleft()
         predecessors = list(graph.predecessors(node_to_consider))
+        # Check whether all predecessors have established distances
         if not all(graph.nodes[p].get(distance_key) is not None for p in predecessors):
-            # we can proceed to establish distance, only if all parents have distances established
             continue
-        if len(predecessors) == 0:
+        if not predecessors:
             distance_from_start = 0
         else:
+            # Use generator to avoid temporary list allocation
             distance_from_start = (
                 max(graph.nodes[p][distance_key] for p in predecessors) + 1
             )
         graph.nodes[node_to_consider][distance_key] = distance_from_start
+        # Add successors to deque (avoid intermediate list, use generator directly)
         for neighbour in graph.successors(node_to_consider):
-            nodes_to_consider.put(neighbour)
+            nodes_to_consider.append(neighbour)
     return graph
 
 
