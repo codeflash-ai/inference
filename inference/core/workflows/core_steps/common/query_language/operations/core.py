@@ -93,16 +93,15 @@ def identity(value: Any, **kwargs) -> Any:
 def build_operations_chain(
     operations: List[OperationDefinition], execution_context: str = "<root>"
 ) -> Callable[[T, Dict[str, Any]], V]:
-    if not len(operations):
+    if not operations:
         return identity  # return identity function
-    operations_functions = []
-    for operation_id, operation_definition in enumerate(operations):
-        operation_context = f"{execution_context}[{operation_id}]"
-        operation_function = build_operation(
+    operations_functions = [
+        build_operation(
             operation_definition=operation_definition,
-            execution_context=operation_context,
+            execution_context=f"{execution_context}[{operation_id}]",
         )
-        operations_functions.append(operation_function)
+        for operation_id, operation_definition in enumerate(operations)
+    ]
     return partial(chain, functions=operations_functions)
 
 
