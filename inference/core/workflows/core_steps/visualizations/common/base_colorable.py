@@ -18,6 +18,24 @@ from inference.core.workflows.execution_engine.entities.types import (
 )
 from inference.core.workflows.prototypes.block import BlockResult
 
+_MPL_PALETTES_R = {
+    "Greys_R",
+    "Purples_R",
+    "Blues_R",
+    "Greens_R",
+    "Oranges_R",
+    "Reds_R",
+    "Wistia",
+    "Pastel1",
+    "Pastel2",
+    "Paired",
+    "Accent",
+    "Dark2",
+    "Set1",
+    "Set2",
+    "Set3",
+}
+
 
 class ColorableVisualizationManifest(PredictionsVisualizationManifest, ABC):
     color_palette: Union[
@@ -124,23 +142,7 @@ class ColorableVisualizationBlock(PredictionsVisualizationBlock, ABC):
         else:
             palette_name = color_palette.replace("Matplotlib ", "")
 
-            if palette_name in [
-                "Greys_R",
-                "Purples_R",
-                "Blues_R",
-                "Greens_R",
-                "Oranges_R",
-                "Reds_R",
-                "Wistia",
-                "Pastel1",
-                "Pastel2",
-                "Paired",
-                "Accent",
-                "Dark2",
-                "Set1",
-                "Set2",
-                "Set3",
-            ]:
+            if palette_name in _MPL_PALETTES_R:
                 palette_name = palette_name.capitalize()
             else:
                 palette_name = palette_name.lower()
