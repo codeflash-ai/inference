@@ -23,6 +23,16 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+# Since the output definition is constant and stateless, we cache it to avoid repeated creation.
+_OUTPUTS: List[OutputDefinition] = [
+    OutputDefinition(
+        name=OUTPUT_IMAGE_KEY,
+        kind=[
+            IMAGE_KIND,
+        ],
+    ),
+]
+
 SHORT_DESCRIPTION: str = "Apply a threshold to an image."
 LONG_DESCRIPTION = """
 Convert grayscale images to binary images using configurable thresholding methods (binary, binary_inv, trunc, tozero, tozero_inv, adaptive_mean, adaptive_gaussian, otsu) to separate foreground from background, isolate objects, prepare images for morphological operations, and create binary masks for segmentation, object detection, and analysis workflows.
@@ -174,14 +184,7 @@ class ImageThresholdManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(
-                name=OUTPUT_IMAGE_KEY,
-                kind=[
-                    IMAGE_KIND,
-                ],
-            ),
-        ]
+        return _OUTPUTS
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
