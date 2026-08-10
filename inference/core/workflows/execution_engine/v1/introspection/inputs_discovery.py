@@ -236,10 +236,17 @@ def grab_input_compatible_references_kinds(
     selector_definition: SelectorDefinition,
 ) -> Dict[str, Set[str]]:
     matching_references = defaultdict(set)
-    for reference in selector_definition.allowed_references:
-        matching_references[reference.selected_element].update(
-            k.name for k in reference.kind
-        )
+    # The tight loop is here, so we optimize by pre-allocating locals, reducing attribute lookups.
+    allowed_references = selector_definition.allowed_references
+    for reference in allowed_references:
+        selected_element = reference.selected_element
+        kind = reference.kind
+        # Use a generator to collect names in a set first, then update, which is faster for large lists.
+        name_set = set()
+        for k in kind:
+            name_set.add(k.name)
+        if name_set:
+            matching_references[selected_element].update(name_set)
     return matching_references
 
 
