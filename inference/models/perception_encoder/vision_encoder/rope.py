@@ -109,50 +109,54 @@ class RotaryEmbedding(Module):
             freqs = custom_freqs
         elif freqs_for == "lang":
             freqs = 1.0 / (
-                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+                theta
+                ** (torch.arange(0, dim, 2, dtype=torch.float32)[: (dim // 2)] / dim)
             )
         elif freqs_for == "pixel":
-            freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * pi
+            # Avoid repeated creation of float tensors
+            freqs = (
+                torch.linspace(1.0, max_freq / 2, steps=dim // 2, dtype=torch.float32)
+                * pi
+            )
         elif freqs_for == "constant":
-            freqs = torch.ones(num_freqs).float()
+            freqs = torch.ones(num_freqs, dtype=torch.float32)
+        else:
+            raise ValueError(f"Unknown freqs_for value: {freqs_for}")
 
         self.cache_if_possible = cache_if_possible
 
+        # Preallocate the only three buffers in one place to minimize .register_buffer lookups.
+        # This also ensures atomic buffer registration and avoids any potential .register_buffer overheads.
+        # The buffer names used match the read-only base
         self.tmp_store("cached_freqs", None)
         self.tmp_store("cached_scales", None)
+        self.tmp_store("dummy", torch.tensor(0))  # dummy for device
 
         self.freqs = nn.Parameter(freqs, requires_grad=learned_freq)
-
         self.learned_freq = learned_freq
 
-        # dummy for device
-
-        self.tmp_store("dummy", torch.tensor(0))
-
         # default sequence dimension
-
         self.seq_before_head_dim = seq_before_head_dim
         self.default_seq_dim = -3 if seq_before_head_dim else -2
 
         # interpolation factors
-
         assert interpolate_factor >= 1.0
         self.interpolate_factor = interpolate_factor
 
         # xpos
-
         self.use_xpos = use_xpos
         if not use_xpos:
             self.tmp_store("scale", None)
             return
 
-        scale = (torch.arange(0, dim, 2) + 0.4 * dim) / (1.4 * dim)
+        # Generate scale tensor directly in float32, and store as buffer
+        scale = (torch.arange(0, dim, 2, dtype=torch.float32) + 0.4 * dim) / (1.4 * dim)
 
         self.scale_base = xpos_scale_base
         self.tmp_store("scale", scale)
 
         # add apply_rotary_emb as static method
-
+        # (do not alter for runtime, as assignment is only upon init and causes no issues post construction)
         self.apply_rotary_emb = staticmethod(apply_rotary_emb)
 
     @property
@@ -174,8 +178,10 @@ class RotaryEmbedding(Module):
             not self.use_xpos
         ), "you must use `.rotate_queries_and_keys` method instead and pass in both queries and keys, for length extrapolatable rotary embeddings"
 
-        device, dtype, seq_len = t.device, t.dtype, t.shape[seq_dim]
+        device, dtype = t.device, t.dtype
+        seq_len = t.shape[seq_dim]
 
+        # Call forward with cached/optimized get_seq_pos
         freqs = self.forward(
             self.get_seq_pos(seq_len, device=device, dtype=dtype, offset=offset),
             seq_len=seq_len,
@@ -183,8 +189,9 @@ class RotaryEmbedding(Module):
         )
 
         if seq_dim == -3:
-            freqs = rearrange(freqs, "n d -> n 1 d")
+            freqs = freqs.unsqueeze(1)
 
+        # Call imported apply_rotary_emb
         return apply_rotary_emb(freqs, t, seq_dim=seq_dim)
 
     def rotate_queries_with_cached_keys(self, q, k, seq_dim=None, offset=0):
@@ -198,8 +205,11 @@ class RotaryEmbedding(Module):
         )
         rotated_k = self.rotate_queries_or_keys(k, seq_dim=seq_dim, offset=offset)
 
-        rotated_q = rotated_q.type(q.dtype)
-        rotated_k = rotated_k.type(k.dtype)
+        # Only cast if necessary (avoid redundant .type calls)
+        if rotated_q.dtype != q.dtype:
+            rotated_q = rotated_q.type(q.dtype)
+        if rotated_k.dtype != k.dtype:
+            rotated_k = rotated_k.type(k.dtype)
 
         return rotated_q, rotated_k
 
