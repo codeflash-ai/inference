@@ -89,8 +89,9 @@ def get_images_in_labeling_jobs_of_specific_batch(
 
     """
 
-    matching_jobs = []
-    for labeling_job in all_labeling_jobs:
-        if batch_id in labeling_job["sourceBatch"]:
-            matching_jobs.append(labeling_job)
-    return sum(job["numImages"] for job in matching_jobs)
+    # Avoid building the intermediate matching_jobs list.
+    return sum(
+        labeling_job["numImages"]
+        for labeling_job in all_labeling_jobs
+        if batch_id in labeling_job["sourceBatch"]
+    )
