@@ -78,16 +78,19 @@ def adjust_prediction_with_bbox_and_points_to_client_scaling_factor(
     scaling_factor: float,
     points_key: str,
 ) -> List[dict]:
+    inv_scaling_factor = 1.0 / scaling_factor
     result = []
     for prediction in predictions:
-        prediction = adjust_bbox_coordinates_to_client_scaling_factor(
-            bbox=prediction,
-            scaling_factor=scaling_factor,
-        )
-        prediction[points_key] = adjust_points_coordinates_to_client_scaling_factor(
-            points=prediction[points_key],
-            scaling_factor=scaling_factor,
-        )
+        prediction["x"] *= inv_scaling_factor
+        prediction["y"] *= inv_scaling_factor
+        prediction["width"] *= inv_scaling_factor
+        prediction["height"] *= inv_scaling_factor
+
+        points = prediction[points_key]
+        for point in points:
+            point["x"] *= inv_scaling_factor
+            point["y"] *= inv_scaling_factor
+
         result.append(prediction)
     return result
 
