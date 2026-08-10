@@ -25,10 +25,10 @@ def get_gpu_id():
         Optional[int]: GPU ID if available, None otherwise.
     """
     try:
-        from pynvml import nvmlDeviceGetCount, nvmlInit
+        import pynvml
 
-        nvmlInit()
-        gpus_count = nvmlDeviceGetCount()
+        pynvml.nvmlInit()
+        gpus_count = pynvml.nvmlDeviceGetCount()
         if gpus_count:
             return 0
     except ImportError:
