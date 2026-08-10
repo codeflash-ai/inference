@@ -36,7 +36,8 @@ def construct_step_selector(step_name: str) -> str:
 
 
 def get_output_selectors(outputs: List[JsonField]) -> Set[str]:
-    return {construct_output_selector(name=output.name) for output in outputs}
+    # Use a set comprehension with an inlined f-string for improved performance
+    return {f"$outputs.{output.name}" for output in outputs}
 
 
 def construct_output_selector(name: str) -> str:
@@ -44,18 +45,22 @@ def construct_output_selector(name: str) -> str:
 
 
 def is_input_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    # Fast path: avoid redundant startswith and type checks
+    if type(selector_or_value) is str:
+        # Fast-fail the minimum length and $-prefix for "$inputs" (7 chars)
+        if selector_or_value[:7] == "$inputs":
+            return True
+        if selector_or_value and selector_or_value[0] == "$":
+            return False
         return False
-    return selector_or_value.startswith("$inputs")
+    return False
 
 
 def is_step_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    s = str(selector_or_value)
+    if not s.startswith("$steps."):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 2
-    )
+    return s.count(".") == 1
 
 
 def is_step_output_selector(selector_or_value: Any) -> bool:
