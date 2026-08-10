@@ -485,10 +485,19 @@ def scale_polygons(
     x_scale: float,
     y_scale: float,
 ) -> List[List[Tuple[float, float]]]:
-    result = []
+    # Pre-bind variables and use local vars to minimize lookups in inner loops
+    xs = x_scale
+    ys = y_scale
+    result: List[List[Tuple[float, float]]] = []
+    append_result = result.append
+
     for poly in polygons:
-        poly = [(p[0] * x_scale, p[1] * y_scale) for p in poly]
-        result.append(poly)
+        # Use local append for inner-loop list construction, avoid repeated attribute lookups
+        scaled_poly: List[Tuple[float, float]] = []
+        append_scaled = scaled_poly.append
+        for px, py in poly:
+            append_scaled((px * xs, py * ys))
+        append_result(scaled_poly)
     return result
 
 
