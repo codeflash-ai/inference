@@ -180,27 +180,27 @@ def non_max_suppression_fast(boxes, overlapThresh):
     # keep looping while some indexes still remain in the indexes
     # list
     while len(idxs) > 0:
-        # grab the last index in the indexes list and add the
-        # index value to the list of picked indexes
-        last = len(idxs) - 1
-        i = idxs[last]
-        pick.append(i)
-        # find the largest (x, y) coordinates for the start of
-        # the bounding box and the smallest (x, y) coordinates
-        # for the end of the bounding box
-        xx1 = np.maximum(x1[i], x1[idxs[:last]])
-        yy1 = np.maximum(y1[i], y1[idxs[:last]])
-        xx2 = np.minimum(x2[i], x2[idxs[:last]])
-        yy2 = np.minimum(y2[i], y2[idxs[:last]])
+        last = idxs[-1]
+        pick.append(last)
+        if len(idxs) == 1:
+            break
+        idxs_rest = idxs[:-1]
+
+        # vectorized computation for all candidates
+        xx1 = np.maximum(x1[last], x1[idxs_rest])
+        yy1 = np.maximum(y1[last], y1[idxs_rest])
+        xx2 = np.minimum(x2[last], x2[idxs_rest])
+        yy2 = np.minimum(y2[last], y2[idxs_rest])
+
         # compute the width and height of the bounding box
         w = np.maximum(0, xx2 - xx1 + 1)
         h = np.maximum(0, yy2 - yy1 + 1)
-        # compute the ratio of overlap
-        overlap = (w * h) / area[idxs[:last]]
-        # delete all indexes from the index list that have
-        idxs = np.delete(
-            idxs, np.concatenate(([last], np.where(overlap > overlapThresh)[0]))
-        )
+        overlap = (w * h) / area[idxs_rest]
+
+        # mask of boxes to keep: those with overlap <= threshold
+        keep_mask = overlap <= overlapThresh
+        idxs = idxs_rest[keep_mask]
+
     # return only the bounding boxes that were picked using the
     # integer data type
     return boxes[pick].astype("float")
