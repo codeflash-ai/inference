@@ -157,9 +157,11 @@ class LatencyMonitor:
 def average_property_values(
     examined_objects: Iterable, property_name: str
 ) -> Optional[float]:
-    values = get_not_empty_properties(
-        examined_objects=examined_objects, property_name=property_name
-    )
+    values = [
+        v
+        for examined_object in examined_objects
+        if (v := getattr(examined_object, property_name, None)) is not None
+    ]
     return safe_average(values=values)
 
 
@@ -174,7 +176,7 @@ def get_not_empty_properties(
 
 
 def safe_average(values: List[float]) -> Optional[float]:
-    if len(values) == 0:
+    if not values:
         return None
     return sum(values) / len(values)
 
