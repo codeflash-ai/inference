@@ -238,18 +238,13 @@ def clip_boxes_coordinates(
     predicted_bboxes: np.ndarray,
     origin_shape: Tuple[int, int],
 ) -> np.ndarray:
-    predicted_bboxes[:, 0] = np.round(
-        np.clip(predicted_bboxes[:, 0], a_min=0, a_max=origin_shape[1])
-    )
-    predicted_bboxes[:, 2] = np.round(
-        np.clip(predicted_bboxes[:, 2], a_min=0, a_max=origin_shape[1])
-    )
-    predicted_bboxes[:, 1] = np.round(
-        np.clip(predicted_bboxes[:, 1], a_min=0, a_max=origin_shape[0])
-    )
-    predicted_bboxes[:, 3] = np.round(
-        np.clip(predicted_bboxes[:, 3], a_min=0, a_max=origin_shape[0])
-    )
+    # Vectorized clipping and rounding for all coordinates at once for better cache locality and performance
+    height, width = origin_shape
+    coords = predicted_bboxes[:, :4]
+    # Set up max values for each coord: [x0, y0, x1, y1] as [width, height, width, height]
+    max_vals = np.array([width, height, width, height], dtype=coords.dtype)
+    np.clip(coords, 0, max_vals, out=coords)
+    np.round(coords, out=coords)
     return predicted_bboxes
 
 
