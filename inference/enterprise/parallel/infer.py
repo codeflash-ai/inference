@@ -152,14 +152,15 @@ def get_batch(redis: Redis, model_names: List[str]) -> Tuple[List[Dict], str]:
 
 def select_best_inference_batch(batches, batch_sizes):
     now = time.time()
-    average_ages = [np.mean([float(b[1]) - now for b in batch]) for batch in batches]
-    lengths = [
-        len(batch) / batch_size for batch, batch_size in zip(batches, batch_sizes)
-    ]
-    fitnesses = [
-        age / AGE_TRADEOFF_SECONDS_FACTOR + length
-        for age, length in zip(average_ages, lengths)
-    ]
+    fitnesses = []
+    for batch, batch_size in zip(batches, batch_sizes):
+        arr = np.fromiter(
+            (float(b[1]) for b in batch), count=len(batch), dtype=np.float64
+        )
+        average_age = arr.mean() - now if arr.size > 0 else float("nan")
+        length = len(batch) / batch_size
+        fitness = average_age / AGE_TRADEOFF_SECONDS_FACTOR + length
+        fitnesses.append(fitness)
     model_index = fitnesses.index(max(fitnesses))
     return model_index
 
