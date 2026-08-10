@@ -59,12 +59,10 @@ def is_step_selector(selector_or_value: Any) -> bool:
 
 
 def is_step_output_selector(selector_or_value: Any) -> bool:
-    if not is_selector(selector_or_value=selector_or_value):
+    selector_or_value = str(selector_or_value)
+    if not selector_or_value.startswith("$"):
         return False
-    return (
-        selector_or_value.startswith("$steps.")
-        and len(selector_or_value.split(".")) == 3
-    )
+    return selector_or_value.startswith("$steps.") and selector_or_value.count(".") == 2
 
 
 def get_step_selector_from_its_output(step_output_selector: str) -> str:
@@ -113,6 +111,7 @@ def is_output_node(execution_graph: DiGraph, node: str) -> bool:
 
 
 def is_selector(selector_or_value: Any) -> bool:
+    # Retain original behavior, but redundant under our optimization.
     return str(selector_or_value).startswith("$")
 
 
