@@ -183,8 +183,15 @@ def compute_events_latency(
     earlier_event: Optional[ModelActivityEvent],
     later_event: Optional[ModelActivityEvent],
 ) -> Optional[float]:
-    if not are_events_compatible(events=[earlier_event, later_event]):
+    # Inline are_events_compatible for reduced function call overhead and to exploit short-circuiting
+    if (
+        earlier_event is None
+        or later_event is None
+        or earlier_event.frame_id != later_event.frame_id
+    ):
         return None
+
+    # Timedelta arithmetic and total_seconds is already efficient
     return (later_event.event_timestamp - earlier_event.event_timestamp).total_seconds()
 
 
