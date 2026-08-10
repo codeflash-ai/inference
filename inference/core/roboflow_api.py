@@ -1202,9 +1202,8 @@ def _url_for_safe_logging(url: str) -> str:
 def _add_params_to_url(url: str, params: List[Tuple[str, str]]) -> str:
     if len(params) == 0:
         return url
-    params_chunks = [
-        f"{name}={urllib.parse.quote_plus(value)}" for name, value in params
-    ]
+    quote_plus = urllib.parse.quote_plus
+    params_chunks = [f"{name}={quote_plus(value)}" for name, value in params]
     parameters_string = "&".join(params_chunks)
     return f"{url}?{parameters_string}"
 
