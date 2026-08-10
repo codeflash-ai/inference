@@ -401,10 +401,10 @@ def establish_control_flow_edge(
 def step_definition_allows_control_flow_references(
     parsed_selector: ParsedSelector,
 ) -> bool:
-    return any(
-        definition.selected_element == STEP_AS_SELECTED_ELEMENT
-        for definition in parsed_selector.definition.allowed_references
-    )
+    for definition in parsed_selector.definition.allowed_references:
+        if definition.selected_element is STEP_AS_SELECTED_ELEMENT:
+            return True
+    return False
 
 
 def get_kind_of_value_provided_in_step_output(
