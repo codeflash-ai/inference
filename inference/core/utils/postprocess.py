@@ -52,12 +52,22 @@ def masks2poly(masks: np.ndarray) -> List[np.ndarray]:
                 m_bool = np.ascontiguousarray(m_bool)
             m_uint8 = m_bool.view(np.uint8)
 
-        # Quickly skip empty masks
-        if not np.any(m_uint8):
+        # Quickly skip empty masks using .any() for slightly faster check
+        if not m_uint8.any():
             segments.append(np.zeros((0, 2), dtype=np.float32))
             continue
 
-        segments.append(mask2poly(m_uint8))
+        # Directly call OpenCV for polygon extraction to avoid list building overhead
+        contours = cv2.findContours(
+            m_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )[0]
+        if contours:
+            # Select largest contour directly without temporary list
+            max_idx = max(range(len(contours)), key=lambda i: contours[i].shape[0])
+            contour = contours[max_idx].reshape(-1, 2).astype(np.float32)
+            segments.append(contour)
+        else:
+            segments.append(np.zeros((0, 2), dtype=np.float32))
     return segments
 
 
