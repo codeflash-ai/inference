@@ -109,12 +109,11 @@ def mask2poly(mask: np.ndarray) -> np.ndarray:
     """
     contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
     if contours:
-        contours = np.array(
-            contours[np.array([len(x) for x in contours]).argmax()]
-        ).reshape(-1, 2)
+        largest_contour = max(contours, key=len)
+        contours = np.asarray(largest_contour, dtype=np.float32).reshape(-1, 2)
     else:
-        contours = np.zeros((0, 2))
-    return contours.astype("float32")
+        contours = np.zeros((0, 2), dtype=np.float32)
+    return contours
 
 
 def mask2multipoly(mask: np.ndarray) -> np.ndarray:
