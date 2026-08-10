@@ -21,6 +21,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_CROPS_OUTPUT = [OutputDefinition(name="crops", kind=[IMAGE_KIND])]
+
 LONG_DESCRIPTION = """
 Extract a fixed rectangular region from input images using relative coordinates (normalized 0.0-1.0 values proportional to image dimensions) specified by center point and dimensions, creating consistent proportional crops from the same relative location across images of different sizes for region-of-interest extraction and size-agnostic fixed-area analysis workflows.
 
@@ -109,9 +111,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [
-            OutputDefinition(name="crops", kind=[IMAGE_KIND]),
-        ]
+        return _CROPS_OUTPUT
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
