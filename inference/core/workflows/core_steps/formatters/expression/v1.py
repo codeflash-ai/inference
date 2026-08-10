@@ -22,6 +22,8 @@ from inference.core.workflows.prototypes.block import (
     WorkflowBlockManifest,
 )
 
+_OUTPUT_DEF_OUTPUT = OutputDefinition(name="output")
+
 LONG_DESCRIPTION = """
 Create conditional logic and business rules in workflows using switch-case statements that evaluate conditions on input variables, optionally transform data with operations, and return different outputs based on which condition matches, enabling conditional execution, business logic implementation, rule-based decision making, and dynamic output generation workflows.
 
@@ -195,7 +197,7 @@ class BlockManifest(WorkflowBlockManifest):
 
     @classmethod
     def describe_outputs(cls) -> List[OutputDefinition]:
-        return [OutputDefinition(name="output")]
+        return [_OUTPUT_DEF_OUTPUT]
 
     @classmethod
     def get_execution_engine_compatibility(cls) -> Optional[str]:
