@@ -27,14 +27,21 @@ def describe_error(
     exception: Optional[Exception] = None,
     error_type: ErrorType = ErrorType.INTERNAL_ERROR,
 ) -> dict:
-    payload = {
-        STATUS_KEY: OperationStatus.FAILURE,
-        ERROR_TYPE_KEY: error_type,
-    }
+    # Preallocate payload keys to avoid later dict insertions
     if exception is not None:
-        payload["error_class"] = exception.__class__.__name__
-        payload["error_message"] = str(exception)
-    return payload
+        exc_class = exception.__class__.__name__
+        exc_message = str(exception)
+        return {
+            STATUS_KEY: OperationStatus.FAILURE,
+            ERROR_TYPE_KEY: error_type,
+            "error_class": exc_class,
+            "error_message": exc_message,
+        }
+    else:
+        return {
+            STATUS_KEY: OperationStatus.FAILURE,
+            ERROR_TYPE_KEY: error_type,
+        }
 
 
 def prepare_error_response(
