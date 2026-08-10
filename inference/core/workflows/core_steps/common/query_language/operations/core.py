@@ -95,14 +95,20 @@ def build_operations_chain(
 ) -> Callable[[T, Dict[str, Any]], V]:
     if not len(operations):
         return identity  # return identity function
-    operations_functions = []
-    for operation_id, operation_definition in enumerate(operations):
-        operation_context = f"{execution_context}[{operation_id}]"
+    if len(operations) == 1:
+        operation_context = f"{execution_context}[0]"
         operation_function = build_operation(
-            operation_definition=operation_definition,
+            operation_definition=operations[0],
             execution_context=operation_context,
         )
-        operations_functions.append(operation_function)
+        return operation_function
+    operations_functions = [
+        build_operation(
+            operation_definition=operation_definition,
+            execution_context=f"{execution_context}[{operation_id}]"
+        )
+        for operation_id, operation_definition in enumerate(operations)
+    ]
     return partial(chain, functions=operations_functions)
 
 
